@@ -38,16 +38,8 @@ python main.py
 
 ### 打包
 
-目录模式（启动快）：
-
 ```bash
-build.bat
-```
-
-单文件模式（方便分发）：
-
-```bash
-build_single.bat
+pyinstaller EasyToDo.spec --clean
 ```
 
 ## 项目结构
@@ -60,8 +52,7 @@ build_single.bat
 ├── views/               # UI 视图
 ├── qss/                 # 主题样式表
 ├── assets/              # 图标资源
-├── build.bat            # 打包脚本（目录模式）
-├── build_single.bat     # 打包脚本（单文件模式）
+├── EasyToDo.spec      # 打包配置
 └── LICENSE              # MIT License
 ```
 
