@@ -1,6 +1,7 @@
 """设置页面 - 内嵌导航子页面"""
-from PySide6.QtCore import Signal, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PySide6.QtCore import Signal, Qt, QSize
+from PySide6.QtGui import QPixmap, QFont
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGraphicsOpacityEffect
 
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, Slider, ComboBox, CheckBox,
@@ -118,68 +119,169 @@ class SettingsPage(QWidget):
         StyleSheet.SETTINGS_CARD.apply(card)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(16, 16, 16, 16)
-        card_layout.setSpacing(6)
+        card_layout.setContentsMargins(20, 20, 20, 20)
+        card_layout.setSpacing(0)
 
-        # 应用名 + 版本
-        header = QHBoxLayout()
-        header.setSpacing(8)
+        # 应用图标和应用名区域
+        header_container = QVBoxLayout()
+        header_container.setSpacing(12)
 
+        # 图标
+        icon_label = QLabel()
+        icon_path = "assets/icon.png"
+        try:
+            pixmap = QPixmap(icon_path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(
+                    QSize(36, 36),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                icon_label.setPixmap(pixmap)
+                icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        except:
+            icon_label.setFixedSize(36, 36)
+            icon_label.setStyleSheet("background: #0078D4; border-radius: 12px;")
+        
+        header_container.addWidget(icon_label)
+        card_layout.addLayout(header_container)
+
+        # 应用名
         name_label = BodyLabel(APP_NAME)
-        name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name_label.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 18px;
+        """)
         name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        header.addWidget(name_label)
+        card_layout.addWidget(name_label)
 
+        # 版本号
         ver_label = BodyLabel(f"v{APP_VERSION}")
-        ver_label.setStyleSheet("color: #888; font-size: 12px;")
+        ver_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ver_label.setStyleSheet("""
+            color: #0078D4;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        """)
         ver_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        header.addWidget(ver_label)
-
-        header.addStretch()
-        card_layout.addLayout(header)
+        card_layout.addWidget(ver_label)
 
         # 分隔线
-        sep = QLabel()
-        sep.setFixedHeight(1)
-        sep.setObjectName("aboutSep")
+        sep1 = QLabel()
+        sep1.setFixedHeight(1)
+        sep1.setObjectName("aboutSep1")
         setCustomStyleSheet(
-            sep,
-            "#aboutSep { background-color: rgba(0,0,0,0.06); }",
-            "#aboutSep { background-color: rgba(255,255,255,0.06); }"
+            sep1,
+            "#aboutSep1 { background-color: rgba(0,0,0,0.08); margin: 12px 0; }",
+            "#aboutSep1 { background-color: rgba(255,255,255,0.08); margin: 12px 0; }"
         )
-        card_layout.addWidget(sep)
+        card_layout.addWidget(sep1)
 
         # 描述
         desc_label = BodyLabel("现代化本地待办管理应用")
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #888; font-size: 12px;")
+        desc_label.setStyleSheet("""
+            color: #666;
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 18px;
+        """)
+        setCustomStyleSheet(
+            desc_label,
+            "color: #666;",
+            "color: #AAA;"
+        )
         card_layout.addWidget(desc_label)
 
-        # 作者
+        # 信息容器
+        info_container = QVBoxLayout()
+        info_container.setSpacing(10)
+
+        # 作者信息
         author_row = QHBoxLayout()
-        author_row.setSpacing(6)
+        author_row.setSpacing(8)
+        author_row.addStretch()
+        
+        author_icon = QLabel()
+        author_icon.setFixedSize(16, 16)
+        author_icon.setStyleSheet("""
+            background: #0078D4;
+            border-radius: 8px;
+        """)
+        author_row.addWidget(author_icon)
+        
         author_key = BodyLabel("作者")
-        author_key.setStyleSheet("color: #888; font-size: 12px;")
+        author_key.setStyleSheet("color: #888; font-size: 13px;")
         author_row.addWidget(author_key)
+        
         author_val = BodyLabel("十玖八柒")
-        author_val.setStyleSheet("font-size: 12px;")
+        author_val.setStyleSheet("font-size: 13px; font-weight: 500;")
         author_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         author_row.addWidget(author_val)
         author_row.addStretch()
-        card_layout.addLayout(author_row)
+        info_container.addLayout(author_row)
 
-        # 开源仓库
+        # 仓库信息
         repo_row = QHBoxLayout()
-        repo_row.setSpacing(6)
+        repo_row.setSpacing(8)
+        repo_row.addStretch()
+        
+        repo_icon = QLabel()
+        repo_icon.setFixedSize(16, 16)
+        repo_icon.setStyleSheet("""
+            background: #8764B8;
+            border-radius: 8px;
+        """)
+        repo_row.addWidget(repo_icon)
+        
         repo_key = BodyLabel("仓库")
-        repo_key.setStyleSheet("color: #888; font-size: 12px;")
+        repo_key.setStyleSheet("color: #888; font-size: 13px;")
         repo_row.addWidget(repo_key)
+        
         repo_val = BodyLabel("github.com/ooahz")
-        repo_val.setStyleSheet("color: #0078D4; font-size: 12px;")
+        repo_val.setStyleSheet("""
+            color: #0078D4;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+        """)
+        repo_val.setCursor(Qt.CursorShape.PointingHandCursor)
         repo_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         repo_row.addWidget(repo_val)
         repo_row.addStretch()
-        card_layout.addLayout(repo_row)
+        info_container.addLayout(repo_row)
+
+        card_layout.addLayout(info_container)
+
+        # 底部分隔线
+        sep2 = QLabel()
+        sep2.setFixedHeight(1)
+        sep2.setObjectName("aboutSep2")
+        setCustomStyleSheet(
+            sep2,
+            "#aboutSep2 { background-color: rgba(0,0,0,0.08); margin-top: 16px; }",
+            "#aboutSep2 { background-color: rgba(255,255,255,0.08); margin-top: 16px; }"
+        )
+        card_layout.addWidget(sep2)
+
+        # 版权信息
+        copyright_label = CaptionLabel("© 2026 Easy Todo. All rights reserved.")
+        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        copyright_label.setStyleSheet("""
+            color: #999;
+            font-size: 11px;
+            margin-top: 18px;
+        """)
+        setCustomStyleSheet(
+            copyright_label,
+            "color: #999;",
+            "color: #777;"
+        )
+        card_layout.addWidget(copyright_label)
 
         return card
 
