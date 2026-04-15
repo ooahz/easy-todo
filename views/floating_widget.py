@@ -2,7 +2,6 @@
 from PySide6.QtCore import Qt, Signal, QPoint, QRect
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QGraphicsOpacityEffect
 )
 from PySide6.QtGui import QMouseEvent, QCursor
 
@@ -23,7 +22,6 @@ class FloatingWidget(QWidget):
         super().__init__(parent)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -42,7 +40,7 @@ class FloatingWidget(QWidget):
         self._todos: list[dict] = []
 
         self._setup_ui()
-        self._setup_opacity()
+        self._apply_theme()
 
     def _setup_ui(self):
         """构建 UI"""
@@ -105,15 +103,36 @@ class FloatingWidget(QWidget):
         self._apply_theme()
 
     def _setup_opacity(self):
-        self._opacity_effect = QGraphicsOpacityEffect(self)
-        self._opacity_effect.setOpacity(self._opacity)
-        self.bg_frame.setGraphicsEffect(self._opacity_effect)
+        """透明度只影响背景色，不影响内容"""
+        pass
+
+    def _update_bg_opacity(self):
+        """根据透明度更新背景色"""
+        c = self._theme_colors()
+        # 解析原始背景色的 RGB 值
+        if isDarkTheme():
+            r, g, b = 45, 45, 45
+        else:
+            r, g, b = 255, 255, 255
+        alpha = int(self._opacity * 255)
+        self.bg_frame.setStyleSheet(f"""
+            #floatingBg {{
+                background-color: rgba({r}, {g}, {b}, {alpha});
+                border: 1px solid {c['border']};
+                border-radius: 12px;
+            }}
+        """)
 
     def _apply_theme(self):
         c = self._theme_colors()
+        if isDarkTheme():
+            r, g, b = 45, 45, 45
+        else:
+            r, g, b = 255, 255, 255
+        alpha = int(self._opacity * 255)
         self.bg_frame.setStyleSheet(f"""
             #floatingBg {{
-                background-color: {c['bg']};
+                background-color: rgba({r}, {g}, {b}, {alpha});
                 border: 1px solid {c['border']};
                 border-radius: 12px;
             }}
@@ -166,13 +185,18 @@ class FloatingWidget(QWidget):
 
     def set_opacity(self, value: float):
         self._opacity = max(0.1, min(1.0, value))
-        self._opacity_effect.setOpacity(self._opacity)
+        self._update_bg_opacity()
 
     def get_opacity(self) -> float:
         return self._opacity
 
     def set_todos(self, todos: list[dict]):
         self._todos = todos
+        self._refresh_list()
+
+    def refresh_theme(self):
+        """主题切换时刷新浮窗样式"""
+        self._apply_theme()
         self._refresh_list()
 
     def _refresh_list(self):
@@ -207,7 +231,7 @@ class FloatingWidget(QWidget):
         if status == 1:
             text_style = f"color: {c['done_text']}; text-decoration: line-through;"
         else:
-            text_style = ""
+            text_style = f"color: {c['title']};"
 
         row.setStyleSheet(f"""
             QFrame {{
@@ -228,7 +252,7 @@ class FloatingWidget(QWidget):
         h_layout.setSpacing(0)
 
         title_label = BodyLabel(todo.get("title", ""))
-        title_label.setStyleSheet(f"font-size: 12px; {text_style} border: none;")
+        title_label.setStyleSheet(f"font-size: 15px; {text_style} border: none;")
         h_layout.addWidget(title_label, 1)
 
         todo_id = todo["id"]

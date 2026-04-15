@@ -1,10 +1,12 @@
 """主窗口"""
 import json
+import os
 import sys
 import winreg
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QWidget, QFileDialog
+from PySide6.QtWidgets import QApplication, QWidget, QFileDialog, QSystemTrayIcon, QMenu
+from PySide6.QtGui import QAction, QIcon
 
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon, Theme,
@@ -33,6 +35,7 @@ class MainWindow(FluentWindow):
         self._setup_ui()
         self._setup_navigation()
         self._setup_floating()
+        self._setup_tray()
         self._connect_signals()
         self._apply_initial_theme()
 
@@ -100,6 +103,61 @@ class MainWindow(FluentWindow):
             fx = main_geo.left() - 310
         self.floating.move(fx, fy)
 
+    def _setup_tray(self):
+        """初始化系统托盘"""
+        self.tray_icon = QSystemTrayIcon(self)
+
+        # 设置托盘图标
+        icon_path = self._get_icon_path()
+        if icon_path:
+            self.tray_icon.setIcon(QIcon(icon_path))
+        else:
+            self.tray_icon.setIcon(self.windowIcon())
+
+        self.tray_icon.setToolTip(APP_NAME)
+
+        # 托盘菜单
+        tray_menu = QMenu()
+
+        show_action = QAction("显示主窗口", self)
+        show_action.triggered.connect(self._tray_show)
+        tray_menu.addAction(show_action)
+
+        quit_action = QAction("退出", self)
+        quit_action.triggered.connect(self._tray_quit)
+        tray_menu.addAction(quit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self._tray_activated)
+        self.tray_icon.show()
+
+    def _get_icon_path(self):
+        """获取图标路径"""
+        icon_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico"
+        )
+        if os.path.exists(icon_path):
+            return icon_path
+        return None
+
+    def _tray_activated(self, reason):
+        """托盘图标激活（双击显示窗口）"""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._tray_show()
+
+    def _tray_show(self):
+        """从托盘恢复窗口"""
+        self.show()
+        self.activateWindow()
+        self.raise_()
+
+    def _tray_quit(self):
+        """从托盘退出应用"""
+        self.tray_icon.hide()
+        self.floating.close()
+        self.todo_service.close()
+        QApplication.quit()
+
     def _connect_signals(self):
         """连接信号"""
         view_map = {
@@ -158,7 +216,7 @@ class MainWindow(FluentWindow):
     def _update_floating_data(self, view_key: str):
         """根据视图标识更新浮窗数据"""
         title_map = {"all": "全部任务", "today": "今日任务", "important": "重要任务", "done": "已完成"}
-        self.floating.title_label.setText(f"📋 {title_map.get(view_key, '任务列表')}")
+        self.floating.title_label.setText(title_map.get(view_key, "任务列表"))
 
         if view_key == "today":
             todos = self.todo_service.get_today()
@@ -329,6 +387,8 @@ class MainWindow(FluentWindow):
                 setTheme(Theme.DARK if darkdetect.isDark() else Theme.LIGHT)
             except Exception:
                 pass
+        # 刷新浮窗样式
+        self.floating.refresh_theme()
 
     def _on_show_done_changed(self, checked: bool):
         self._refresh_all_views()
@@ -371,8 +431,12 @@ class MainWindow(FluentWindow):
         super().moveEvent(event)
 
     def closeEvent(self, event):
-        settings.window_size = (self.width(), self.height())
-        settings.window_pos = (self.x(), self.y())
-        self.floating.close()
-        self.todo_service.close()
-        super().closeEvent(event)
+        # 最小化到系统托盘
+        event.ignore()
+        self.hide()
+        self.tray_icon.showMessage(
+            APP_NAME,
+            "已最小化到系统托盘，双击图标可恢复窗口",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )

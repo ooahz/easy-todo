@@ -201,12 +201,11 @@ class TodoCard(CardWidget):
         c = _tc()
         self.setStyleSheet(f"""
             CardWidget {{
-                border: 1px solid transparent;
+                border: none;
                 border-radius: 8px;
                 background-color: transparent;
             }}
             CardWidget:hover {{
-                border: 1px solid {c['hover_border']};
                 background-color: {c['hover_bg']};
             }}
         """)
