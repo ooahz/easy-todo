@@ -190,6 +190,18 @@ class FloatingWidget(QWidget):
     def get_opacity(self) -> float:
         return self._opacity
 
+    def set_always_on_top(self, enabled: bool):
+        """设置浮窗是否始终置顶"""
+        was_visible = self.isVisible()
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+        if enabled:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
+        if was_visible:
+            self.show()
+
     def set_todos(self, todos: list[dict]):
         self._todos = todos
         self._refresh_list()

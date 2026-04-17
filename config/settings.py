@@ -21,6 +21,10 @@ class Settings:
         "floating_opacity": 0.95,
         "show_done_tasks": False,
         "auto_start": False,
+        "home_page": "all",
+        "sort_rule": "created_at",
+        "done_at_bottom": True,
+        "floating_top": False,
     }
 
     def __init__(self):
@@ -134,6 +138,42 @@ class Settings:
     @auto_start.setter
     def auto_start(self, value: bool):
         self._data["auto_start"] = value
+        self.save()
+
+    @property
+    def home_page(self) -> str:
+        return self._data.get("home_page", "all")
+
+    @home_page.setter
+    def home_page(self, value: str):
+        self._data["home_page"] = value
+        self.save()
+
+    @property
+    def sort_rule(self) -> str:
+        return self._data.get("sort_rule", "created_at")
+
+    @sort_rule.setter
+    def sort_rule(self, value: str):
+        self._data["sort_rule"] = value
+        self.save()
+
+    @property
+    def done_at_bottom(self) -> bool:
+        return self._data.get("done_at_bottom", True)
+
+    @done_at_bottom.setter
+    def done_at_bottom(self, value: bool):
+        self._data["done_at_bottom"] = value
+        self.save()
+
+    @property
+    def floating_top(self) -> bool:
+        return self._data.get("floating_top", False)
+
+    @floating_top.setter
+    def floating_top(self, value: bool):
+        self._data["floating_top"] = value
         self.save()
 
 

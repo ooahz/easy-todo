@@ -21,6 +21,10 @@ class SettingsPage(QWidget):
     theme_changed = Signal(str)
     show_done_changed = Signal(bool)
     auto_start_changed = Signal(bool)
+    home_page_changed = Signal(str)
+    sort_rule_changed = Signal(str)
+    done_at_bottom_changed = Signal(bool)
+    floating_top_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -59,23 +63,30 @@ class SettingsPage(QWidget):
         self.list_layout.setSpacing(10)
 
         # ---- 设置卡片 ----
-        self.list_layout.addWidget(self._make_card("主题", [
-            self._make_combo_row("外观", self._create_theme_combo()),
+        self.list_layout.addWidget(self._make_card("外观", [
+            self._make_combo_row("主题", self._create_theme_combo()),
         ]))
 
-        self.list_layout.addWidget(self._make_card("列表显示", [
+        self.list_layout.addWidget(self._make_card("任务列表", [
             self._create_show_done_cb(),
+            self._create_done_at_bottom_cb(),
         ]))
 
-        self.list_layout.addWidget(self._make_card("浮窗", [
+        self.list_layout.addWidget(self._make_card("排序规则", [
+            self._make_combo_row("排序", self._create_sort_rule_combo()),
+        ]))
+
+        self.list_layout.addWidget(self._make_card("浮窗设置", [
             self._make_slider_row(),
+            self._create_floating_top_cb(),
         ]))
 
-        self.list_layout.addWidget(self._make_card("数据管理", [
+        self.list_layout.addWidget(self._make_card("数据", [
             self._make_data_btns(),
         ]))
 
-        self.list_layout.addWidget(self._make_card("通用", [
+        self.list_layout.addWidget(self._make_card("启动", [
+            self._make_combo_row("首屏", self._create_home_page_combo()),
             self._create_auto_start_cb(),
         ]))
 
@@ -99,7 +110,7 @@ class SettingsPage(QWidget):
         card_layout.setSpacing(8)
 
         title_label = BodyLabel(title)
-        title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        title_label.setFont(QFont("Microsoft YaHei", 12))
         card_layout.addWidget(title_label)
 
         for row in rows:
@@ -122,38 +133,15 @@ class SettingsPage(QWidget):
         card_layout.setContentsMargins(20, 20, 20, 20)
         card_layout.setSpacing(0)
 
-        # 应用图标和应用名区域
+        # 应用名区域
         header_container = QVBoxLayout()
         header_container.setSpacing(12)
-
-        # 图标
-        icon_label = QLabel()
-        icon_path = "assets/icon.png"
-        try:
-            pixmap = QPixmap(icon_path)
-            if not pixmap.isNull():
-                pixmap = pixmap.scaled(
-                    QSize(36, 36),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                icon_label.setPixmap(pixmap)
-                icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        except:
-            icon_label.setFixedSize(36, 36)
-            icon_label.setStyleSheet("background: #0078D4; border-radius: 12px;")
-        
-        header_container.addWidget(icon_label)
-        card_layout.addLayout(header_container)
 
         # 应用名
         name_label = BodyLabel(APP_NAME)
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name_label.setStyleSheet("""
-            font-size: 20px;
-            font-weight: bold;
-            margin-top: 18px;
-        """)
+        name_label.setFont(QFont("Microsoft YaHei", 15))
+        name_label.setMargin(7)
         name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(name_label)
 
@@ -164,7 +152,6 @@ class SettingsPage(QWidget):
             color: #0078D4;
             font-size: 13px;
             font-weight: 500;
-            margin-bottom: 8px;
         """)
         ver_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(ver_label)
@@ -205,7 +192,7 @@ class SettingsPage(QWidget):
         author_row = QHBoxLayout()
         author_row.setSpacing(8)
         author_row.addStretch()
-        
+
         author_icon = QLabel()
         author_icon.setFixedSize(16, 16)
         author_icon.setStyleSheet("""
@@ -213,11 +200,11 @@ class SettingsPage(QWidget):
             border-radius: 8px;
         """)
         author_row.addWidget(author_icon)
-        
+
         author_key = BodyLabel("作者")
         author_key.setStyleSheet("color: #888; font-size: 13px;")
         author_row.addWidget(author_key)
-        
+
         author_val = BodyLabel("十玖八柒")
         author_val.setStyleSheet("font-size: 13px; font-weight: 500;")
         author_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -229,7 +216,7 @@ class SettingsPage(QWidget):
         repo_row = QHBoxLayout()
         repo_row.setSpacing(8)
         repo_row.addStretch()
-        
+
         repo_icon = QLabel()
         repo_icon.setFixedSize(16, 16)
         repo_icon.setStyleSheet("""
@@ -237,11 +224,11 @@ class SettingsPage(QWidget):
             border-radius: 8px;
         """)
         repo_row.addWidget(repo_icon)
-        
+
         repo_key = BodyLabel("仓库")
         repo_key.setStyleSheet("color: #888; font-size: 13px;")
         repo_row.addWidget(repo_key)
-        
+
         repo_val = BodyLabel("github.com/ooahz")
         repo_val.setStyleSheet("""
             color: #0078D4;
@@ -310,11 +297,39 @@ class SettingsPage(QWidget):
         self.show_done_cb.checkStateChanged.connect(self._on_show_done_changed)
         return self.show_done_cb
 
+    def _create_done_at_bottom_cb(self) -> CheckBox:
+        self.done_at_bottom_cb = CheckBox("已完成任务置底")
+        self.done_at_bottom_cb.setChecked(settings.done_at_bottom)
+        self.done_at_bottom_cb.checkStateChanged.connect(self._on_done_at_bottom_changed)
+        return self.done_at_bottom_cb
+
+    def _create_sort_rule_combo(self) -> ComboBox:
+        self.sort_rule_combo = ComboBox()
+        self.sort_rule_combo.addItems(["创建时间", "优先级"])
+        idx = {"created_at": 0, "priority": 1}.get(settings.sort_rule, 0)
+        self.sort_rule_combo.setCurrentIndex(idx)
+        self.sort_rule_combo.currentIndexChanged.connect(self._on_sort_rule_changed)
+        return self.sort_rule_combo
+
+    def _create_home_page_combo(self) -> ComboBox:
+        self.home_page_combo = ComboBox()
+        self.home_page_combo.addItems(["全部任务", "今日任务", "重要任务", "已完成"])
+        idx = {"all": 0, "today": 1, "important": 2, "done": 3}.get(settings.home_page, 0)
+        self.home_page_combo.setCurrentIndex(idx)
+        self.home_page_combo.currentIndexChanged.connect(self._on_home_page_changed)
+        return self.home_page_combo
+
     def _create_auto_start_cb(self) -> CheckBox:
         self.auto_start_cb = CheckBox("开机自动启动")
         self.auto_start_cb.setChecked(settings.auto_start)
         self.auto_start_cb.checkStateChanged.connect(self._on_auto_start_changed)
         return self.auto_start_cb
+
+    def _create_floating_top_cb(self) -> CheckBox:
+        self.floating_top_cb = CheckBox("浮窗始终置顶")
+        self.floating_top_cb.setChecked(settings.floating_top)
+        self.floating_top_cb.checkStateChanged.connect(self._on_floating_top_changed)
+        return self.floating_top_cb
 
     def _make_slider_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -340,10 +355,10 @@ class SettingsPage(QWidget):
         row = QHBoxLayout()
         row.setSpacing(10)
 
-        self.export_btn = PushButton(FluentIcon.SAVE.icon(), "导出数据")
+        self.export_btn = PushButton(FluentIcon.SAVE, "导出数据")
         row.addWidget(self.export_btn)
 
-        self.import_btn = PushButton(FluentIcon.FOLDER.icon(), "导入数据")
+        self.import_btn = PushButton(FluentIcon.FOLDER, "导入数据")
         row.addWidget(self.import_btn)
 
         row.addStretch()
@@ -370,3 +385,25 @@ class SettingsPage(QWidget):
         checked = (state == Qt.CheckState.Checked)
         settings.auto_start = checked
         self.auto_start_changed.emit(checked)
+
+    def _on_home_page_changed(self, index: int):
+        pages = ["all", "today", "important", "done"]
+        page = pages[index] if index < len(pages) else "all"
+        settings.home_page = page
+        self.home_page_changed.emit(page)
+
+    def _on_sort_rule_changed(self, index: int):
+        rules = ["created_at", "priority"]
+        rule = rules[index] if index < len(rules) else "created_at"
+        settings.sort_rule = rule
+        self.sort_rule_changed.emit(rule)
+
+    def _on_done_at_bottom_changed(self, state):
+        checked = (state == Qt.CheckState.Checked)
+        settings.done_at_bottom = checked
+        self.done_at_bottom_changed.emit(checked)
+
+    def _on_floating_top_changed(self, state):
+        checked = (state == Qt.CheckState.Checked)
+        settings.floating_top = checked
+        self.floating_top_changed.emit(checked)

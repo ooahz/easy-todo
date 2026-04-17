@@ -94,7 +94,7 @@ class TodoDialog(QDialog):
 
         # 自动延期（独立一行）
         self.auto_postpone_cb = CheckBox("自动延期")
-        self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到第二天")
+        self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
         layout.addWidget(self.auto_postpone_cb)
 
         # 颜色标签

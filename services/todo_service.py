@@ -106,15 +106,14 @@ class TodoService:
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:
-        """处理自动延期：将已过期且开启自动延期的任务延期到明天"""
+        """处理自动延期：将已过期且开启自动延期的任务延期到今天"""
         today = date.today()
-        tomorrow = today + timedelta(days=1)
         count = self.session.query(Todo).filter(
             Todo.status == STATUS_TODO,
             Todo.auto_postpone == True,
             Todo.due_date < today,
             Todo.due_date.isnot(None),
-        ).update({Todo.due_date: tomorrow, Todo.updated_at: datetime.now()},
+        ).update({Todo.due_date: today, Todo.updated_at: datetime.now()},
                   synchronize_session=False)
         self.session.commit()
         return count
@@ -133,16 +132,15 @@ class TodoService:
         if color_tag is not None:
             query = query.filter(Todo.color_tag == color_tag)
 
-        sort_column = getattr(Todo, sort_by, Todo.created_at)
-        if sort_order == "asc":
-            query = query.order_by(sort_column.asc(), Todo.sort_order.asc())
-        else:
-            query = query.order_by(sort_column.desc(), Todo.sort_order.desc())
+        query = self._apply_sort(query, sort_by, sort_order)
 
         return query.all()
 
-    def get_all_including_done(self, **kwargs) -> list[Todo]:
-        """获取所有任务（包含已完成）"""
+    def get_all_including_done(self, sort_by: str = "created_at",
+                                sort_order: str = "desc",
+                                done_at_bottom: bool = True,
+                                **kwargs) -> list[Todo]:
+        """获取所有任务（包含已完成），支持已完成置底"""
         query = self.session.query(Todo).filter(Todo.status.in_([STATUS_TODO, STATUS_DONE]))
 
         priority = kwargs.get('priority')
@@ -153,15 +151,34 @@ class TodoService:
         if color_tag is not None:
             query = query.filter(Todo.color_tag == color_tag)
 
-        sort_by = kwargs.get('sort_by', 'created_at')
-        sort_order = kwargs.get('sort_order', 'desc')
-        sort_column = getattr(Todo, sort_by, Todo.created_at)
-        if sort_order == "asc":
-            query = query.order_by(sort_column.asc(), Todo.sort_order.asc())
+        if done_at_bottom:
+            # 未完成按排序规则排前面，已完成排后面
+            sort_expr = self._build_sort_expr(sort_by, sort_order)
+            query = query.order_by(Todo.status.asc(), *sort_expr)
         else:
-            query = query.order_by(sort_column.desc(), Todo.sort_order.desc())
+            query = self._apply_sort(query, sort_by, sort_order)
 
         return query.all()
+
+    def _apply_sort(self, query, sort_by: str = "created_at", sort_order: str = "desc"):
+        """应用排序规则"""
+        sort_expr = self._build_sort_expr(sort_by, sort_order)
+        return query.order_by(*sort_expr)
+
+    def _build_sort_expr(self, sort_by: str, sort_order: str):
+        """构建排序表达式，主排序 + 副排序"""
+        if sort_by == "priority":
+            # 优先级高的排前面，同优先级新创建的排前面
+            if sort_order == "asc":
+                return [Todo.priority.asc(), Todo.created_at.desc()]
+            else:
+                return [Todo.priority.desc(), Todo.created_at.desc()]
+        else:
+            # 创建时间新的排前面，同时创建时间相同时优先级高的排前面
+            if sort_order == "asc":
+                return [Todo.created_at.asc(), Todo.priority.desc()]
+            else:
+                return [Todo.created_at.desc(), Todo.priority.desc()]
 
     def get_today(self) -> list[Todo]:
         """获取今日到期任务"""

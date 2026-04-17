@@ -5,6 +5,7 @@ import sys
 import winreg
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QWidget, QFileDialog, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QAction, QIcon
 
@@ -42,7 +43,14 @@ class MainWindow(FluentWindow):
         # 启动时处理自动延期
         self.todo_service.process_auto_postpone()
 
+        # 跨天时自动检查延期（每天零点触发）
+        self._postpone_timer = QTimer(self)
+        self._postpone_timer.setSingleShot(True)
+        self._postpone_timer.timeout.connect(self._auto_postpone_tick)
+        self._schedule_postpone_timer()
+
         self._load_todos()
+        self._apply_home_page()
 
     def _setup_ui(self):
         """初始化窗口"""
@@ -91,6 +99,7 @@ class MainWindow(FluentWindow):
         """初始化浮窗"""
         self.floating = FloatingWidget()
         self.floating.set_opacity(settings.floating_opacity)
+        self.floating.set_always_on_top(settings.floating_top)
         self._position_floating()
 
     def _position_floating(self):
@@ -183,6 +192,10 @@ class MainWindow(FluentWindow):
         self.settings_page.theme_changed.connect(self._on_theme_changed)
         self.settings_page.show_done_changed.connect(self._on_show_done_changed)
         self.settings_page.auto_start_changed.connect(self._on_auto_start_changed)
+        self.settings_page.home_page_changed.connect(self._on_home_page_changed)
+        self.settings_page.sort_rule_changed.connect(self._on_sort_rule_changed)
+        self.settings_page.done_at_bottom_changed.connect(self._on_done_at_bottom_changed)
+        self.settings_page.floating_top_changed.connect(self._on_floating_top_changed)
         self.settings_page.export_btn.clicked.connect(self._export_data)
         self.settings_page.import_btn.clicked.connect(self._import_data)
 
@@ -226,9 +239,15 @@ class MainWindow(FluentWindow):
             todos = self.todo_service.get_all(status=STATUS_DONE)
         else:
             if settings.show_done_tasks:
-                todos = self.todo_service.get_all_including_done()
+                todos = self.todo_service.get_all_including_done(
+                    sort_by=settings.sort_rule, sort_order="desc",
+                    done_at_bottom=settings.done_at_bottom
+                )
             else:
-                todos = self.todo_service.get_all(status=STATUS_TODO)
+                todos = self.todo_service.get_all(
+                    status=STATUS_TODO,
+                    sort_by=settings.sort_rule, sort_order="desc"
+                )
 
         self.floating.set_todos([t.to_dict() for t in todos])
 
@@ -245,12 +264,58 @@ class MainWindow(FluentWindow):
             except Exception:
                 setTheme(Theme.LIGHT)
 
+    def _apply_home_page(self):
+        """应用首屏设置"""
+        page_map = {
+            "all": 0, "today": 1, "important": 2, "done": 3
+        }
+        idx = page_map.get(settings.home_page, 0)
+        self.navigationInterface.setCurrentItem(idx)
+        self.switchTo(self.todo_list_view)  # 先切到第一个
+        # 根据设置切换到目标页面
+        view_map = {
+            0: self.todo_list_view,
+            1: self.today_view,
+            2: self.important_view,
+            3: self.done_view,
+        }
+        target = view_map.get(idx, self.todo_list_view)
+        self.switchTo(target)
+        self._current_view_key = {"all": "all", "today": "today", "important": "important", "done": "done"}.get(
+            settings.home_page, "all"
+        )
+
+    def _schedule_postpone_timer(self):
+        """计算距离下一个零点的毫秒数，设置单次定时器"""
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        interval_ms = int((tomorrow - now).total_seconds() * 1000)
+        self._postpone_timer.start(interval_ms)
+
+    def _auto_postpone_tick(self):
+        """定时检查自动延期"""
+        count = self.todo_service.process_auto_postpone()
+        if count > 0:
+            self._load_todos()
+        # 重新调度到下一个零点
+        self._schedule_postpone_timer()
+
     def _load_todos(self):
         """加载待办数据"""
+        sort_by = settings.sort_rule
+        sort_order = "desc"
+        done_at_bottom = settings.done_at_bottom
+
         if settings.show_done_tasks:
-            todos = self.todo_service.get_all_including_done()
+            todos = self.todo_service.get_all_including_done(
+                sort_by=sort_by, sort_order=sort_order,
+                done_at_bottom=done_at_bottom
+            )
         else:
-            todos = self.todo_service.get_all(status=STATUS_TODO)
+            todos = self.todo_service.get_all(
+                status=STATUS_TODO, sort_by=sort_by, sort_order=sort_order
+            )
         self.todo_list_view.set_todos([t.to_dict() for t in todos])
 
         today_todos = self.todo_service.get_today()
@@ -392,6 +457,18 @@ class MainWindow(FluentWindow):
 
     def _on_show_done_changed(self, checked: bool):
         self._refresh_all_views()
+
+    def _on_home_page_changed(self, page: str):
+        self._apply_home_page()
+
+    def _on_sort_rule_changed(self, rule: str):
+        self._refresh_all_views()
+
+    def _on_done_at_bottom_changed(self, checked: bool):
+        self._refresh_all_views()
+
+    def _on_floating_top_changed(self, enabled: bool):
+        self.floating.set_always_on_top(enabled)
 
     def _on_auto_start_changed(self, enabled: bool):
         """设置开机自启"""

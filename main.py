@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # 抑制 PySide6 弃用警告
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSharedMemory
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont, QColor, QIcon
 from qfluentwidgets import FluentIcon
@@ -19,8 +19,20 @@ from config.settings import settings
 from models.database import db
 from views.main_window import MainWindow
 
+# 全局共享内存，用于单实例检测
+_shared_memory = None
+
 
 def main():
+    global _shared_memory
+
+    # 单实例检测
+    _shared_memory = QSharedMemory(f"EasyTodo_SingleInstance")
+    if not _shared_memory.create(1):
+        # 已有实例运行，退出
+        _shared_memory.detach()
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
