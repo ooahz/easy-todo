@@ -9,7 +9,7 @@ from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme
 
 
 class FloatingWidget(QWidget):
-    """浮窗 - 置顶、无边框、可拖动、四边+四角可调整大小"""
+    """浮窗布局"""
 
     todo_toggled = Signal(int)
 
@@ -103,13 +103,11 @@ class FloatingWidget(QWidget):
         self._apply_theme()
 
     def _setup_opacity(self):
-        """透明度只影响背景色，不影响内容"""
         pass
 
     def _update_bg_opacity(self):
         """根据透明度更新背景色"""
         c = self._theme_colors()
-        # 解析原始背景色的 RGB 值
         if isDarkTheme():
             r, g, b = 45, 45, 45
         else:

@@ -28,7 +28,6 @@ class TodoService:
                color_tag: Optional[str] = None, due_date=None,
                auto_postpone: bool = False) -> Todo:
         """创建待办事项"""
-        # QDate 转换
         if due_date is not None and hasattr(due_date, 'year') and not isinstance(due_date, date):
             from datetime import date as pydate
             due_date = pydate(due_date.year(), due_date.month(), due_date.day())
@@ -58,7 +57,7 @@ class TodoService:
         if not todo:
             return None
 
-        # QDate 转换
+        # 日期转换
         if 'due_date' in kwargs and kwargs['due_date'] is not None and hasattr(kwargs['due_date'], 'year') and not isinstance(kwargs['due_date'], date):
             from datetime import date as pydate
             qd = kwargs['due_date']
@@ -106,7 +105,6 @@ class TodoService:
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:
-        """处理自动延期：将已过期且开启自动延期的任务延期到今天"""
         today = date.today()
         count = self.session.query(Todo).filter(
             Todo.status == STATUS_TODO,
@@ -140,7 +138,7 @@ class TodoService:
                                 sort_order: str = "desc",
                                 done_at_bottom: bool = True,
                                 **kwargs) -> list[Todo]:
-        """获取所有任务（包含已完成），支持已完成置底"""
+        """获取所有任务"""
         query = self.session.query(Todo).filter(Todo.status.in_([STATUS_TODO, STATUS_DONE]))
 
         priority = kwargs.get('priority')

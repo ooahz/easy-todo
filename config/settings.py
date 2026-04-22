@@ -7,7 +7,7 @@ from config.constants import THEME_COLORS
 
 
 class Settings:
-    """应用设置，持久化到 JSON 文件"""
+    """应用设置"""
 
     DEFAULT = {
         "theme": "light",  # light / dark / system

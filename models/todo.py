@@ -16,7 +16,7 @@ class Todo(Base):
     status = Column(Integer, default=0)          # 0=待办, 1=已完成, 2=已归档
     color_tag = Column(String(7), default=None, nullable=True)
     due_date = Column(Date, nullable=True)
-    auto_postpone = Column(Boolean, default=False)  # 自动延期：过期时自动延到今天
+    auto_postpone = Column(Boolean, default=False)  # 自动延期
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     sort_order = Column(Integer, default=0)

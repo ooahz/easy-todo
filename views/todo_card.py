@@ -3,7 +3,7 @@ from datetime import date
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame, QSizePolicy
 )
 
 from qfluentwidgets import (
@@ -62,7 +62,7 @@ class TodoCard(CardWidget):
         self.main_layout.setContentsMargins(12, 8, 8, 8)
         self.main_layout.setSpacing(8)
 
-        # 左侧色条（颜色标签优先，否则显示优先级色）
+        # 左侧色条
         self.priority_bar = QFrame()
         self.priority_bar.setFixedWidth(4)
         self.priority_bar.setMinimumHeight(40)
@@ -86,7 +86,10 @@ class TodoCard(CardWidget):
         self.title_row.setSpacing(8)
 
         self.title_label = BodyLabel(self.todo_data["title"])
-        self.title_label.setWordWrap(False)
+        self.title_label.setWordWrap(True)
+        self.title_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self._apply_title_style()
         self.title_row.addWidget(self.title_label, 1)
 
@@ -96,13 +99,20 @@ class TodoCard(CardWidget):
         desc = self.todo_data.get("description", "")
         due = self.todo_data.get("due_date", "")
 
+        # 描述
+        if desc:
+            self.desc_label = CaptionLabel(desc)
+            self.desc_label.setObjectName("descLabel")
+            self.desc_label.setWordWrap(True)
+            self.desc_label.setMaximumHeight(36)
+            self._apply_desc_style()
+            self.content_layout.addWidget(self.desc_label)
+
+        # 信息行
         info_parts = []
-        # 优先级
         priority = self.todo_data.get("priority", 0)
         if priority in PRIORITY_MAP and priority > 0:
             info_parts.append(PRIORITY_MAP[priority])
-        if desc:
-            info_parts.append(desc[:60] + ("..." if len(desc) > 60 else ""))
         if due:
             due_date = date.fromisoformat(due)
             today = date.today()
@@ -126,6 +136,12 @@ class TodoCard(CardWidget):
         self.action_layout.setSpacing(2)
         self.action_layout.setContentsMargins(0, 0, 4, 0)
 
+        action_widget = QWidget()
+        action_widget.setLayout(self.action_layout)
+        action_widget.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
+        )
+
         self.edit_btn = TransparentToolButton(FluentIcon.EDIT)
         self.edit_btn.setFixedSize(30, 30)
         self.edit_btn.setToolTip("编辑")
@@ -138,7 +154,7 @@ class TodoCard(CardWidget):
         self.delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.todo_id))
         self.action_layout.addWidget(self.delete_btn)
 
-        self.main_layout.addLayout(self.action_layout)
+        self.main_layout.addWidget(action_widget)
 
         self.mousePressEvent = self._on_mouse_press
 
@@ -197,6 +213,23 @@ class TodoCard(CardWidget):
                 }}
             """)
 
+    def _apply_desc_style(self):
+        c = _tc()
+        if self._is_done:
+            self.desc_label.setStyleSheet(f"""
+                CaptionLabel#descLabel {{
+                    color: {c['done']};
+                    font-size: 12px;
+                }}
+            """)
+        else:
+            self.desc_label.setStyleSheet(f"""
+                CaptionLabel#descLabel {{
+                    color: {c['muted']};
+                    font-size: 12px;
+                }}
+            """)
+
     def _apply_styles(self):
         c = _tc()
         self.setStyleSheet(f"""
@@ -220,6 +253,10 @@ class TodoCard(CardWidget):
         self.title_label.setText(todo_data["title"])
         self._apply_title_style()
         self._update_bar_color()
+        desc = todo_data.get("description", "")
+        if hasattr(self, "desc_label") and desc:
+            self.desc_label.setText(desc)
+            self._apply_desc_style()
 
     def set_selected(self, selected: bool):
         self._is_selected = selected

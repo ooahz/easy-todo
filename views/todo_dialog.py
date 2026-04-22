@@ -61,12 +61,14 @@ class TodoDialog(QDialog):
         self.title_edit = LineEdit()
         self.title_edit.setPlaceholderText("输入任务标题...")
         self.title_edit.setClearButtonEnabled(True)
+        self.title_edit.setMaxLength(100)
         layout.addWidget(self.title_edit)
 
         # 描述输入
         self.desc_edit = TextEdit()
         self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
-        self.desc_edit.setFixedHeight(60)
+        self.desc_edit.setMinimumHeight(72)
+        self.desc_edit.setMaximumHeight(120)
         layout.addWidget(self.desc_edit)
 
         # 优先级 + 截止日期
@@ -92,7 +94,7 @@ class TodoDialog(QDialog):
         row1.addStretch()
         layout.addLayout(row1)
 
-        # 自动延期（独立一行）
+        # 自动延期
         self.auto_postpone_cb = CheckBox("自动延期")
         self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
         layout.addWidget(self.auto_postpone_cb)
@@ -154,6 +156,16 @@ class TodoDialog(QDialog):
 
     def _connect_signals(self):
         self.title_edit.returnPressed.connect(self._on_save)
+        self.desc_edit.textChanged.connect(self._on_desc_changed)
+
+    def _on_desc_changed(self):
+        """限制描述最多1000字符"""
+        text = self.desc_edit.toPlainText()
+        if len(text) > 1000:
+            cursor = self.desc_edit.textCursor()
+            cursor.setPosition(1000)
+            cursor.movePosition(cursor.MoveOperation.End, cursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
 
     def _on_color_clicked(self, color: str, btn: QPushButton):
         if self._selected_color == color:

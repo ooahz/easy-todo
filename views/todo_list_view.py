@@ -38,14 +38,14 @@ class TodoListView(QWidget):
 
         self.toolbar.addStretch()
 
-        # 浮窗按钮（新建按钮左侧）
+        # 浮窗按钮
         self.float_btn = ToolButton(FluentIcon.ZOOM)
         self.float_btn.setFixedSize(36, 36)
         self.float_btn.setToolTip("浮窗")
         self.float_btn.clicked.connect(self.float_clicked.emit)
         self.toolbar.addWidget(self.float_btn)
 
-        # 新建按钮（右侧）
+        # 新建按钮
         self.add_btn = PrimaryPushButton(FluentIcon.ADD, "新建任务")
         self.add_btn.clicked.connect(self.add_clicked.emit)
         self.toolbar.addWidget(self.add_btn)

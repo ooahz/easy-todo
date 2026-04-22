@@ -32,6 +32,7 @@ class MainWindow(FluentWindow):
 
         # 当前视图标识
         self._current_view_key = "all"
+        self._tray_tip_shown = False
 
         self._setup_ui()
         self._setup_navigation()
@@ -132,6 +133,10 @@ class MainWindow(FluentWindow):
         show_action.triggered.connect(self._tray_show)
         tray_menu.addAction(show_action)
 
+        float_action = QAction("显示浮窗", self)
+        float_action.triggered.connect(self._tray_toggle_floating)
+        tray_menu.addAction(float_action)
+
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(self._tray_quit)
         tray_menu.addAction(quit_action)
@@ -156,9 +161,18 @@ class MainWindow(FluentWindow):
 
     def _tray_show(self):
         """从托盘恢复窗口"""
-        self.show()
+        self.showNormal()
         self.activateWindow()
         self.raise_()
+
+    def _tray_toggle_floating(self):
+        """从托盘切换浮窗显示"""
+        if self.floating.isVisible():
+            self.floating.hide()
+        else:
+            self._position_floating()
+            self._update_floating_data(self._current_view_key)
+            self.floating.show()
 
     def _tray_quit(self):
         """从托盘退出应用"""
@@ -271,7 +285,7 @@ class MainWindow(FluentWindow):
         }
         idx = page_map.get(settings.home_page, 0)
         self.navigationInterface.setCurrentItem(idx)
-        self.switchTo(self.todo_list_view)  # 先切到第一个
+        self.switchTo(self.todo_list_view)
         # 根据设置切换到目标页面
         view_map = {
             0: self.todo_list_view,
@@ -372,7 +386,7 @@ class MainWindow(FluentWindow):
     # ---- 导入导出 ----
 
     def _export_data(self):
-        """导出数据为 JSON"""
+        """导出数据"""
         path, _ = QFileDialog.getSaveFileName(
             self, "导出数据", "easy_todo_backup.json", "JSON 文件 (*.json)"
         )
@@ -390,7 +404,7 @@ class MainWindow(FluentWindow):
                          position=InfoBarPosition.TOP, duration=3000)
 
     def _import_data(self):
-        """从 JSON 导入数据"""
+        """导入数据"""
         path, _ = QFileDialog.getOpenFileName(
             self, "导入数据", "", "JSON 文件 (*.json)"
         )
@@ -410,7 +424,7 @@ class MainWindow(FluentWindow):
                 title = item.get("title", "").strip()
                 if not title:
                     continue
-                # due_date 字符串转 date 对象
+                # 日期转换
                 due = item.get("due_date")
                 if isinstance(due, str) and due:
                     try:
@@ -499,8 +513,6 @@ class MainWindow(FluentWindow):
 
     def _on_resize(self, event):
         settings.window_size = (self.width(), self.height())
-        if self.floating.isVisible():
-            self._position_floating()
         super().resizeEvent(event)
 
     def _on_move(self, event):
@@ -511,9 +523,11 @@ class MainWindow(FluentWindow):
         # 最小化到系统托盘
         event.ignore()
         self.hide()
-        self.tray_icon.showMessage(
-            APP_NAME,
-            "已最小化到系统托盘，双击图标可恢复窗口",
-            QSystemTrayIcon.MessageIcon.Information,
-            2000
-        )
+        if not self._tray_tip_shown:
+            self.tray_icon.showMessage(
+                APP_NAME,
+                "已最小化到系统托盘，双击图标可恢复窗口",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+            self._tray_tip_shown = True

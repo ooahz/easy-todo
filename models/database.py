@@ -12,7 +12,7 @@ class Base(DeclarativeBase):
 
 
 class Database:
-    """数据库管理器（单例）"""
+    """数据库对象"""
 
     _instance = None
 
