@@ -1,19 +1,16 @@
 """设置页面 - 内嵌导航子页面"""
-import os
-import sys
 
 from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from PySide6.QtGui import QPixmap, QIcon, QFont
-
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, Slider, ComboBox, CheckBox,
-    PrimaryPushButton, PushButton, FluentIcon, SmoothScrollArea,
-    setTheme, Theme, isDarkTheme, setCustomStyleSheet, IconWidget
+    PushButton, FluentIcon, SmoothScrollArea,
+    setCustomStyleSheet
 )
 
-from config.settings import settings
 from config.constants import APP_NAME, APP_VERSION
+from config.settings import settings
 from views.style_sheet import StyleSheet
 
 
@@ -28,6 +25,7 @@ class SettingsPage(QWidget):
     sort_rule_changed = Signal(str)
     done_at_bottom_changed = Signal(bool)
     floating_top_changed = Signal(bool)
+    important_priorities_changed = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,6 +71,7 @@ class SettingsPage(QWidget):
         self.list_layout.addWidget(self._make_card("任务列表", [
             self._create_show_done_cb(),
             self._create_done_at_bottom_cb(),
+            self._create_important_priorities_row(),
         ]))
 
         self.list_layout.addWidget(self._make_card("排序规则", [
@@ -127,22 +126,6 @@ class SettingsPage(QWidget):
 
         return card
 
-    @staticmethod
-    def _get_app_icon_path() -> str | None:
-        """获取应用图标路径，兼容开发环境和打包环境"""
-        # 打包环境：sys._MEIPASS
-        if getattr(sys, 'frozen', False):
-            base = sys._MEIPASS
-        else:
-            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        icon = os.path.join(base, "assets", "icon.png")
-        if os.path.exists(icon):
-            return icon
-        icon_ico = os.path.join(base, "assets", "icon.ico")
-        if os.path.exists(icon_ico):
-            return icon_ico
-        return None
-
     def _make_about_card(self) -> QFrame:
         """创建关于卡片"""
         card = QFrame()
@@ -154,16 +137,6 @@ class SettingsPage(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 20, 20, 20)
         card_layout.setSpacing(12)
-
-        # 应用图标
-        icon_label = QLabel()
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_path = self._get_app_icon_path()
-        if icon_path and os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            icon_label.setPixmap(pixmap)
-        icon_label.setFixedSize(48, 48)
-        card_layout.addWidget(icon_label)
 
         # 应用名
         name_label = BodyLabel(APP_NAME)
@@ -182,27 +155,51 @@ class SettingsPage(QWidget):
         ver_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(ver_label)
 
+        # 分隔线
+        sep1 = QLabel()
+        sep1.setFixedHeight(1)
+        sep1.setObjectName("aboutSep1")
+        setCustomStyleSheet(
+            sep1,
+            "#aboutSep1 { background-color: rgba(0,0,0,0.08); margin: 12px 0; }",
+            "#aboutSep1 { background-color: rgba(255,255,255,0.08); margin: 12px 0; }"
+        )
+        card_layout.addWidget(sep1)
+
         # 描述
         desc_label = BodyLabel("现代化本地待办管理应用")
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #666; font-size: 13px;")
+        desc_label.setStyleSheet("""
+            color: #666;
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 18px;
+        """)
+        setCustomStyleSheet(
+            desc_label,
+            "color: #666;",
+            "color: #AAA;"
+        )
         card_layout.addWidget(desc_label)
 
-        # 分隔线
-        sep = QLabel()
-        sep.setFixedHeight(1)
-        sep.setObjectName("aboutSep")
-        setCustomStyleSheet(
-            sep,
-            "#aboutSep { background-color: rgba(0,0,0,0.08); }",
-            "#aboutSep { background-color: rgba(255,255,255,0.08); }"
-        )
-        card_layout.addWidget(sep)
+        # 信息容器
+        info_container = QVBoxLayout()
+        info_container.setSpacing(10)
 
-        # 作者
+        # 作者信息
         author_row = QHBoxLayout()
         author_row.setSpacing(8)
+        author_row.addStretch()
+
+        author_icon = QLabel()
+        author_icon.setFixedSize(16, 16)
+        author_icon.setStyleSheet("""
+            background: #0078D4;
+            border-radius: 8px;
+        """)
+        author_row.addWidget(author_icon)
+
         author_key = BodyLabel("作者")
         author_key.setStyleSheet("color: #888; font-size: 13px;")
         author_row.addWidget(author_key)
@@ -211,20 +208,65 @@ class SettingsPage(QWidget):
         author_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         author_row.addWidget(author_val)
         author_row.addStretch()
-        card_layout.addLayout(author_row)
+        info_container.addLayout(author_row)
 
-        # 开源仓库
+        # 仓库信息
         repo_row = QHBoxLayout()
         repo_row.setSpacing(8)
+        repo_row.addStretch()
+
+        repo_icon = QLabel()
+        repo_icon.setFixedSize(16, 16)
+        repo_icon.setStyleSheet("""
+            background: #8764B8;
+            border-radius: 8px;
+        """)
+        repo_row.addWidget(repo_icon)
+
         repo_key = BodyLabel("仓库")
         repo_key.setStyleSheet("color: #888; font-size: 13px;")
         repo_row.addWidget(repo_key)
-        repo_val = BodyLabel('<a href="https://github.com/ooahz" style="color: #0078D4; text-decoration: none;">github.com/ooahz</a>')
-        repo_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        repo_val.setOpenExternalLinks(True)
+
+        repo_val = BodyLabel("github.com/ooahz")
+        repo_val.setStyleSheet("""
+            color: #0078D4;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+        """)
+        repo_val.setCursor(Qt.CursorShape.PointingHandCursor)
+        repo_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         repo_row.addWidget(repo_val)
         repo_row.addStretch()
-        card_layout.addLayout(repo_row)
+        info_container.addLayout(repo_row)
+
+        card_layout.addLayout(info_container)
+
+        # 底部分隔线
+        sep2 = QLabel()
+        sep2.setFixedHeight(1)
+        sep2.setObjectName("aboutSep2")
+        setCustomStyleSheet(
+            sep2,
+            "#aboutSep2 { background-color: rgba(0,0,0,0.08); margin-top: 16px; }",
+            "#aboutSep2 { background-color: rgba(255,255,255,0.08); margin-top: 16px; }"
+        )
+        card_layout.addWidget(sep2)
+
+        # 版权信息
+        copyright_label = CaptionLabel("© 2026 Easy Todo. All rights reserved.")
+        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        copyright_label.setStyleSheet("""
+            color: #999;
+            font-size: 11px;
+            margin-top: 18px;
+        """)
+        setCustomStyleSheet(
+            copyright_label,
+            "color: #999;",
+            "color: #777;"
+        )
+        card_layout.addWidget(copyright_label)
 
         return card
 
@@ -259,10 +301,33 @@ class SettingsPage(QWidget):
         self.done_at_bottom_cb.checkStateChanged.connect(self._on_done_at_bottom_changed)
         return self.done_at_bottom_cb
 
+    def _create_important_priorities_row(self) -> QHBoxLayout:
+        """创建重要任务优先级多选行"""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        label = BodyLabel("重要任务")
+        label.setFixedWidth(60)
+        row.addWidget(label)
+
+        from config.constants import PRIORITY_MAP
+        self._priority_cbs: list[CheckBox] = []
+        for val in sorted(PRIORITY_MAP.keys()):
+            if val == 0:
+                continue
+            cb = CheckBox(PRIORITY_MAP[val])
+            cb.setChecked(val in settings.important_priorities)
+            cb.checkStateChanged.connect(self._on_important_priorities_changed)
+            row.addWidget(cb)
+            self._priority_cbs.append((val, cb))
+
+        row.addStretch()
+        return row
+
     def _create_sort_rule_combo(self) -> ComboBox:
         self.sort_rule_combo = ComboBox()
-        self.sort_rule_combo.addItems(["创建时间", "优先级"])
-        idx = {"created_at": 0, "priority": 1}.get(settings.sort_rule, 0)
+        self.sort_rule_combo.addItems(["创建时间", "优先级", "截止时间"])
+        idx = {"created_at": 0, "priority": 1, "due_date": 2}.get(settings.sort_rule, 0)
         self.sort_rule_combo.setCurrentIndex(idx)
         self.sort_rule_combo.currentIndexChanged.connect(self._on_sort_rule_changed)
         return self.sort_rule_combo
@@ -349,7 +414,7 @@ class SettingsPage(QWidget):
         self.home_page_changed.emit(page)
 
     def _on_sort_rule_changed(self, index: int):
-        rules = ["created_at", "priority"]
+        rules = ["created_at", "priority", "due_date"]
         rule = rules[index] if index < len(rules) else "created_at"
         settings.sort_rule = rule
         self.sort_rule_changed.emit(rule)
@@ -363,3 +428,9 @@ class SettingsPage(QWidget):
         checked = (state == Qt.CheckState.Checked)
         settings.floating_top = checked
         self.floating_top_changed.emit(checked)
+
+    def _on_important_priorities_changed(self):
+        priorities = [val for val, cb in self._priority_cbs
+                      if cb.checkState() == Qt.CheckState.Checked]
+        settings.important_priorities = priorities
+        self.important_priorities_changed.emit(priorities)

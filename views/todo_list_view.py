@@ -6,7 +6,6 @@ from qfluentwidgets import (
     PrimaryPushButton, ToolButton, BodyLabel, CaptionLabel, FluentIcon,
     SmoothScrollArea,
 )
-
 from views.todo_card import TodoCard
 
 

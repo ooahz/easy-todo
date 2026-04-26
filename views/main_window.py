@@ -101,7 +101,21 @@ class MainWindow(FluentWindow):
         self.floating = FloatingWidget()
         self.floating.set_opacity(settings.floating_opacity)
         self.floating.set_always_on_top(settings.floating_top)
-        self._position_floating()
+        self.floating.set_pinned(settings.floating_pinned)
+        self.floating.pin_changed.connect(self._on_floating_pin_changed)
+        self.floating.quick_add.connect(self._on_floating_quick_add)
+
+        # 恢复浮窗位置和视图
+        geo = settings.floating_geometry
+        if geo:
+            self.floating.setGeometry(geo.get("x", 0), geo.get("y", 0),
+                                      geo.get("w", 300), geo.get("h", 400))
+            self._current_view_key = settings.floating_view
+        else:
+            self._position_floating()
+
+        # 固定状态下自动显示浮窗
+        self._restore_floating_pending = settings.floating_pinned
 
     def _position_floating(self):
         """将浮窗定位到主窗口右侧"""
@@ -210,6 +224,7 @@ class MainWindow(FluentWindow):
         self.settings_page.sort_rule_changed.connect(self._on_sort_rule_changed)
         self.settings_page.done_at_bottom_changed.connect(self._on_done_at_bottom_changed)
         self.settings_page.floating_top_changed.connect(self._on_floating_top_changed)
+        self.settings_page.important_priorities_changed.connect(self._on_important_priorities_changed)
         self.settings_page.export_btn.clicked.connect(self._export_data)
         self.settings_page.import_btn.clicked.connect(self._import_data)
 
@@ -278,6 +293,13 @@ class MainWindow(FluentWindow):
             except Exception:
                 setTheme(Theme.LIGHT)
 
+        # 主题应用后恢复固定浮窗
+        if getattr(self, '_restore_floating_pending', False):
+            self._restore_floating_pending = False
+            self._update_floating_data(self._current_view_key)
+            self.floating.refresh_theme()
+            self.floating.show()
+
     def _apply_home_page(self):
         """应用首屏设置"""
         page_map = {
@@ -335,7 +357,9 @@ class MainWindow(FluentWindow):
         today_todos = self.todo_service.get_today()
         self.today_view.set_todos([t.to_dict() for t in today_todos])
 
-        important_todos = self.todo_service.get_high_priority()
+        important_todos = self.todo_service.get_high_priority(
+            priorities=settings.important_priorities
+        )
         self.important_view.set_todos([t.to_dict() for t in important_todos])
 
         done_todos = self.todo_service.get_all(status=STATUS_DONE)
@@ -468,6 +492,8 @@ class MainWindow(FluentWindow):
                 pass
         # 刷新浮窗样式
         self.floating.refresh_theme()
+        # 刷新卡片样式
+        self._refresh_all_views()
 
     def _on_show_done_changed(self, checked: bool):
         self._refresh_all_views()
@@ -483,6 +509,29 @@ class MainWindow(FluentWindow):
 
     def _on_floating_top_changed(self, enabled: bool):
         self.floating.set_always_on_top(enabled)
+
+    def _on_floating_pin_changed(self, pinned: bool):
+        """浮窗固定状态变更"""
+        settings.floating_pinned = pinned
+        if pinned:
+            # 固定时保存位置、大小和当前视图
+            g = self.floating.geometry()
+            settings.floating_geometry = {
+                "x": g.x(), "y": g.y(), "w": g.width(), "h": g.height()
+            }
+            settings.floating_view = self._current_view_key
+            self._update_floating_data(self._current_view_key)
+            self.floating.show()
+        else:
+            settings.floating_geometry = None
+
+    def _on_floating_quick_add(self, title: str):
+        """浮窗快速新建任务"""
+        self.todo_service.create(title=title)
+        self._refresh_all_views()
+
+    def _on_important_priorities_changed(self, priorities: list):
+        self._refresh_all_views()
 
     def _on_auto_start_changed(self, enabled: bool):
         """设置开机自启"""

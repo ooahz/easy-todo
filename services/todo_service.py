@@ -171,6 +171,12 @@ class TodoService:
                 return [Todo.priority.asc(), Todo.created_at.desc()]
             else:
                 return [Todo.priority.desc(), Todo.created_at.desc()]
+        elif sort_by == "due_date":
+            # 截止日期近的排前面，无截止日期的排最后
+            if sort_order == "asc":
+                return [Todo.due_date.asc().nullslast(), Todo.created_at.desc()]
+            else:
+                return [Todo.due_date.desc().nullsfirst(), Todo.created_at.desc()]
         else:
             # 创建时间新的排前面，同时创建时间相同时优先级高的排前面
             if sort_order == "asc":
@@ -186,12 +192,13 @@ class TodoService:
             Todo.due_date == today,
         ).order_by(Todo.priority.desc(), Todo.created_at.desc()).all()
 
-    def get_high_priority(self) -> list[Todo]:
-        """获取高优先级任务"""
-        from config.constants import PRIORITY_HIGH
+    def get_high_priority(self, priorities: list[int] = None) -> list[Todo]:
+        """获取重要任务"""
+        if not priorities:
+            priorities = [3]  # 默认高优先级
         return self.session.query(Todo).filter(
             Todo.status == STATUS_TODO,
-            Todo.priority == PRIORITY_HIGH,
+            Todo.priority.in_(priorities),
         ).order_by(Todo.created_at.desc()).all()
 
     def get_overdue(self) -> list[Todo]:

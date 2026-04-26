@@ -1,9 +1,10 @@
-"""应用设置管理"""
+"""
+ * @description 应用设置管理
+ * @author 十玖八柒（Ahzoo）
+ * @date 2026/04
+"""
 import json
-import os
 from pathlib import Path
-
-from config.constants import THEME_COLORS
 
 
 class Settings:
@@ -25,6 +26,10 @@ class Settings:
         "sort_rule": "created_at",
         "done_at_bottom": True,
         "floating_top": False,
+        "important_priorities": [3],
+        "floating_pinned": False,
+        "floating_geometry": None,
+        "floating_view": "all",
     }
 
     def __init__(self):
@@ -174,6 +179,42 @@ class Settings:
     @floating_top.setter
     def floating_top(self, value: bool):
         self._data["floating_top"] = value
+        self.save()
+
+    @property
+    def important_priorities(self) -> list[int]:
+        return self._data.get("important_priorities", [3])
+
+    @important_priorities.setter
+    def important_priorities(self, value: list[int]):
+        self._data["important_priorities"] = value
+        self.save()
+
+    @property
+    def floating_pinned(self) -> bool:
+        return self._data.get("floating_pinned", False)
+
+    @floating_pinned.setter
+    def floating_pinned(self, value: bool):
+        self._data["floating_pinned"] = value
+        self.save()
+
+    @property
+    def floating_geometry(self) -> dict | None:
+        return self._data.get("floating_geometry")
+
+    @floating_geometry.setter
+    def floating_geometry(self, value: dict | None):
+        self._data["floating_geometry"] = value
+        self.save()
+
+    @property
+    def floating_view(self) -> str:
+        return self._data.get("floating_view", "all")
+
+    @floating_view.setter
+    def floating_view(self, value: str):
+        self._data["floating_view"] = value
         self.save()
 
 

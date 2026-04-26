@@ -1,4 +1,10 @@
-"""Easy Todo App - 应用入口"""
+"""
+ * @author 十玖八柒（Ahzoo）
+ * @description Easy Todo - 待办事项管理工具
+ * @github https://github.com/ooahz
+ * @date 2026/04
+"""
+
 import sys
 import os
 import warnings

@@ -5,13 +5,15 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QMouseEvent, QCursor
 
-from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme
+from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit
 
 
 class FloatingWidget(QWidget):
     """浮窗布局"""
 
     todo_toggled = Signal(int)
+    quick_add = Signal(str)       # 快速新建任务
+    pin_changed = Signal(bool)    # 固定状态变更
 
     # 边缘检测区域宽度
     EDGE_SIZE = 5
@@ -22,7 +24,8 @@ class FloatingWidget(QWidget):
         super().__init__(parent)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
@@ -38,6 +41,7 @@ class FloatingWidget(QWidget):
         self._resize_start_geo = QRect()
         self._resize_start_pos = QPoint()
         self._todos: list[dict] = []
+        self._pinned = False
 
         self._setup_ui()
         self._apply_theme()
@@ -61,18 +65,37 @@ class FloatingWidget(QWidget):
         self.title_bar = QWidget()
         self.title_bar.setFixedHeight(32)
         title_layout = QHBoxLayout(self.title_bar)
-        title_layout.setContentsMargins(4, 0, 4, 0)
+        title_layout.setContentsMargins(1, 0, 1, 0)
 
         self.title_label = BodyLabel("任务列表")
         self.title_label.setStyleSheet("font-weight: bold; font-size: 13px; border: none;")
         title_layout.addWidget(self.title_label)
         title_layout.addStretch()
 
+        # 新建按钮（固定按钮左侧）
+        self.add_btn = QLabel("+")
+        self.add_btn.setFixedSize(20, 20)
+        self.add_btn.setAlignment(Qt.AlignCenter)
+        self.add_btn.setCursor(Qt.PointingHandCursor)
+        self.add_btn.setToolTip("快速新建任务")
+        self.add_btn.mousePressEvent = lambda e: self._show_quick_add()
+        title_layout.addWidget(self.add_btn)
+
+        # 固定按钮
+        self.pin_btn = QLabel("○")
+        self.pin_btn.setFixedSize(20, 20)
+        self.pin_btn.setAlignment(Qt.AlignCenter)
+        self.pin_btn.setCursor(Qt.PointingHandCursor)
+        self.pin_btn.setToolTip("固定浮窗")
+        self.pin_btn.mousePressEvent = lambda e: self._toggle_pin()
+        title_layout.addWidget(self.pin_btn)
+
         # 关闭按钮
         self.close_btn = QLabel("X")
         self.close_btn.setFixedSize(20, 20)
         self.close_btn.setAlignment(Qt.AlignCenter)
         self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.setToolTip("关闭")
         self.close_btn.mousePressEvent = lambda e: self.hide()
         title_layout.addWidget(self.close_btn)
 
@@ -99,6 +122,39 @@ class FloatingWidget(QWidget):
         self.scroll.setWidget(self.list_widget)
         bg_layout.addWidget(self.scroll, 1)
 
+        # 遮罩层
+        self.mask_layer = QLabel(self.bg_frame)
+        self.mask_layer.setVisible(False)
+
+        # 弹窗
+        self.quick_overlay = QFrame(self.bg_frame)
+        self.quick_overlay.setObjectName("quickOverlay")
+        self.quick_overlay.setVisible(False)
+        overlay_layout = QVBoxLayout(self.quick_overlay)
+        overlay_layout.setContentsMargins(12, 10, 12, 10)
+        overlay_layout.setSpacing(8)
+        overlay_title = BodyLabel("快速添加")
+        overlay_title.setStyleSheet("font-weight: bold; font-size: 13px; border: none;")
+        overlay_layout.addWidget(overlay_title)
+        self.quick_input = LineEdit()
+        self.quick_input.setPlaceholderText("输入任务标题...")
+        self.quick_input.setClearButtonEnabled(True)
+        self.quick_input.returnPressed.connect(self._on_quick_add)
+        overlay_layout.addWidget(self.quick_input)
+        # 按钮
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.setSpacing(12)
+        self.quick_cancel = QLabel("取消")
+        self.quick_cancel.setCursor(Qt.PointingHandCursor)
+        self.quick_cancel.mousePressEvent = lambda e: self._hide_quick_add()
+        btn_row.addWidget(self.quick_cancel)
+        self.quick_confirm = QLabel("确认")
+        self.quick_confirm.setCursor(Qt.PointingHandCursor)
+        self.quick_confirm.mousePressEvent = lambda e: self._on_quick_add()
+        btn_row.addWidget(self.quick_confirm)
+        overlay_layout.addLayout(btn_row)
+
         self.main_layout.addWidget(self.bg_frame)
         self._apply_theme()
 
@@ -106,7 +162,7 @@ class FloatingWidget(QWidget):
         pass
 
     def _update_bg_opacity(self):
-        """根据透明度更新背景色"""
+        """更新背景色"""
         c = self._theme_colors()
         if isDarkTheme():
             r, g, b = 45, 45, 45
@@ -139,19 +195,49 @@ class FloatingWidget(QWidget):
         self.title_label.setStyleSheet(
             f"font-weight: bold; font-size: 13px; {title_color} border: none;"
         )
-        self.close_btn.setStyleSheet(f"""
-            QLabel {{
-                color: {c['close']};
-                font-size: 12px;
-                border-radius: 10px;
-                border: none;
+        # 操作按钮样式
+        for btn in (self.add_btn, self.pin_btn, self.close_btn):
+            btn.setStyleSheet(f"""
+                QLabel {{
+                    color: {c['close']};
+                    font-size: 12px;
+                    border-radius: 10px;
+                    border: none;
+                }}
+                QLabel:hover {{
+                    color: {c['close_hover']};
+                    background-color: {c['close_hover_bg']};
+                }}
+            """)
+        self.sep.setStyleSheet(f"background-color: {c['sep']}; border: none;")
+        # 快速新建弹窗样式
+        if isDarkTheme():
+            overlay_bg = "rgba(43, 43, 43, 240)"
+            input_bg = "rgb(59, 59, 59)"
+            input_border = "rgb(80, 80, 80)"
+            input_color = "#EEE"
+            btn_color = "#0078D4"
+        else:
+            overlay_bg = "rgba(255, 255, 255, 245)"
+            input_bg = "#FFF"
+            input_border = "rgb(200, 200, 200)"
+            input_color = "#333"
+            btn_color = "#0078D4"
+        self.quick_overlay.setStyleSheet(f"""
+            #quickOverlay {{
+                background-color: {overlay_bg};
+                border: 1px solid {c['border']};
+                border-radius: 8px;
             }}
-            QLabel:hover {{
-                color: {c['close_hover']};
-                background-color: {c['close_hover_bg']};
+            LineEdit {{
+                background-color: {input_bg};
+                color: {input_color};
+                border: 1px solid {input_border};
+                border-radius: 6px;
             }}
         """)
-        self.sep.setStyleSheet(f"background-color: {c['sep']}; border: none;")
+        self.quick_cancel.setStyleSheet(f"color: #888; font-size: 13px; border: none;")
+        self.quick_confirm.setStyleSheet(f"color: {btn_color}; font-size: 13px; font-weight: bold; border: none;")
 
     @staticmethod
     def _theme_colors():
@@ -199,6 +285,51 @@ class FloatingWidget(QWidget):
         self.setMouseTracking(True)
         if was_visible:
             self.show()
+
+    def set_pinned(self, pinned: bool):
+        """设置固定状态"""
+        self._pinned = pinned
+        self.pin_btn.setText("◉" if pinned else "○")
+        self.pin_btn.setToolTip("取消固定" if pinned else "固定浮窗")
+
+    def _toggle_pin(self):
+        """切换固定状态"""
+        self._pinned = not self._pinned
+        self.set_pinned(self._pinned)
+        self.pin_changed.emit(self._pinned)
+
+    def _show_quick_add(self):
+        """显示快速新建弹窗"""
+        # 显示遮罩层
+        self.mask_layer.setGeometry(self.bg_frame.rect())
+        self.mask_layer.setStyleSheet("background-color: rgba(0, 0, 0, 0.3);")
+        self.mask_layer.raise_()
+        self.mask_layer.setVisible(True)
+        # 居中显示弹窗
+        overlay_w = min(self.bg_frame.width() - 24, 240)
+        overlay_h = 110
+        x = (self.bg_frame.width() - overlay_w) // 2
+        y = (self.bg_frame.height() - overlay_h) // 2
+        self.quick_overlay.setFixedSize(overlay_w, overlay_h)
+        self.quick_overlay.move(x, y)
+        self.quick_overlay.raise_()
+        self.quick_overlay.setVisible(True)
+        self.quick_input.setFocus()
+
+    def _hide_quick_add(self):
+        """隐藏快速新建弹窗"""
+        self.mask_layer.setVisible(False)
+        self.quick_overlay.setVisible(False)
+        self.quick_input.clear()
+
+    def _on_quick_add(self):
+        """快速新建任务"""
+        text = self.quick_input.text().strip()
+        if text:
+            self.quick_input.clear()
+            self.mask_layer.setVisible(False)
+            self.quick_overlay.setVisible(False)
+            self.quick_add.emit(text)
 
     def set_todos(self, todos: list[dict]):
         self._todos = todos
@@ -312,13 +443,13 @@ class FloatingWidget(QWidget):
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             edge = self._detect_edge(event.pos())
-            if edge:
+            if edge and not self._pinned:
                 self._resizing = True
                 self._resize_edge = edge
                 self._resize_start_geo = self.geometry()
                 self._resize_start_pos = event.globalPosition().toPoint()
                 return
-            if self.title_bar.underMouse():
+            if self.title_bar.underMouse() and not self._pinned:
                 self._dragging = True
                 self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
                 return
@@ -364,13 +495,16 @@ class FloatingWidget(QWidget):
 
         # 非拖动时更新光标
         if not self._dragging and not self._resizing:
-            edge = self._detect_edge(event.pos())
-            if edge:
-                self.setCursor(self._edge_cursor(edge))
-            elif self.title_bar.underMouse():
-                self.setCursor(Qt.CursorShape.SizeAllCursor)
-            else:
+            if self._pinned:
                 self.unsetCursor()
+            else:
+                edge = self._detect_edge(event.pos())
+                if edge:
+                    self.setCursor(self._edge_cursor(edge))
+                elif self.title_bar.underMouse() and not self._pinned:
+                    self.setCursor(Qt.CursorShape.SizeAllCursor)
+                else:
+                    self.unsetCursor()
 
         super().mouseMoveEvent(event)
 
