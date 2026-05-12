@@ -12,6 +12,7 @@ from qfluentwidgets import (
 )
 
 from config.constants import PRIORITY_MAP
+from services.file_service import FileService
 
 
 def _tc():
@@ -49,8 +50,13 @@ class TodoCard(CardWidget):
         self.todo_id = todo_data["id"]
         self._is_done = todo_data["status"] == 1
         self._is_selected = False
+        self._file_service = FileService()
 
-        self.setFixedHeight(72)
+        # 动态计算高度
+        self._base_height = 72
+        self._has_files = self._file_service.get_file_count(self.todo_id) > 0
+
+        self.setFixedHeight(self._base_height + (20 if self._has_files else 0))
         self.setCursor(Qt.PointingHandCursor)
 
         self._setup_ui()
@@ -113,6 +119,12 @@ class TodoCard(CardWidget):
         priority = self.todo_data.get("priority", 0)
         if priority in PRIORITY_MAP and priority > 0:
             info_parts.append(PRIORITY_MAP[priority])
+
+        # 分类名称
+        category = self.todo_data.get("category")
+        if category:
+            info_parts.append(category.get("name", ""))
+
         if due:
             due_date = date.fromisoformat(due)
             today = date.today()
@@ -122,6 +134,11 @@ class TodoCard(CardWidget):
                 info_parts.append("今天")
             else:
                 info_parts.append(f"{due}")
+
+        # 文件数量
+        file_count = self._file_service.get_file_count(self.todo_id)
+        if file_count > 0:
+            info_parts.append(f"📎 {file_count}")
 
         if info_parts:
             self.info_label = CaptionLabel("  |  ".join(info_parts))

@@ -42,7 +42,30 @@ class Database:
 
     def create_tables(self):
         """创建所有数据表"""
+        # 导入所有模型以确保表被创建
+        from models.todo import Todo  # noqa: F401
+        from models.category import Category  # noqa: F401
+
         Base.metadata.create_all(self.engine)
+        self._migrate_add_category_id()
+        self._init_default_categories()
+
+    def _migrate_add_category_id(self):
+        """迁移：为 todos 表添加 category_id 列"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        if "category_id" not in columns:
+            with self.engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE todos ADD COLUMN category_id INTEGER REFERENCES categories(id)"
+                ))
+                conn.commit()
+
+    def _init_default_categories(self):
+        """初始化默认分类"""
+        pass
 
     def get_session(self):
         """获取数据库会话"""

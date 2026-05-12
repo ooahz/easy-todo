@@ -34,9 +34,10 @@ def main():
 
     # 单实例检测
     _shared_memory = QSharedMemory(f"EasyTodo_SingleInstance")
+    if _shared_memory.attach():
+        _shared_memory.detach()
     if not _shared_memory.create(1):
         # 已有实例运行，退出
-        _shared_memory.detach()
         sys.exit(0)
 
     app = QApplication(sys.argv)

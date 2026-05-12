@@ -1,7 +1,8 @@
 """Todo 数据模型"""
 from datetime import datetime, date
 
-from sqlalchemy import Column, Integer, String, Text, Date, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Text, Date, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
 
 from models.database import Base
 
@@ -20,6 +21,10 @@ class Todo(Base):
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     sort_order = Column(Integer, default=0)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+
+    # 关联关系
+    category = relationship("Category", back_populates="todos")
 
     def to_dict(self):
         return {
@@ -34,4 +39,6 @@ class Todo(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "sort_order": self.sort_order,
+            "category_id": self.category_id,
+            "category": self.category.to_dict() if self.category else None,
         }

@@ -19,6 +19,8 @@ from views.todo_dialog import TodoDialog
 from views.settings_dialog import SettingsPage
 from views.floating_widget import FloatingWidget
 from services.todo_service import TodoService
+from services.category_service import CategoryService
+from services.file_service import FileService
 from config.constants import STATUS_TODO, STATUS_DONE, APP_NAME
 from config.settings import settings
 
@@ -29,13 +31,19 @@ class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
         self.todo_service = TodoService()
+        self.category_service = CategoryService()
+        self.file_service = FileService()
 
         # 当前视图标识
         self._current_view_key = "all"
         self._tray_tip_shown = False
 
+        # 分类导航项缓存 {category_id: (interface, navigation_widget)}
+        self._category_nav_items: dict[int, tuple] = {}
+
         self._setup_ui()
         self._setup_navigation()
+        self._setup_category_navigation()
         self._setup_floating()
         self._setup_tray()
         self._connect_signals()
@@ -114,7 +122,7 @@ class MainWindow(FluentWindow):
         else:
             self._position_floating()
 
-        # 固定状态下自动显示浮窗
+        # 固定状态下自动显示浮窗（延迟到主题应用后）
         self._restore_floating_pending = settings.floating_pinned
 
     def _position_floating(self):
@@ -224,9 +232,9 @@ class MainWindow(FluentWindow):
         self.settings_page.sort_rule_changed.connect(self._on_sort_rule_changed)
         self.settings_page.done_at_bottom_changed.connect(self._on_done_at_bottom_changed)
         self.settings_page.floating_top_changed.connect(self._on_floating_top_changed)
-        self.settings_page.important_priorities_changed.connect(self._on_important_priorities_changed)
         self.settings_page.export_btn.clicked.connect(self._export_data)
         self.settings_page.import_btn.clicked.connect(self._import_data)
+        self.settings_page.categories_changed.connect(self._on_categories_changed)
 
         # 导航切换时记录当前视图
         self.stackedWidget.currentChanged.connect(self._on_view_changed)
@@ -245,6 +253,12 @@ class MainWindow(FluentWindow):
             self._current_view_key = "important"
         elif widget == self.done_view:
             self._current_view_key = "done"
+        else:
+            # 检查是否是分类视图
+            for cat_id, (view, name) in self._category_nav_items.items():
+                if widget == view:
+                    self._current_view_key = f"cat_{cat_id}"
+                    break
 
     def _toggle_floating(self, view_key: str = None):
         """切换浮窗显示/隐藏"""
@@ -257,6 +271,15 @@ class MainWindow(FluentWindow):
 
     def _update_floating_data(self, view_key: str):
         """根据视图标识更新浮窗数据"""
+        # 处理分类视图
+        if view_key.startswith("cat_"):
+            cat_id = int(view_key.split("_")[1])
+            cat_name = self._category_nav_items.get(cat_id, (None, "任务列表"))[1]
+            self.floating.title_label.setText(cat_name)
+            todos = self.todo_service.get_by_category(cat_id)
+            self.floating.set_todos([t.to_dict() for t in todos])
+            return
+
         title_map = {"all": "全部任务", "today": "今日任务", "important": "重要任务", "done": "已完成"}
         self.floating.title_label.setText(title_map.get(view_key, "任务列表"))
 
@@ -269,13 +292,12 @@ class MainWindow(FluentWindow):
         else:
             if settings.show_done_tasks:
                 todos = self.todo_service.get_all_including_done(
-                    sort_by=settings.sort_rule, sort_order="desc",
+                    sort_rules=settings.sort_rules,
                     done_at_bottom=settings.done_at_bottom
                 )
             else:
                 todos = self.todo_service.get_all(
-                    status=STATUS_TODO,
-                    sort_by=settings.sort_rule, sort_order="desc"
+                    status=STATUS_TODO, sort_rules=settings.sort_rules
                 )
 
         self.floating.set_todos([t.to_dict() for t in todos])
@@ -339,31 +361,33 @@ class MainWindow(FluentWindow):
 
     def _load_todos(self):
         """加载待办数据"""
-        sort_by = settings.sort_rule
-        sort_order = "desc"
+        sort_rules = settings.sort_rules
         done_at_bottom = settings.done_at_bottom
 
         if settings.show_done_tasks:
             todos = self.todo_service.get_all_including_done(
-                sort_by=sort_by, sort_order=sort_order,
+                sort_rules=sort_rules,
                 done_at_bottom=done_at_bottom
             )
         else:
             todos = self.todo_service.get_all(
-                status=STATUS_TODO, sort_by=sort_by, sort_order=sort_order
+                status=STATUS_TODO, sort_rules=sort_rules
             )
         self.todo_list_view.set_todos([t.to_dict() for t in todos])
 
         today_todos = self.todo_service.get_today()
         self.today_view.set_todos([t.to_dict() for t in today_todos])
 
-        important_todos = self.todo_service.get_high_priority(
-            priorities=settings.important_priorities
-        )
+        important_todos = self.todo_service.get_high_priority()
         self.important_view.set_todos([t.to_dict() for t in important_todos])
 
         done_todos = self.todo_service.get_all(status=STATUS_DONE)
         self.done_view.set_todos([t.to_dict() for t in done_todos])
+
+        # 加载分类视图数据
+        for cat_id, (view, _) in self._category_nav_items.items():
+            cat_todos = self.todo_service.get_by_category(cat_id)
+            view.set_todos([t.to_dict() for t in cat_todos])
 
         if self.floating.isVisible():
             self._update_floating_data(self._current_view_key)
@@ -383,10 +407,23 @@ class MainWindow(FluentWindow):
         dialog.exec()
 
     def _on_todo_saved(self, data: dict):
+        # 提取临时文件列表
+        temp_files = data.pop("temp_files", [])
+
         if "id" in data:
             todo = self.todo_service.update(data["id"], **data)
+            todo_id = data["id"]
         else:
             todo = self.todo_service.create(**data)
+            todo_id = todo.id if todo else None
+
+        # 保存关联文件
+        if todo_id and temp_files:
+            for file_path in temp_files:
+                try:
+                    self.file_service.save_file(todo_id, file_path)
+                except Exception as e:
+                    print(f"保存文件失败: {e}")
 
         if todo:
             self._refresh_all_views()
@@ -510,6 +547,41 @@ class MainWindow(FluentWindow):
     def _on_floating_top_changed(self, enabled: bool):
         self.floating.set_always_on_top(enabled)
 
+    def _setup_category_navigation(self):
+        """设置分类导航"""
+        categories = self.category_service.get_all()
+        for cat in categories:
+            self._add_category_nav_item(cat)
+
+    def _add_category_nav_item(self, cat):
+        """添加单个分类导航项"""
+        view = TodoListView()
+        view.setObjectName(f"categoryView_{cat.id}")
+
+        self.addSubInterface(view, FluentIcon.BOOK_SHELF, cat.name)
+
+        # 连接信号
+        view.add_clicked.connect(lambda: self._open_todo_dialog())
+        view.edit_clicked.connect(self._open_todo_dialog)
+        view.delete_clicked.connect(self._delete_todo)
+        view.toggle_done.connect(self._toggle_todo_done)
+        view.float_clicked.connect(lambda k=f"cat_{cat.id}": self._toggle_floating(k))
+
+        # 缓存
+        self._category_nav_items[cat.id] = (view, cat.name)
+
+    def _on_categories_changed(self):
+        """分类变更时刷新导航"""
+        # 移除旧的分类导航
+        for cat_id, (view, _) in list(self._category_nav_items.items()):
+            self.removeInterface(view)
+            view.deleteLater()
+        self._category_nav_items.clear()
+
+        # 重新加载
+        self._setup_category_navigation()
+        self._refresh_all_views()
+
     def _on_floating_pin_changed(self, pinned: bool):
         """浮窗固定状态变更"""
         settings.floating_pinned = pinned
@@ -528,9 +600,6 @@ class MainWindow(FluentWindow):
     def _on_floating_quick_add(self, title: str):
         """浮窗快速新建任务"""
         self.todo_service.create(title=title)
-        self._refresh_all_views()
-
-    def _on_important_priorities_changed(self, priorities: list):
         self._refresh_all_views()
 
     def _on_auto_start_changed(self, enabled: bool):

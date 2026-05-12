@@ -24,12 +24,13 @@ class Settings:
         "auto_start": False,
         "home_page": "all",
         "sort_rule": "created_at",
+        "sort_rules": ["priority", "created_at"],
         "done_at_bottom": True,
         "floating_top": False,
-        "important_priorities": [3],
         "floating_pinned": False,
         "floating_geometry": None,
         "floating_view": "all",
+        "data_path": "",  # 数据保存路径，空则使用默认路径
     }
 
     def __init__(self):
@@ -164,6 +165,15 @@ class Settings:
         self.save()
 
     @property
+    def sort_rules(self) -> list[str]:
+        return self._data.get("sort_rules", ["priority", "created_at"])
+
+    @sort_rules.setter
+    def sort_rules(self, value: list[str]):
+        self._data["sort_rules"] = value
+        self.save()
+
+    @property
     def done_at_bottom(self) -> bool:
         return self._data.get("done_at_bottom", True)
 
@@ -179,15 +189,6 @@ class Settings:
     @floating_top.setter
     def floating_top(self, value: bool):
         self._data["floating_top"] = value
-        self.save()
-
-    @property
-    def important_priorities(self) -> list[int]:
-        return self._data.get("important_priorities", [3])
-
-    @important_priorities.setter
-    def important_priorities(self, value: list[int]):
-        self._data["important_priorities"] = value
         self.save()
 
     @property
@@ -215,6 +216,16 @@ class Settings:
     @floating_view.setter
     def floating_view(self, value: str):
         self._data["floating_view"] = value
+        self.save()
+
+    @property
+    def data_path(self) -> str:
+        """数据保存路径"""
+        return self._data.get("data_path", "")
+
+    @data_path.setter
+    def data_path(self, value: str):
+        self._data["data_path"] = value
         self.save()
 
 

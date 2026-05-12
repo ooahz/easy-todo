@@ -1,16 +1,20 @@
 """设置页面 - 内嵌导航子页面"""
+import os
+import sys
+from pathlib import Path
 
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PySide6.QtGui import QFont
+
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, Slider, ComboBox, CheckBox,
-    PushButton, FluentIcon, SmoothScrollArea,
-    setCustomStyleSheet
+    PrimaryPushButton, PushButton, FluentIcon, SmoothScrollArea,
+    setTheme, Theme, isDarkTheme, setCustomStyleSheet, IconWidget
 )
 
-from config.constants import APP_NAME, APP_VERSION
 from config.settings import settings
+from config.constants import APP_NAME, APP_VERSION
 from views.style_sheet import StyleSheet
 
 
@@ -23,9 +27,10 @@ class SettingsPage(QWidget):
     auto_start_changed = Signal(bool)
     home_page_changed = Signal(str)
     sort_rule_changed = Signal(str)
+    sort_rules_changed = Signal(list)
     done_at_bottom_changed = Signal(bool)
     floating_top_changed = Signal(bool)
-    important_priorities_changed = Signal(list)
+    categories_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -71,11 +76,15 @@ class SettingsPage(QWidget):
         self.list_layout.addWidget(self._make_card("任务列表", [
             self._create_show_done_cb(),
             self._create_done_at_bottom_cb(),
-            self._create_important_priorities_row(),
         ]))
 
         self.list_layout.addWidget(self._make_card("排序规则", [
-            self._make_combo_row("排序", self._create_sort_rule_combo()),
+            self._make_combo_row("一级排序", self._create_sort_primary_combo()),
+            self._make_combo_row("二级排序", self._create_sort_secondary_combo()),
+        ]))
+
+        self.list_layout.addWidget(self._make_card("分类", [
+            self._make_category_manage_row(),
         ]))
 
         self.list_layout.addWidget(self._make_card("浮窗设置", [
@@ -301,36 +310,83 @@ class SettingsPage(QWidget):
         self.done_at_bottom_cb.checkStateChanged.connect(self._on_done_at_bottom_changed)
         return self.done_at_bottom_cb
 
-    def _create_important_priorities_row(self) -> QHBoxLayout:
-        """创建重要任务优先级多选行"""
+    def _make_category_manage_row(self) -> QHBoxLayout:
+        """创建分类管理行"""
+        from services.category_service import CategoryService
+
         row = QHBoxLayout()
-        row.setSpacing(8)
+        row.setSpacing(12)
 
-        label = BodyLabel("重要任务")
-        label.setFixedWidth(60)
-        row.addWidget(label)
-
-        from config.constants import PRIORITY_MAP
-        self._priority_cbs: list[CheckBox] = []
-        for val in sorted(PRIORITY_MAP.keys()):
-            if val == 0:
-                continue
-            cb = CheckBox(PRIORITY_MAP[val])
-            cb.setChecked(val in settings.important_priorities)
-            cb.checkStateChanged.connect(self._on_important_priorities_changed)
-            row.addWidget(cb)
-            self._priority_cbs.append((val, cb))
-
+        self.category_count_label = BodyLabel("加载中...")
+        row.addWidget(self.category_count_label)
         row.addStretch()
+
+        manage_btn = PushButton("管理分类")
+        manage_btn.clicked.connect(self._on_manage_categories)
+        row.addWidget(manage_btn)
+
+        self._update_category_count()
         return row
 
-    def _create_sort_rule_combo(self) -> ComboBox:
-        self.sort_rule_combo = ComboBox()
-        self.sort_rule_combo.addItems(["创建时间", "优先级", "截止时间"])
-        idx = {"created_at": 0, "priority": 1, "due_date": 2}.get(settings.sort_rule, 0)
-        self.sort_rule_combo.setCurrentIndex(idx)
-        self.sort_rule_combo.currentIndexChanged.connect(self._on_sort_rule_changed)
-        return self.sort_rule_combo
+    def _update_category_count(self):
+        """更新分类数量显示"""
+        from services.category_service import CategoryService
+        count = CategoryService().get_count()
+        self.category_count_label.setText(f"当前有 {count} 个分类")
+
+    def _on_manage_categories(self):
+        """打开分类管理对话框"""
+        from views.category_dialog import CategoryDialog
+        dialog = CategoryDialog(self)
+        dialog.categories_changed.connect(self._update_category_count)
+        dialog.categories_changed.connect(self.categories_changed.emit)
+        dialog.exec()
+
+    SORT_OPTIONS = [
+        ("优先级", "priority"),
+        ("创建时间", "created_at"),
+        ("截止时间", "due_date"),
+    ]
+
+    def _create_sort_primary_combo(self) -> ComboBox:
+        self.sort_primary_combo = ComboBox()
+        self.sort_primary_combo.addItems([label for label, _ in self.SORT_OPTIONS])
+        rules = settings.sort_rules
+        primary = rules[0] if rules else "priority"
+        for i, (_, val) in enumerate(self.SORT_OPTIONS):
+            if val == primary:
+                self.sort_primary_combo.setCurrentIndex(i)
+                break
+        self.sort_primary_combo.currentIndexChanged.connect(self._on_sort_rules_changed)
+        return self.sort_primary_combo
+
+    def _create_sort_secondary_combo(self) -> ComboBox:
+        self.sort_secondary_combo = ComboBox()
+        self.sort_secondary_combo.addItems(["无"] + [label for label, _ in self.SORT_OPTIONS])
+        rules = settings.sort_rules
+        secondary = rules[1] if len(rules) > 1 else ""
+        if secondary:
+            for i, (_, val) in enumerate(self.SORT_OPTIONS):
+                if val == secondary:
+                    self.sort_secondary_combo.setCurrentIndex(i + 1)
+                    break
+        else:
+            self.sort_secondary_combo.setCurrentIndex(0)
+        self.sort_secondary_combo.currentIndexChanged.connect(self._on_sort_rules_changed)
+        return self.sort_secondary_combo
+
+    def _on_sort_rules_changed(self):
+        primary_idx = self.sort_primary_combo.currentIndex()
+        secondary_idx = self.sort_secondary_combo.currentIndex()
+        rules = [self.SORT_OPTIONS[primary_idx][1]]
+        if secondary_idx > 0:
+            secondary_val = self.SORT_OPTIONS[secondary_idx - 1][1]
+            if secondary_val != rules[0]:
+                rules.append(secondary_val)
+        settings.sort_rules = rules
+        settings.sort_rule = rules[0]
+        self.sort_rules_changed.emit(rules)
+        self.sort_rule_changed.emit(rules[0])
 
     def _create_home_page_combo(self) -> ComboBox:
         self.home_page_combo = ComboBox()
@@ -372,18 +428,62 @@ class SettingsPage(QWidget):
 
         return row
 
-    def _make_data_btns(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(10)
+    def _make_data_btns(self) -> QVBoxLayout:
+        layout = QVBoxLayout()
+        layout.setSpacing(12)
+
+        # 数据保存路径
+        path_row = QHBoxLayout()
+        path_row.setSpacing(10)
+
+        path_label = BodyLabel("保存路径")
+        path_label.setFixedWidth(60)
+        path_row.addWidget(path_label)
+
+        self.data_path_label = BodyLabel(settings.data_path or "默认路径")
+        self.data_path_label.setWordWrap(True)
+        path_row.addWidget(self.data_path_label, 1)
+
+        self.browse_path_btn = PushButton(FluentIcon.FOLDER, "浏览")
+        self.browse_path_btn.clicked.connect(self._on_browse_data_path)
+        path_row.addWidget(self.browse_path_btn)
+
+        self.reset_path_btn = PushButton("重置")
+        self.reset_path_btn.clicked.connect(self._on_reset_data_path)
+        path_row.addWidget(self.reset_path_btn)
+
+        layout.addLayout(path_row)
+
+        # 导入导出按钮
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
 
         self.export_btn = PushButton(FluentIcon.SAVE, "导出数据")
-        row.addWidget(self.export_btn)
+        btn_row.addWidget(self.export_btn)
 
         self.import_btn = PushButton(FluentIcon.FOLDER, "导入数据")
-        row.addWidget(self.import_btn)
+        btn_row.addWidget(self.import_btn)
 
-        row.addStretch()
-        return row
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        return layout
+
+    def _on_browse_data_path(self):
+        """浏览选择数据保存路径"""
+        from PySide6.QtWidgets import QFileDialog
+
+        path = QFileDialog.getExistingDirectory(
+            self, "选择数据保存路径", settings.data_path or str(Path.home())
+        )
+        if path:
+            settings.data_path = path
+            self.data_path_label.setText(path)
+
+    def _on_reset_data_path(self):
+        """重置为默认路径"""
+        settings.data_path = ""
+        self.data_path_label.setText("默认路径")
 
     def _on_opacity_changed(self, value: int):
         percent = value / 100.0
@@ -413,12 +513,6 @@ class SettingsPage(QWidget):
         settings.home_page = page
         self.home_page_changed.emit(page)
 
-    def _on_sort_rule_changed(self, index: int):
-        rules = ["created_at", "priority", "due_date"]
-        rule = rules[index] if index < len(rules) else "created_at"
-        settings.sort_rule = rule
-        self.sort_rule_changed.emit(rule)
-
     def _on_done_at_bottom_changed(self, state):
         checked = (state == Qt.CheckState.Checked)
         settings.done_at_bottom = checked
@@ -428,9 +522,3 @@ class SettingsPage(QWidget):
         checked = (state == Qt.CheckState.Checked)
         settings.floating_top = checked
         self.floating_top_changed.emit(checked)
-
-    def _on_important_priorities_changed(self):
-        priorities = [val for val, cb in self._priority_cbs
-                      if cb.checkState() == Qt.CheckState.Checked]
-        settings.important_priorities = priorities
-        self.important_priorities_changed.emit(priorities)

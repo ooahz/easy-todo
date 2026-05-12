@@ -1,7 +1,7 @@
 """浮窗组件 - 显示当前页面任务列表"""
-from PySide6.QtCore import Qt, Signal, QPoint, QRect
+from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGraphicsOpacityEffect,
 )
 from PySide6.QtGui import QMouseEvent, QCursor
 
@@ -72,27 +72,27 @@ class FloatingWidget(QWidget):
         title_layout.addWidget(self.title_label)
         title_layout.addStretch()
 
-        # 新建按钮（固定按钮左侧）
-        self.add_btn = QLabel("+")
-        self.add_btn.setFixedSize(20, 20)
-        self.add_btn.setAlignment(Qt.AlignCenter)
-        self.add_btn.setCursor(Qt.PointingHandCursor)
-        self.add_btn.setToolTip("快速新建任务")
-        self.add_btn.mousePressEvent = lambda e: self._show_quick_add()
-        title_layout.addWidget(self.add_btn)
-
         # 固定按钮
         self.pin_btn = QLabel("○")
-        self.pin_btn.setFixedSize(20, 20)
+        self.pin_btn.setFixedSize(24, 24)
         self.pin_btn.setAlignment(Qt.AlignCenter)
         self.pin_btn.setCursor(Qt.PointingHandCursor)
         self.pin_btn.setToolTip("固定浮窗")
         self.pin_btn.mousePressEvent = lambda e: self._toggle_pin()
         title_layout.addWidget(self.pin_btn)
 
+        # 新建按钮
+        self.add_btn = QLabel("+")
+        self.add_btn.setFixedSize(24, 24)
+        self.add_btn.setAlignment(Qt.AlignCenter)
+        self.add_btn.setCursor(Qt.PointingHandCursor)
+        self.add_btn.setToolTip("快速新建任务")
+        self.add_btn.mousePressEvent = lambda e: self._show_quick_add()
+        title_layout.addWidget(self.add_btn)
+
         # 关闭按钮
         self.close_btn = QLabel("X")
-        self.close_btn.setFixedSize(20, 20)
+        self.close_btn.setFixedSize(24, 24)
         self.close_btn.setAlignment(Qt.AlignCenter)
         self.close_btn.setCursor(Qt.PointingHandCursor)
         self.close_btn.setToolTip("关闭")
@@ -122,18 +122,24 @@ class FloatingWidget(QWidget):
         self.scroll.setWidget(self.list_widget)
         bg_layout.addWidget(self.scroll, 1)
 
-        # 遮罩层
+        # 遮罩层（新建任务时阻止点击列表）
         self.mask_layer = QLabel(self.bg_frame)
         self.mask_layer.setVisible(False)
+        self.mask_opacity = QGraphicsOpacityEffect(self.mask_layer)
+        self.mask_layer.setGraphicsEffect(self.mask_opacity)
+        self.mask_opacity.setOpacity(0)
 
-        # 弹窗
+        # 快速新建弹窗（居中覆盖，模拟弹窗效果）
         self.quick_overlay = QFrame(self.bg_frame)
         self.quick_overlay.setObjectName("quickOverlay")
         self.quick_overlay.setVisible(False)
+        self.overlay_opacity = QGraphicsOpacityEffect(self.quick_overlay)
+        self.quick_overlay.setGraphicsEffect(self.overlay_opacity)
+        self.overlay_opacity.setOpacity(0)
         overlay_layout = QVBoxLayout(self.quick_overlay)
         overlay_layout.setContentsMargins(12, 10, 12, 10)
         overlay_layout.setSpacing(8)
-        overlay_title = BodyLabel("快速添加")
+        overlay_title = BodyLabel("添加")
         overlay_title.setStyleSheet("font-weight: bold; font-size: 13px; border: none;")
         overlay_layout.addWidget(overlay_title)
         self.quick_input = LineEdit()
@@ -141,7 +147,7 @@ class FloatingWidget(QWidget):
         self.quick_input.setClearButtonEnabled(True)
         self.quick_input.returnPressed.connect(self._on_quick_add)
         overlay_layout.addWidget(self.quick_input)
-        # 按钮
+        # 取消 + 确认文字按钮（右对齐）
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_row.setSpacing(12)
@@ -162,7 +168,7 @@ class FloatingWidget(QWidget):
         pass
 
     def _update_bg_opacity(self):
-        """更新背景色"""
+        """根据透明度更新背景色"""
         c = self._theme_colors()
         if isDarkTheme():
             r, g, b = 45, 45, 45
@@ -299,27 +305,59 @@ class FloatingWidget(QWidget):
         self.pin_changed.emit(self._pinned)
 
     def _show_quick_add(self):
-        """显示快速新建弹窗"""
-        # 显示遮罩层
-        self.mask_layer.setGeometry(self.bg_frame.rect())
-        self.mask_layer.setStyleSheet("background-color: rgba(0, 0, 0, 0.3);")
-        self.mask_layer.raise_()
-        self.mask_layer.setVisible(True)
-        # 居中显示弹窗
+        """显示快速新建弹窗（带动画）"""
+        # 计算弹窗位置
         overlay_w = min(self.bg_frame.width() - 24, 240)
         overlay_h = 110
         x = (self.bg_frame.width() - overlay_w) // 2
         y = (self.bg_frame.height() - overlay_h) // 2
         self.quick_overlay.setFixedSize(overlay_w, overlay_h)
         self.quick_overlay.move(x, y)
+
+        # 遮罩淡入
+        self.mask_layer.setGeometry(self.bg_frame.rect())
+        self.mask_layer.setStyleSheet("background-color: rgba(0, 0, 0, 0.3);")
+        self.mask_layer.raise_()
+        self.mask_layer.setVisible(True)
+        self.mask_opacity.setOpacity(0)
+        mask_anim = QPropertyAnimation(self.mask_opacity, b"opacity")
+        mask_anim.setDuration(150)
+        mask_anim.setStartValue(0)
+        mask_anim.setEndValue(1)
+
+        # 弹窗缩放+淡入
         self.quick_overlay.raise_()
         self.quick_overlay.setVisible(True)
+        self.overlay_opacity.setOpacity(0)
+        overlay_anim = QPropertyAnimation(self.overlay_opacity, b"opacity")
+        overlay_anim.setDuration(150)
+        overlay_anim.setStartValue(0)
+        overlay_anim.setEndValue(1)
+
+        group = QParallelAnimationGroup(self)
+        group.addAnimation(mask_anim)
+        group.addAnimation(overlay_anim)
+        group.start()
         self.quick_input.setFocus()
 
     def _hide_quick_add(self):
-        """隐藏快速新建弹窗"""
-        self.mask_layer.setVisible(False)
-        self.quick_overlay.setVisible(False)
+        """隐藏快速新建弹窗（带动画）"""
+        mask_anim = QPropertyAnimation(self.mask_opacity, b"opacity")
+        mask_anim.setDuration(120)
+        mask_anim.setStartValue(1)
+        mask_anim.setEndValue(0)
+        mask_anim.finished.connect(lambda: self.mask_layer.setVisible(False))
+
+        overlay_anim = QPropertyAnimation(self.overlay_opacity, b"opacity")
+        overlay_anim.setDuration(120)
+        overlay_anim.setStartValue(1)
+        overlay_anim.setEndValue(0)
+        overlay_anim.finished.connect(lambda: self.quick_overlay.setVisible(False))
+
+        group = QParallelAnimationGroup(self)
+        group.addAnimation(mask_anim)
+        group.addAnimation(overlay_anim)
+        group.start()
         self.quick_input.clear()
 
     def _on_quick_add(self):
@@ -327,8 +365,7 @@ class FloatingWidget(QWidget):
         text = self.quick_input.text().strip()
         if text:
             self.quick_input.clear()
-            self.mask_layer.setVisible(False)
-            self.quick_overlay.setVisible(False)
+            self._hide_quick_add()
             self.quick_add.emit(text)
 
     def set_todos(self, todos: list[dict]):

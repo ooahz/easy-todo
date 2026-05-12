@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from models.database import db
 from models.todo import Todo
-from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED
+from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED, PRIORITY_HIGH
 
 
 class TodoService:
@@ -26,7 +26,7 @@ class TodoService:
 
     def create(self, title: str, description: str = "", priority: int = 0,
                color_tag: Optional[str] = None, due_date=None,
-               auto_postpone: bool = False) -> Todo:
+               auto_postpone: bool = False, category_id: Optional[int] = None) -> Todo:
         """创建待办事项"""
         if due_date is not None and hasattr(due_date, 'year') and not isinstance(due_date, date):
             from datetime import date as pydate
@@ -45,6 +45,7 @@ class TodoService:
             due_date=due_date,
             auto_postpone=auto_postpone,
             sort_order=max_order,
+            category_id=category_id,
         )
         self.session.add(todo)
         self.session.commit()
@@ -120,7 +121,9 @@ class TodoService:
 
     def get_all(self, status: int = STATUS_TODO,
                 priority: Optional[int] = None, color_tag: Optional[str] = None,
-                sort_by: str = "created_at", sort_order: str = "desc") -> list[Todo]:
+                category_id: Optional[int] = None,
+                sort_by: str = "created_at", sort_order: str = "desc",
+                sort_rules: list[str] = None) -> list[Todo]:
         """获取待办列表"""
         query = self.session.query(Todo).filter(Todo.status == status)
 
@@ -130,13 +133,21 @@ class TodoService:
         if color_tag is not None:
             query = query.filter(Todo.color_tag == color_tag)
 
-        query = self._apply_sort(query, sort_by, sort_order)
+        if category_id is not None:
+            query = query.filter(Todo.category_id == category_id)
+
+        if sort_rules:
+            query = self._apply_multi_sort(query, sort_rules)
+        else:
+            query = self._apply_sort(query, sort_by, sort_order)
 
         return query.all()
 
     def get_all_including_done(self, sort_by: str = "created_at",
                                 sort_order: str = "desc",
                                 done_at_bottom: bool = True,
+                                sort_rules: list[str] = None,
+                                category_id: Optional[int] = None,
                                 **kwargs) -> list[Todo]:
         """获取所有任务"""
         query = self.session.query(Todo).filter(Todo.status.in_([STATUS_TODO, STATUS_DONE]))
@@ -149,12 +160,20 @@ class TodoService:
         if color_tag is not None:
             query = query.filter(Todo.color_tag == color_tag)
 
+        if category_id is not None:
+            query = query.filter(Todo.category_id == category_id)
+
         if done_at_bottom:
-            # 未完成按排序规则排前面，已完成排后面
-            sort_expr = self._build_sort_expr(sort_by, sort_order)
-            query = query.order_by(Todo.status.asc(), *sort_expr)
+            if sort_rules:
+                sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
+            else:
+                sort_exprs = self._build_sort_expr(sort_by, sort_order)
+            query = query.order_by(Todo.status.asc(), *sort_exprs)
         else:
-            query = self._apply_sort(query, sort_by, sort_order)
+            if sort_rules:
+                query = self._apply_multi_sort(query, sort_rules)
+            else:
+                query = self._apply_sort(query, sort_by, sort_order)
 
         return query.all()
 
@@ -163,26 +182,45 @@ class TodoService:
         sort_expr = self._build_sort_expr(sort_by, sort_order)
         return query.order_by(*sort_expr)
 
+    @staticmethod
+    def _sort_expr_for_field(field: str):
+        """根据字段名返回排序表达式（降序，无截止日期排最后）"""
+        if field == "priority":
+            return Todo.priority.desc()
+        elif field == "due_date":
+            return Todo.due_date.asc().nullslast()
+        else:
+            return Todo.created_at.desc()
+
     def _build_sort_expr(self, sort_by: str, sort_order: str):
         """构建排序表达式，主排序 + 副排序"""
         if sort_by == "priority":
-            # 优先级高的排前面，同优先级新创建的排前面
             if sort_order == "asc":
                 return [Todo.priority.asc(), Todo.created_at.desc()]
             else:
                 return [Todo.priority.desc(), Todo.created_at.desc()]
         elif sort_by == "due_date":
-            # 截止日期近的排前面，无截止日期的排最后
             if sort_order == "asc":
                 return [Todo.due_date.asc().nullslast(), Todo.created_at.desc()]
             else:
                 return [Todo.due_date.desc().nullsfirst(), Todo.created_at.desc()]
         else:
-            # 创建时间新的排前面，同时创建时间相同时优先级高的排前面
             if sort_order == "asc":
                 return [Todo.created_at.asc(), Todo.priority.desc()]
             else:
                 return [Todo.created_at.desc(), Todo.priority.desc()]
+
+    def _apply_multi_sort(self, query, sort_rules: list[str]):
+        """应用多级排序规则"""
+        if not sort_rules:
+            return query
+        seen = set()
+        exprs = []
+        for field in sort_rules:
+            if field not in seen:
+                seen.add(field)
+                exprs.append(self._sort_expr_for_field(field))
+        return query.order_by(*exprs)
 
     def get_today(self) -> list[Todo]:
         """获取今日到期任务"""
@@ -192,13 +230,18 @@ class TodoService:
             Todo.due_date == today,
         ).order_by(Todo.priority.desc(), Todo.created_at.desc()).all()
 
-    def get_high_priority(self, priorities: list[int] = None) -> list[Todo]:
-        """获取重要任务"""
-        if not priorities:
-            priorities = [3]  # 默认高优先级
+    def get_high_priority(self) -> list[Todo]:
+        """获取高优先级任务"""
         return self.session.query(Todo).filter(
             Todo.status == STATUS_TODO,
-            Todo.priority.in_(priorities),
+            Todo.priority == PRIORITY_HIGH,
+        ).order_by(Todo.created_at.desc()).all()
+
+    def get_by_category(self, category_id: int) -> list[Todo]:
+        """获取指定分类的任务"""
+        return self.session.query(Todo).filter(
+            Todo.status == STATUS_TODO,
+            Todo.category_id == category_id,
         ).order_by(Todo.created_at.desc()).all()
 
     def get_overdue(self) -> list[Todo]:

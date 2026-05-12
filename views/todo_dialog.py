@@ -1,18 +1,21 @@
 """新建/编辑待办对话框"""
+import os
 from datetime import date, datetime
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog
 )
 
 from qfluentwidgets import (
     LineEdit, TextEdit, ComboBox, CalendarPicker,
     PrimaryPushButton, PushButton, SubtitleLabel, CheckBox,
-    FluentIcon, isDarkTheme, setCustomStyleSheet
+    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel, CaptionLabel
 )
 
 from config.constants import PRIORITY_MAP, TODO_COLORS
+from services.category_service import CategoryService
+from services.file_service import FileService
 
 
 class TodoDialog(QDialog):
@@ -25,16 +28,23 @@ class TodoDialog(QDialog):
         self.todo_data = todo_data
         self._is_edit = todo_data is not None
         self._selected_color = None
+        self._category_service = CategoryService()
+        self._file_service = FileService()
+        self._temp_files = []  # 临时存储待上传的文件
 
         self.setWindowTitle("编辑任务" if self._is_edit else "新建任务")
-        self.setFixedSize(480, 460)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setFixedSize(480, 580)
 
         self._setup_ui()
         self._connect_signals()
+        self._load_categories()
 
         if self._is_edit:
             self._fill_data(todo_data)
+            self._load_files()
+
+        # 启用拖放
+        self.setAcceptDrops(True)
 
     def _setup_ui(self):
         """构建对话框 UI"""
@@ -94,6 +104,12 @@ class TodoDialog(QDialog):
         row1.addStretch()
         layout.addLayout(row1)
 
+        # 分类选择
+        self.category_combo = ComboBox()
+        self.category_combo.setFixedWidth(210)
+        self.category_combo.addItem("无分类", userData=None)
+        layout.addWidget(self.category_combo)
+
         # 自动延期
         self.auto_postpone_cb = CheckBox("自动延期")
         self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
@@ -133,6 +149,32 @@ class TodoDialog(QDialog):
 
         color_row.addStretch()
         layout.addLayout(color_row)
+
+        # 文件上传区域
+        self.drop_area = QLabel("📎 拖放文件到此处，或点击选择文件")
+        self.drop_area.setFixedHeight(40)
+        self.drop_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.drop_area.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #888;
+                border-radius: 6px;
+                color: #888;
+            }
+        """)
+        self.drop_area.setCursor(Qt.PointingHandCursor)
+        self.drop_area.mousePressEvent = lambda e: self._on_select_file()
+        layout.addWidget(self.drop_area)
+
+        # 文件数量
+        self.file_count_label = QLabel("")
+        self.file_count_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(self.file_count_label)
+
+        # 打开文件夹按钮（仅编辑模式）
+        if self._is_edit:
+            self.open_folder_btn = PushButton(FluentIcon.FOLDER, "打开文件夹")
+            self.open_folder_btn.clicked.connect(self._on_open_folder)
+            layout.addWidget(self.open_folder_btn)
 
         layout.addStretch()
 
@@ -177,6 +219,58 @@ class TodoDialog(QDialog):
             btn.setChecked(True)
             self._selected_color = color
 
+    def _on_select_file(self):
+        """选择文件"""
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "选择文件", "", "所有文件 (*.*)"
+        )
+        if files:
+            for f in files:
+                self._add_file(f)
+
+    def _add_file(self, file_path: str):
+        """添加文件到列表"""
+        if file_path not in self._temp_files:
+            self._temp_files.append(file_path)
+            self._update_file_list()
+
+    def _update_file_list(self):
+        """更新文件数量显示"""
+        count = len(self._temp_files)
+        if count == 0:
+            self.file_count_label.setText("")
+        else:
+            self.file_count_label.setText(f"待上传 {count} 个文件")
+
+    def _load_files(self):
+        """加载已关联的文件数量"""
+        if not self.todo_data:
+            return
+
+        todo_id = self.todo_data.get("id")
+        if not todo_id:
+            return
+
+        count = self._file_service.get_file_count(todo_id)
+        if count > 0:
+            self.file_count_label.setText(f"已关联 {count} 个文件")
+
+    def _on_open_folder(self):
+        """打开任务关联文件夹"""
+        if self.todo_data and self.todo_data.get("id"):
+            self._file_service.open_folder(self.todo_data["id"])
+
+    def _save_files(self, todo_id: int):
+        """保存临时文件到任务文件夹"""
+        saved_files = []
+        for file_path in self._temp_files:
+            try:
+                saved_name = self._file_service.save_file(todo_id, file_path)
+                saved_files.append(saved_name)
+            except Exception as e:
+                print(f"保存文件失败: {e}")
+        return saved_files
+
     def _fill_data(self, data: dict):
         self.title_edit.setText(data.get("title", ""))
         self.desc_edit.setPlainText(data.get("description", ""))
@@ -197,6 +291,13 @@ class TodoDialog(QDialog):
 
         # 自动延期
         self.auto_postpone_cb.setChecked(data.get("auto_postpone", False))
+
+        # 分类
+        category_id = data.get("category_id")
+        for i in range(self.category_combo.count()):
+            if self.category_combo.itemData(i) == category_id:
+                self.category_combo.setCurrentIndex(i)
+                break
 
         due_str = data.get("due_date")
         if due_str:
@@ -236,6 +337,8 @@ class TodoDialog(QDialog):
             "color_tag": self._selected_color,
             "due_date": due_date,
             "auto_postpone": self.auto_postpone_cb.isChecked(),
+            "category_id": self.category_combo.currentData(),
+            "temp_files": self._temp_files,  # 传递待上传的文件
         }
 
         if self._is_edit:
@@ -243,6 +346,51 @@ class TodoDialog(QDialog):
 
         self.todo_saved.emit(data)
         self.close()
+
+    def _load_categories(self):
+        """加载分类列表"""
+        self.category_combo.clear()
+        self.category_combo.addItem("无分类", userData=None)
+        categories = self._category_service.get_all()
+        for cat in categories:
+            self.category_combo.addItem(cat.name, userData=cat.id)
+
+    # ---- 拖放支持 ----
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.drop_area.setStyleSheet("""
+                QLabel {
+                    border: 2px dashed #0078D4;
+                    border-radius: 6px;
+                    color: #0078D4;
+                    background-color: rgba(0, 120, 212, 0.1);
+                }
+            """)
+
+    def dragLeaveEvent(self, event):
+        self.drop_area.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #888;
+                border-radius: 6px;
+                color: #888;
+            }
+        """)
+
+    def dropEvent(self, event):
+        self.drop_area.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #888;
+                border-radius: 6px;
+                color: #888;
+            }
+        """)
+
+        urls = event.mimeData().urls()
+        for url in urls:
+            file_path = url.toLocalFile()
+            if file_path:
+                self._add_file(file_path)
 
     def showEvent(self, event):
         super().showEvent(event)
