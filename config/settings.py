@@ -30,6 +30,7 @@ class Settings:
         "floating_pinned": False,
         "floating_geometry": None,
         "floating_view": "all",
+        "floating_show_subtasks": True,  # 浮窗是否显示子任务
         "data_path": "",  # 数据保存路径，空则使用默认路径
     }
 
@@ -216,6 +217,15 @@ class Settings:
     @floating_view.setter
     def floating_view(self, value: str):
         self._data["floating_view"] = value
+        self.save()
+
+    @property
+    def floating_show_subtasks(self) -> bool:
+        return self._data.get("floating_show_subtasks", True)
+
+    @floating_show_subtasks.setter
+    def floating_show_subtasks(self, value: bool):
+        self._data["floating_show_subtasks"] = value
         self.save()
 
     @property

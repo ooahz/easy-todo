@@ -7,6 +7,7 @@ from qfluentwidgets import (
     SmoothScrollArea,
 )
 from views.todo_card import TodoCard
+from views.subtask_card import SubtaskCard
 
 
 class TodoListView(QWidget):
@@ -17,11 +18,15 @@ class TodoListView(QWidget):
     delete_clicked = Signal(int)
     toggle_done = Signal(int)
     float_clicked = Signal()
+    reorder_requested = Signal(int, int, bool, list)  # from_id, to_id, insert_after, current_order
+    add_subtask_clicked = Signal(int)  # parent_id
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, view_name: str = "", total_count: int = 0):
         super().__init__(parent)
-        self._todos: list[dict] = []
-        self._cards: list[TodoCard] = []
+        self._todos: list[dict] = []  # 父任务列表
+        self._cards: list = []  # 所有卡片（TodoCard 或 SubtaskCard）
+        self._view_name = view_name
+        self._total_count = total_count
 
         self._setup_ui()
 
@@ -100,12 +105,12 @@ class TodoListView(QWidget):
         self.main_layout.addWidget(self.empty_widget)
 
     def set_todos(self, todos: list[dict]):
-        """设置待办列表数据"""
+        """设置待办列表数据（父任务列表，已包含 children）"""
         self._todos = todos
         self._refresh_list()
 
     def _refresh_list(self):
-        """刷新列表显示"""
+        """刷新列表显示 - 树形渲染：父任务 + 缩进子任务"""
         for card in self._cards:
             card.deleteLater()
         self._cards.clear()
@@ -119,21 +124,56 @@ class TodoListView(QWidget):
         self.scroll_area.setVisible(has_todos)
         self.empty_widget.setVisible(not has_todos)
 
+        # 构建父任务 ID 列表（用于拖拽排序）
+        parent_ids = [t["id"] for t in self._todos]
+
         for todo_data in self._todos:
+            # 父任务卡片
             card = TodoCard(todo_data)
             card.edit_clicked.connect(self.edit_clicked.emit)
             card.delete_clicked.connect(self.delete_clicked.emit)
             card.toggle_done.connect(self.toggle_done.emit)
+            card.add_subtask_clicked.connect(self.add_subtask_clicked.emit)
+            card.reorder_requested.connect(
+                lambda from_id, to_id, after, order=parent_ids: self.reorder_requested.emit(from_id, to_id, after, order)
+            )
             self.list_layout.addWidget(card)
             self._cards.append(card)
 
+            # 子任务卡片（整体缩进）
+            children = todo_data.get("children", [])
+            for child_data in children:
+                # 创建容器实现整体缩进
+                container = QWidget()
+                container_layout = QHBoxLayout(container)
+                container_layout.setContentsMargins(24, 0, 0, 0)  # 左侧缩进 24px
+                container_layout.setSpacing(0)
+                
+                child_card = SubtaskCard(child_data)
+                child_card.edit_clicked.connect(self.edit_clicked.emit)
+                child_card.delete_clicked.connect(self.delete_clicked.emit)
+                child_card.toggle_done.connect(self.toggle_done.emit)
+                container_layout.addWidget(child_card)
+                
+                self.list_layout.addWidget(container)
+                self._cards.append(child_card)  # 仍然记录卡片用于更新
+
         self.list_layout.addStretch()
 
-        total = len(self._todos)
-        self.stats_label.setText(f"共 {total} 个任务")
+        parent_count = len(self._todos)
+        # 统计当前页面所有任务（父任务+子任务）
+        child_count = sum(len(t.get("children", [])) for t in self._todos)
+        total_count = parent_count + child_count
+        # 统计已完成数量（父任务+子任务）
+        done_parent = sum(1 for t in self._todos if t.get("status") == 1)
+        done_child = sum(
+            1 for t in self._todos for c in t.get("children", []) if c.get("status") == 1
+        )
+        done_count = done_parent + done_child
+        self.stats_label.setText(f"已完成{done_count}个任务，共{total_count}个任务")
 
     def update_single_todo(self, todo_data: dict):
-        """更新单个卡片"""
+        """更新单个卡片（父任务或子任务）"""
         for card in self._cards:
             if card.todo_id == todo_data["id"]:
                 card.update_data(todo_data)
@@ -148,9 +188,12 @@ class TodoListView(QWidget):
                 self.list_layout.removeWidget(card)
                 break
 
-        total = len(self._cards)
-        self.stats_label.setText(f"共 {total} 个任务")
+        parent_cards = [c for c in self._cards if not isinstance(c, SubtaskCard)]
+        child_cards = [c for c in self._cards if isinstance(c, SubtaskCard)]
+        total_count = len(parent_cards) + len(child_cards)
+        done_count = sum(1 for c in self._cards if c.todo_data.get("status") == 1)
+        self.stats_label.setText(f"已完成{done_count}个任务，共{total_count}个任务")
 
-        if total == 0:
+        if len(self._cards) == 0:
             self.scroll_area.setVisible(False)
             self.empty_widget.setVisible(True)

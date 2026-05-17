@@ -1,11 +1,11 @@
 """浮窗组件 - 显示当前页面任务列表"""
-from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
+from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGraphicsOpacityEffect,
 )
-from PySide6.QtGui import QMouseEvent, QCursor
+from PySide6.QtGui import QMouseEvent, QCursor, QIcon, QPainter, QPixmap
 
-from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit
+from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit, FluentIcon, TransparentToolButton
 
 
 class FloatingWidget(QWidget):
@@ -72,31 +72,28 @@ class FloatingWidget(QWidget):
         title_layout.addWidget(self.title_label)
         title_layout.addStretch()
 
-        # 固定按钮
-        self.pin_btn = QLabel("○")
-        self.pin_btn.setFixedSize(24, 24)
-        self.pin_btn.setAlignment(Qt.AlignCenter)
-        self.pin_btn.setCursor(Qt.PointingHandCursor)
-        self.pin_btn.setToolTip("固定浮窗")
-        self.pin_btn.mousePressEvent = lambda e: self._toggle_pin()
-        title_layout.addWidget(self.pin_btn)
-
         # 新建按钮
-        self.add_btn = QLabel("+")
+        self.add_btn = TransparentToolButton(FluentIcon.ADD)
         self.add_btn.setFixedSize(24, 24)
-        self.add_btn.setAlignment(Qt.AlignCenter)
-        self.add_btn.setCursor(Qt.PointingHandCursor)
+        self.add_btn.setIconSize(QSize(12, 12))
         self.add_btn.setToolTip("快速新建任务")
-        self.add_btn.mousePressEvent = lambda e: self._show_quick_add()
+        self.add_btn.clicked.connect(self._show_quick_add)
         title_layout.addWidget(self.add_btn)
 
+        # 固定按钮
+        self.pin_btn = TransparentToolButton(FluentIcon.PIN)
+        self.pin_btn.setFixedSize(24, 24)
+        self.pin_btn.setIconSize(QSize(12, 12))
+        self.pin_btn.setToolTip("固定浮窗")
+        self.pin_btn.clicked.connect(self._toggle_pin)
+        title_layout.addWidget(self.pin_btn)
+
         # 关闭按钮
-        self.close_btn = QLabel("X")
+        self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
         self.close_btn.setFixedSize(24, 24)
-        self.close_btn.setAlignment(Qt.AlignCenter)
-        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.setIconSize(QSize(12, 12))
         self.close_btn.setToolTip("关闭")
-        self.close_btn.mousePressEvent = lambda e: self.hide()
+        self.close_btn.clicked.connect(self.hide)
         title_layout.addWidget(self.close_btn)
 
         bg_layout.addWidget(self.title_bar)
@@ -201,20 +198,6 @@ class FloatingWidget(QWidget):
         self.title_label.setStyleSheet(
             f"font-weight: bold; font-size: 13px; {title_color} border: none;"
         )
-        # 操作按钮样式
-        for btn in (self.add_btn, self.pin_btn, self.close_btn):
-            btn.setStyleSheet(f"""
-                QLabel {{
-                    color: {c['close']};
-                    font-size: 12px;
-                    border-radius: 10px;
-                    border: none;
-                }}
-                QLabel:hover {{
-                    color: {c['close_hover']};
-                    background-color: {c['close_hover_bg']};
-                }}
-            """)
         self.sep.setStyleSheet(f"background-color: {c['sep']}; border: none;")
         # 快速新建弹窗样式
         if isDarkTheme():
@@ -295,7 +278,8 @@ class FloatingWidget(QWidget):
     def set_pinned(self, pinned: bool):
         """设置固定状态"""
         self._pinned = pinned
-        self.pin_btn.setText("◉" if pinned else "○")
+        self.pin_btn.setIcon(FluentIcon.UNPIN if pinned else FluentIcon.PIN)
+        self.pin_btn.setIconSize(QSize(12, 12))
         self.pin_btn.setToolTip("取消固定" if pinned else "固定浮窗")
 
     def _toggle_pin(self):
@@ -378,12 +362,15 @@ class FloatingWidget(QWidget):
         self._refresh_list()
 
     def _refresh_list(self):
+        from config.settings import settings
+        
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
         c = self._theme_colors()
+        show_subtasks = settings.floating_show_subtasks
 
         if not self._todos:
             empty = BodyLabel("暂无任务")
@@ -392,18 +379,27 @@ class FloatingWidget(QWidget):
             self.list_layout.addWidget(empty)
         else:
             for todo in self._todos:
+                # 父任务行
                 row = self._create_todo_row(todo, c)
                 self.list_layout.addWidget(row)
+                # 子任务行（根据配置决定是否显示）
+                if show_subtasks:
+                    for child in todo.get("children", []):
+                        child_row = self._create_todo_row(child, c, is_child=True)
+                        self.list_layout.addWidget(child_row)
 
         self.list_layout.addStretch()
 
-    def _create_todo_row(self, todo: dict, c: dict) -> QWidget:
+    def _create_todo_row(self, todo: dict, c: dict, is_child: bool = False) -> QWidget:
         row = QFrame()
-        row.setFixedHeight(30)
+        row.setFixedHeight(26 if is_child else 30)
         row.setCursor(Qt.PointingHandCursor)
 
         color_tag = todo.get("color_tag")
-        border_left = f"border-left: 3px solid {color_tag};" if color_tag else "border-left: 3px solid transparent;"
+        if is_child:
+            border_left = "border-left: 2px solid transparent;"
+        else:
+            border_left = f"border-left: 3px solid {color_tag};" if color_tag else "border-left: 3px solid transparent;"
 
         status = todo.get("status", 0)
         if status == 1:
@@ -426,11 +422,15 @@ class FloatingWidget(QWidget):
         """)
 
         h_layout = QHBoxLayout(row)
-        h_layout.setContentsMargins(8, 0, 6, 0)
+        if is_child:
+            h_layout.setContentsMargins(20, 0, 6, 0)  # 子任务左侧缩进
+        else:
+            h_layout.setContentsMargins(8, 0, 6, 0)
         h_layout.setSpacing(0)
 
         title_label = BodyLabel(todo.get("title", ""))
-        title_label.setStyleSheet(f"font-size: 15px; {text_style} border: none;")
+        font_size = "13px" if is_child else "15px"
+        title_label.setStyleSheet(f"font-size: {font_size}; {text_style} border: none;")
         h_layout.addWidget(title_label, 1)
 
         todo_id = todo["id"]

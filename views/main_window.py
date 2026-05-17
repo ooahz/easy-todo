@@ -79,19 +79,19 @@ class MainWindow(FluentWindow):
 
     def _setup_navigation(self):
         """设置导航栏"""
-        self.todo_list_view = TodoListView()
+        self.todo_list_view = TodoListView(view_name="全部任务")
         self.todo_list_view.setObjectName("todoListView")
         self.addSubInterface(self.todo_list_view, FluentIcon.HOME, "全部任务")
 
-        self.today_view = TodoListView()
+        self.today_view = TodoListView(view_name="今日任务")
         self.today_view.setObjectName("todayView")
         self.addSubInterface(self.today_view, FluentIcon.CALENDAR, "今日任务")
 
-        self.important_view = TodoListView()
+        self.important_view = TodoListView(view_name="重要任务")
         self.important_view.setObjectName("importantView")
         self.addSubInterface(self.important_view, FluentIcon.HEART, "重要任务")
 
-        self.done_view = TodoListView()
+        self.done_view = TodoListView(view_name="已完成")
         self.done_view.setObjectName("doneView")
         self.addSubInterface(self.done_view, FluentIcon.COMPLETED, "已完成")
 
@@ -217,6 +217,8 @@ class MainWindow(FluentWindow):
             view.edit_clicked.connect(self._open_todo_dialog)
             view.delete_clicked.connect(self._delete_todo)
             view.toggle_done.connect(self._toggle_todo_done)
+            view.reorder_requested.connect(self._on_reorder_todos)
+            view.add_subtask_clicked.connect(self._open_todo_dialog_for_subtask)
             # 浮窗按钮 - 传递视图标识
             view.float_clicked.connect(lambda k=key: self._toggle_floating(k))
 
@@ -277,7 +279,7 @@ class MainWindow(FluentWindow):
             cat_name = self._category_nav_items.get(cat_id, (None, "任务列表"))[1]
             self.floating.title_label.setText(cat_name)
             todos = self.todo_service.get_by_category(cat_id)
-            self.floating.set_todos([t.to_dict() for t in todos])
+            self.floating.set_todos(self._build_todo_tree(todos))
             return
 
         title_map = {"all": "全部任务", "today": "今日任务", "important": "重要任务", "done": "已完成"}
@@ -300,7 +302,7 @@ class MainWindow(FluentWindow):
                     status=STATUS_TODO, sort_rules=settings.sort_rules
                 )
 
-        self.floating.set_todos([t.to_dict() for t in todos])
+        self.floating.set_todos(self._build_todo_tree(todos))
 
     def _apply_initial_theme(self):
         theme = settings.theme
@@ -359,10 +361,32 @@ class MainWindow(FluentWindow):
         # 重新调度到下一个零点
         self._schedule_postpone_timer()
 
+    def _build_todo_tree(self, todos: list) -> list[dict]:
+        """在内存中构建任务树形结构"""
+        # 转换为字典并建立 id 映射
+        todo_dicts = [t.to_dict() for t in todos]
+        id_map = {t["id"]: t for t in todo_dicts}
+
+        # 构建树形：子任务放入父任务的 children
+        parents = []
+        for t in todo_dicts:
+            if t["pid"] is None:
+                parents.append(t)
+            else:
+                parent = id_map.get(t["pid"])
+                if parent:
+                    parent["children"].append(t)
+
+        return parents
+
     def _load_todos(self):
         """加载待办数据"""
         sort_rules = settings.sort_rules
         done_at_bottom = settings.done_at_bottom
+
+        # 获取全部任务（含子任务）
+        all_todos = self.todo_service.get_all()
+        total_count = len(all_todos)
 
         if settings.show_done_tasks:
             todos = self.todo_service.get_all_including_done(
@@ -373,21 +397,26 @@ class MainWindow(FluentWindow):
             todos = self.todo_service.get_all(
                 status=STATUS_TODO, sort_rules=sort_rules
             )
-        self.todo_list_view.set_todos([t.to_dict() for t in todos])
+        self.todo_list_view._total_count = total_count
+        self.todo_list_view.set_todos(self._build_todo_tree(todos))
 
         today_todos = self.todo_service.get_today()
-        self.today_view.set_todos([t.to_dict() for t in today_todos])
+        self.today_view._total_count = total_count
+        self.today_view.set_todos(self._build_todo_tree(today_todos))
 
         important_todos = self.todo_service.get_high_priority()
-        self.important_view.set_todos([t.to_dict() for t in important_todos])
+        self.important_view._total_count = total_count
+        self.important_view.set_todos(self._build_todo_tree(important_todos))
 
         done_todos = self.todo_service.get_all(status=STATUS_DONE)
-        self.done_view.set_todos([t.to_dict() for t in done_todos])
+        self.done_view._total_count = total_count
+        self.done_view.set_todos(self._build_todo_tree(done_todos))
 
         # 加载分类视图数据
         for cat_id, (view, _) in self._category_nav_items.items():
             cat_todos = self.todo_service.get_by_category(cat_id)
-            view.set_todos([t.to_dict() for t in cat_todos])
+            view._total_count = total_count
+            view.set_todos(self._build_todo_tree(cat_todos))
 
         if self.floating.isVisible():
             self._update_floating_data(self._current_view_key)
@@ -412,16 +441,14 @@ class MainWindow(FluentWindow):
 
         if "id" in data:
             todo = self.todo_service.update(data["id"], **data)
-            todo_id = data["id"]
         else:
             todo = self.todo_service.create(**data)
-            todo_id = todo.id if todo else None
 
         # 保存关联文件
-        if todo_id and temp_files:
+        if todo and temp_files:
             for file_path in temp_files:
                 try:
-                    self.file_service.save_file(todo_id, file_path)
+                    self.file_service.save_file(todo.id, file_path)
                 except Exception as e:
                     print(f"保存文件失败: {e}")
 
@@ -443,6 +470,49 @@ class MainWindow(FluentWindow):
     def _toggle_todo_done(self, todo_id: int):
         if self.todo_service.toggle_done(todo_id):
             self._refresh_all_views()
+
+    def _open_todo_dialog_for_subtask(self, parent_id: int):
+        """为父任务新建子任务"""
+        dialog = TodoDialog(pid=parent_id, parent=self)
+        dialog.todo_saved.connect(self._on_todo_saved)
+        dialog.exec()
+
+    def _on_reorder_todos(self, from_id: int, to_id: int, insert_after: bool, current_order: list):
+        """处理任务拖拽排序 - 基于当前视图显示的顺序"""
+        todo_ids = current_order.copy()
+
+        if from_id not in todo_ids or to_id not in todo_ids:
+            return
+
+        # 如果不是自定义排序，先记录当前顺序到数据库，再执行拖拽
+        if settings.sort_rules != ["custom"]:
+            self.todo_service.reorder(todo_ids)
+            settings.sort_rules = ["custom"]
+            settings.sort_rule = "custom"
+            self.settings_page._update_sort_ui(["custom"])
+
+        # 重新排序：将 from_id 放到 to_id 的上方或下方
+        from_idx = todo_ids.index(from_id)
+        to_idx = todo_ids.index(to_id)
+
+        # 移除源元素
+        todo_ids.pop(from_idx)
+
+        # 重新计算目标位置（因为可能已移除一个元素）
+        if from_idx < to_idx:
+            to_idx -= 1
+
+        # 根据 insert_after 决定插入位置
+        if insert_after:
+            to_idx += 1
+
+        # 插入到目标位置
+        todo_ids.insert(to_idx, from_id)
+
+        # 更新排序
+        self.todo_service.reorder(todo_ids)
+
+        self._refresh_all_views()
 
     # ---- 导入导出 ----
 
@@ -555,7 +625,7 @@ class MainWindow(FluentWindow):
 
     def _add_category_nav_item(self, cat):
         """添加单个分类导航项"""
-        view = TodoListView()
+        view = TodoListView(view_name=cat.name)
         view.setObjectName(f"categoryView_{cat.id}")
 
         self.addSubInterface(view, FluentIcon.BOOK_SHELF, cat.name)
@@ -565,6 +635,8 @@ class MainWindow(FluentWindow):
         view.edit_clicked.connect(self._open_todo_dialog)
         view.delete_clicked.connect(self._delete_todo)
         view.toggle_done.connect(self._toggle_todo_done)
+        view.reorder_requested.connect(self._on_reorder_todos)
+        view.add_subtask_clicked.connect(self._open_todo_dialog_for_subtask)
         view.float_clicked.connect(lambda k=f"cat_{cat.id}": self._toggle_floating(k))
 
         # 缓存

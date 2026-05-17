@@ -1,6 +1,6 @@
 """新建/编辑待办对话框"""
 import os
-from datetime import date, datetime
+from datetime import date
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     LineEdit, TextEdit, ComboBox, CalendarPicker,
     PrimaryPushButton, PushButton, SubtitleLabel, CheckBox,
-    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel, CaptionLabel
+    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel
 )
 
 from config.constants import PRIORITY_MAP, TODO_COLORS
@@ -19,21 +19,28 @@ from services.file_service import FileService
 
 
 class TodoDialog(QDialog):
-    """新建/编辑待办对话框"""
+    """新建/编辑待办对话框，支持父任务和子任务"""
 
     todo_saved = Signal(dict)
 
-    def __init__(self, todo_data: dict = None, parent=None):
+    def __init__(self, todo_data: dict = None, parent=None, pid: int = None):
         super().__init__(parent)
         self.todo_data = todo_data
         self._is_edit = todo_data is not None
+        # 父任务ID：新建时传入，编辑时从数据读取
+        self._pid = pid if pid is not None else (todo_data.get("pid") if todo_data else None)
         self._selected_color = None
         self._category_service = CategoryService()
         self._file_service = FileService()
-        self._temp_files = []  # 临时存储待上传的文件
+        self._temp_files = []
 
-        self.setWindowTitle("编辑任务" if self._is_edit else "新建任务")
-        self.setFixedSize(480, 580)
+        # 子任务窗口更小、更简洁
+        if self._pid is not None:
+            self.setWindowTitle("新建子任务" if not self._is_edit else "编辑子任务")
+            self.setFixedSize(400, 120)
+        else:
+            self.setWindowTitle("编辑任务" if self._is_edit else "新建任务")
+            self.setFixedSize(480, 560)
 
         self._setup_ui()
         self._connect_signals()
@@ -43,29 +50,30 @@ class TodoDialog(QDialog):
             self._fill_data(todo_data)
             self._load_files()
 
-        # 启用拖放
         self.setAcceptDrops(True)
 
     def _setup_ui(self):
         """构建对话框 UI"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
 
-        # 标题
-        title = SubtitleLabel("编辑任务" if self._is_edit else "新建任务")
-        layout.addWidget(title)
+        # 标题（子任务不显示标题标签）
+        if self._pid is None:
+            title_text = "编辑任务" if self._is_edit else "新建任务"
+            title = SubtitleLabel(title_text)
+            layout.addWidget(title)
 
-        # 分隔线
-        sep = QLabel()
-        sep.setFixedHeight(1)
-        sep.setObjectName("dialogSep")
-        setCustomStyleSheet(
-            sep,
-            "#dialogSep { background-color: rgba(0,0,0,0.08); }",
-            "#dialogSep { background-color: rgba(255,255,255,0.06); }"
-        )
-        layout.addWidget(sep)
+            # 分隔线
+            sep = QLabel()
+            sep.setFixedHeight(1)
+            sep.setObjectName("dialogSep")
+            setCustomStyleSheet(
+                sep,
+                "#dialogSep { background-color: rgba(0,0,0,0.08); }",
+                "#dialogSep { background-color: rgba(255,255,255,0.06); }"
+            )
+            layout.addWidget(sep)
 
         # 标题输入
         self.title_edit = LineEdit()
@@ -74,113 +82,113 @@ class TodoDialog(QDialog):
         self.title_edit.setMaxLength(100)
         layout.addWidget(self.title_edit)
 
-        # 描述输入
-        self.desc_edit = TextEdit()
-        self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
-        self.desc_edit.setMinimumHeight(72)
-        self.desc_edit.setMaximumHeight(120)
-        layout.addWidget(self.desc_edit)
+        # 子任务不需要以下字段
+        if self._pid is None:
+            # 描述输入
+            self.desc_edit = TextEdit()
+            self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
+            self.desc_edit.setMinimumHeight(72)
+            self.desc_edit.setMaximumHeight(110)
+            layout.addWidget(self.desc_edit)
 
-        # 优先级 + 截止日期
-        row1 = QHBoxLayout()
-        row1.setSpacing(20)
+            # 优先级 + 分类选择
+            row1 = QHBoxLayout()
+            row1.setSpacing(20)
 
-        self.priority_combo = ComboBox()
-        self.priority_combo.setFixedWidth(210)
-        self.priority_combo.addItem("选择优先级", userData=None)
-        for val, name in PRIORITY_MAP.items():
-            self.priority_combo.addItem(name, userData=val)
-        self.priority_combo.setCurrentIndex(0)
-        row1.addWidget(self.priority_combo)
+            self.priority_combo = ComboBox()
+            self.priority_combo.setFixedWidth(205)
+            self.priority_combo.addItem("选择优先级", userData=None)
+            for val, name in PRIORITY_MAP.items():
+                self.priority_combo.addItem(name, userData=val)
+            self.priority_combo.setCurrentIndex(0)
+            row1.addWidget(self.priority_combo)
 
-        self.due_picker = CalendarPicker()
-        self.due_picker.setFixedWidth(210)
-        try:
-            self.due_picker.setText("截止日期")
-        except Exception:
-            pass
-        row1.addWidget(self.due_picker)
+            self.category_combo = ComboBox()
+            self.category_combo.setFixedWidth(205)
+            self.category_combo.addItem("无分类", userData=None)
+            row1.addWidget(self.category_combo)
+            row1.addStretch()
+            layout.addLayout(row1)
 
-        row1.addStretch()
-        layout.addLayout(row1)
+            # 截止日期 + 自动延期
+            due_row = QHBoxLayout()
+            due_row.setSpacing(20)
 
-        # 分类选择
-        self.category_combo = ComboBox()
-        self.category_combo.setFixedWidth(210)
-        self.category_combo.addItem("无分类", userData=None)
-        layout.addWidget(self.category_combo)
+            self.due_picker = CalendarPicker()
+            self.due_picker.setFixedWidth(205)
+            try:
+                self.due_picker.setText("截止日期")
+            except Exception:
+                pass
+            due_row.addWidget(self.due_picker)
 
-        # 自动延期
-        self.auto_postpone_cb = CheckBox("自动延期")
-        self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
-        layout.addWidget(self.auto_postpone_cb)
+            self.auto_postpone_cb = CheckBox("自动延期")
+            self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
+            due_row.addWidget(self.auto_postpone_cb)
+            due_row.addStretch()
+            layout.addLayout(due_row)
 
-        # 颜色标签
-        color_row = QHBoxLayout()
-        color_row.setSpacing(8)
+            # 颜色标签
+            color_row = QHBoxLayout()
+            color_row.setSpacing(8)
 
-        self.color_buttons = []
-        dark = isDarkTheme()
-        for name, color in TODO_COLORS:
-            btn = QPushButton()
-            btn.setFixedSize(24, 24)
-            btn.setCheckable(True)
-            checked_border = "border: 2px solid #AAA;" if dark else "border: 2px solid #333;"
-            hover_border = "border: 2px solid #888;" if dark else "border: 2px solid #666;"
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {color};
-                    border-radius: 12px;
-                    border: 2px solid transparent;
-                }}
-                QPushButton:checked {{
-                    {checked_border}
-                }}
-                QPushButton:hover {{
-                    {hover_border}
-                }}
+            self.color_buttons = []
+            dark = isDarkTheme()
+            for name, color in TODO_COLORS:
+                btn = QPushButton()
+                btn.setFixedSize(24, 24)
+                btn.setCheckable(True)
+                checked_border = "border: 2px solid #AAA;" if dark else "border: 2px solid #333;"
+                hover_border = "border: 2px solid #888;" if dark else "border: 2px solid #666;"
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {color};
+                        border-radius: 12px;
+                        border: 2px solid transparent;
+                    }}
+                    QPushButton:checked {{
+                        {checked_border}
+                    }}
+                    QPushButton:hover {{
+                        {hover_border}
+                    }}
+                """)
+                btn.setToolTip(name)
+                btn.setProperty("color_value", color)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.clicked.connect(lambda checked, c=color, b=btn: self._on_color_clicked(c, b))
+                color_row.addWidget(btn)
+                self.color_buttons.append(btn)
+
+            color_row.addStretch()
+            layout.addLayout(color_row)
+
+            # 文件上传区域
+            self.drop_area = QLabel("📎 拖放文件到此处，或点击选择文件")
+            self.drop_area.setFixedHeight(36)
+            self.drop_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.drop_area.setStyleSheet("""
+                QLabel {
+                    border: 2px dashed #888;
+                    border-radius: 6px;
+                    color: #888;
+                }
             """)
-            btn.setToolTip(name)
-            btn.setProperty("color_value", color)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda checked, c=color, b=btn: self._on_color_clicked(c, b))
-            color_row.addWidget(btn)
-            self.color_buttons.append(btn)
-
-        color_row.addStretch()
-        layout.addLayout(color_row)
-
-        # 文件上传区域
-        self.drop_area = QLabel("📎 拖放文件到此处，或点击选择文件")
-        self.drop_area.setFixedHeight(40)
-        self.drop_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.drop_area.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #888;
-                border-radius: 6px;
-                color: #888;
-            }
-        """)
-        self.drop_area.setCursor(Qt.PointingHandCursor)
-        self.drop_area.mousePressEvent = lambda e: self._on_select_file()
-        layout.addWidget(self.drop_area)
-
-        # 文件数量
-        self.file_count_label = QLabel("")
-        self.file_count_label.setStyleSheet("color: #666; font-size: 12px;")
-        layout.addWidget(self.file_count_label)
-
-        # 打开文件夹按钮（仅编辑模式）
-        if self._is_edit:
-            self.open_folder_btn = PushButton(FluentIcon.FOLDER, "打开文件夹")
-            self.open_folder_btn.clicked.connect(self._on_open_folder)
-            layout.addWidget(self.open_folder_btn)
+            self.drop_area.setCursor(Qt.PointingHandCursor)
+            self.drop_area.mousePressEvent = lambda e: self._on_select_file()
+            layout.addWidget(self.drop_area)
 
         layout.addStretch()
 
         # 按钮区
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
+
+        if self._pid is None and self._is_edit:
+            self.open_folder_btn = PushButton(FluentIcon.FOLDER, "打开文件夹")
+            self.open_folder_btn.clicked.connect(self._on_open_folder)
+            btn_layout.addWidget(self.open_folder_btn)
+
         btn_layout.addStretch()
 
         self.cancel_btn = PushButton("取消")
@@ -198,10 +206,10 @@ class TodoDialog(QDialog):
 
     def _connect_signals(self):
         self.title_edit.returnPressed.connect(self._on_save)
-        self.desc_edit.textChanged.connect(self._on_desc_changed)
+        if hasattr(self, 'desc_edit'):
+            self.desc_edit.textChanged.connect(self._on_desc_changed)
 
     def _on_desc_changed(self):
-        """限制描述最多1000字符"""
         text = self.desc_edit.toPlainText()
         if len(text) > 1000:
             cursor = self.desc_edit.textCursor()
@@ -220,7 +228,6 @@ class TodoDialog(QDialog):
             self._selected_color = color
 
     def _on_select_file(self):
-        """选择文件"""
         files, _ = QFileDialog.getOpenFileNames(
             self, "选择文件", "", "所有文件 (*.*)"
         )
@@ -229,39 +236,32 @@ class TodoDialog(QDialog):
                 self._add_file(f)
 
     def _add_file(self, file_path: str):
-        """添加文件到列表"""
         if file_path not in self._temp_files:
             self._temp_files.append(file_path)
             self._update_file_list()
 
     def _update_file_list(self):
-        """更新文件数量显示"""
         count = len(self._temp_files)
         if count == 0:
-            self.file_count_label.setText("")
+            self.drop_area.setText("📎 拖放文件到此处，或点击选择文件")
         else:
-            self.file_count_label.setText(f"待上传 {count} 个文件")
+            self.drop_area.setText(f"📎 待上传 {count} 个文件")
 
     def _load_files(self):
-        """加载已关联的文件数量"""
         if not self.todo_data:
             return
-
         todo_id = self.todo_data.get("id")
-        if not todo_id:
+        if not todo_id or not hasattr(self, 'drop_area'):
             return
-
         count = self._file_service.get_file_count(todo_id)
         if count > 0:
-            self.file_count_label.setText(f"已关联 {count} 个文件")
+            self.drop_area.setText(f"📎 已关联 {count} 个文件")
 
     def _on_open_folder(self):
-        """打开任务关联文件夹"""
         if self.todo_data and self.todo_data.get("id"):
             self._file_service.open_folder(self.todo_data["id"])
 
     def _save_files(self, todo_id: int):
-        """保存临时文件到任务文件夹"""
         saved_files = []
         for file_path in self._temp_files:
             try:
@@ -273,43 +273,43 @@ class TodoDialog(QDialog):
 
     def _fill_data(self, data: dict):
         self.title_edit.setText(data.get("title", ""))
-        self.desc_edit.setPlainText(data.get("description", ""))
 
-        priority = data.get("priority", 0)
-        for i in range(self.priority_combo.count()):
-            if self.priority_combo.itemData(i) == priority:
-                self.priority_combo.setCurrentIndex(i)
-                break
+        if hasattr(self, 'desc_edit'):
+            self.desc_edit.setPlainText(data.get("description", ""))
 
-        color_tag = data.get("color_tag")
-        if color_tag:
-            self._selected_color = color_tag
-            for btn in self.color_buttons:
-                if btn.property("color_value") == color_tag:
-                    btn.setChecked(True)
+            priority = data.get("priority", 0)
+            for i in range(self.priority_combo.count()):
+                if self.priority_combo.itemData(i) == priority:
+                    self.priority_combo.setCurrentIndex(i)
                     break
 
-        # 自动延期
-        self.auto_postpone_cb.setChecked(data.get("auto_postpone", False))
+            color_tag = data.get("color_tag")
+            if color_tag:
+                self._selected_color = color_tag
+                for btn in self.color_buttons:
+                    if btn.property("color_value") == color_tag:
+                        btn.setChecked(True)
+                        break
 
-        # 分类
-        category_id = data.get("category_id")
-        for i in range(self.category_combo.count()):
-            if self.category_combo.itemData(i) == category_id:
-                self.category_combo.setCurrentIndex(i)
-                break
+            self.auto_postpone_cb.setChecked(data.get("auto_postpone", False))
 
-        due_str = data.get("due_date")
-        if due_str:
-            try:
-                from PySide6.QtCore import QDate
-                if isinstance(due_str, str):
-                    pyd = date.fromisoformat(due_str)
-                    self.due_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
-                else:
-                    self.due_picker.setDate(QDate(due_str.year, due_str.month, due_str.day))
-            except Exception:
-                pass
+            category_id = data.get("category_id")
+            for i in range(self.category_combo.count()):
+                if self.category_combo.itemData(i) == category_id:
+                    self.category_combo.setCurrentIndex(i)
+                    break
+
+            due_str = data.get("due_date")
+            if due_str:
+                try:
+                    from PySide6.QtCore import QDate
+                    if isinstance(due_str, str):
+                        pyd = date.fromisoformat(due_str)
+                        self.due_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
+                    else:
+                        self.due_picker.setDate(QDate(due_str.year, due_str.month, due_str.day))
+                except Exception:
+                    pass
 
     def _on_save(self):
         title = self.title_edit.text().strip()
@@ -319,27 +319,36 @@ class TodoDialog(QDialog):
             )
             return
 
-        due_date = None
-        try:
-            qdate = self.due_picker.date
-            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
-                due_date = date(qdate.year(), qdate.month(), qdate.day())
-        except Exception:
-            pass
-
-        priority_val = self.priority_combo.currentData()
-        priority = priority_val if priority_val is not None else 0
-
         data = {
             "title": title,
-            "description": self.desc_edit.toPlainText().strip(),
-            "priority": priority,
-            "color_tag": self._selected_color,
-            "due_date": due_date,
-            "auto_postpone": self.auto_postpone_cb.isChecked(),
-            "category_id": self.category_combo.currentData(),
-            "temp_files": self._temp_files,  # 传递待上传的文件
+            "temp_files": self._temp_files,
         }
+
+        # 子任务只传 title
+        if self._pid is None:
+            data["description"] = self.desc_edit.toPlainText().strip()
+
+            due_date = None
+            if hasattr(self, 'due_picker'):
+                try:
+                    qdate = self.due_picker.date
+                    if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                        due_date = date(qdate.year(), qdate.month(), qdate.day())
+                except Exception:
+                    pass
+            data["due_date"] = due_date
+
+            priority_val = getattr(self, 'priority_combo', None)
+            if priority_val:
+                data["priority"] = priority_val.currentData() or 0
+            else:
+                data["priority"] = 0
+
+            data["color_tag"] = self._selected_color
+            data["auto_postpone"] = self.auto_postpone_cb.isChecked() if hasattr(self, 'auto_postpone_cb') else False
+            data["category_id"] = self.category_combo.currentData() if hasattr(self, 'category_combo') else None
+        else:
+            data["pid"] = self._pid
 
         if self._is_edit:
             data["id"] = self.todo_data["id"]
@@ -348,16 +357,16 @@ class TodoDialog(QDialog):
         self.close()
 
     def _load_categories(self):
-        """加载分类列表"""
-        self.category_combo.clear()
-        self.category_combo.addItem("无分类", userData=None)
-        categories = self._category_service.get_all()
-        for cat in categories:
-            self.category_combo.addItem(cat.name, userData=cat.id)
+        if hasattr(self, 'category_combo'):
+            self.category_combo.clear()
+            self.category_combo.addItem("无分类", userData=None)
+            categories = self._category_service.get_all()
+            for cat in categories:
+                self.category_combo.addItem(cat.name, userData=cat.id)
 
     # ---- 拖放支持 ----
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
+        if event.mimeData().hasUrls() and hasattr(self, 'drop_area'):
             event.acceptProposedAction()
             self.drop_area.setStyleSheet("""
                 QLabel {
@@ -369,40 +378,38 @@ class TodoDialog(QDialog):
             """)
 
     def dragLeaveEvent(self, event):
-        self.drop_area.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #888;
-                border-radius: 6px;
-                color: #888;
-            }
-        """)
+        if hasattr(self, 'drop_area'):
+            self.drop_area.setStyleSheet("""
+                QLabel {
+                    border: 2px dashed #888;
+                    border-radius: 6px;
+                    color: #888;
+                }
+            """)
 
     def dropEvent(self, event):
-        self.drop_area.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #888;
-                border-radius: 6px;
-                color: #888;
-            }
-        """)
-
-        urls = event.mimeData().urls()
-        for url in urls:
-            file_path = url.toLocalFile()
-            if file_path:
-                self._add_file(file_path)
+        if hasattr(self, 'drop_area'):
+            self.drop_area.setStyleSheet("""
+                QLabel {
+                    border: 2px dashed #888;
+                    border-radius: 6px;
+                    color: #888;
+                }
+            """)
+            urls = event.mimeData().urls()
+            for url in urls:
+                file_path = url.toLocalFile()
+                if file_path:
+                    self._add_file(file_path)
 
     def showEvent(self, event):
         super().showEvent(event)
         self.title_edit.setFocus()
         self.title_edit.setStyleSheet("")
-        # 对话框背景跟随主题
         if isDarkTheme():
             self.setStyleSheet(
                 "QDialog { background-color: rgb(43, 43, 43); }"
                 "SubtitleLabel { color: #EEE; }"
-                "BodyLabel { color: #DDD; }"
-                "CaptionLabel { color: #AAA; }"
                 "QLabel { color: #DDD; }"
                 "LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }"
                 "TextEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }"
@@ -412,8 +419,6 @@ class TodoDialog(QDialog):
             self.setStyleSheet(
                 "QDialog { background-color: rgb(249, 249, 249); }"
                 "SubtitleLabel { color: #111; }"
-                "BodyLabel { color: #333; }"
-                "CaptionLabel { color: #666; }"
                 "QLabel { color: #333; }"
                 "LineEdit { background-color: #FFF; color: #333; }"
                 "TextEdit { background-color: #FFF; color: #333; }"

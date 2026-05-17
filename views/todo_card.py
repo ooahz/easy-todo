@@ -1,9 +1,10 @@
 """待办卡片组件 - 单个待办事项的卡片展示"""
 from datetime import date
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QMimeData, QByteArray, QPoint
+from PySide6.QtGui import QDrag, QPixmap, QPainter
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame, QSizePolicy
+    QWidget, QHBoxLayout, QVBoxLayout, QFrame, QSizePolicy
 )
 
 from qfluentwidgets import (
@@ -37,12 +38,14 @@ def _tc():
 
 
 class TodoCard(CardWidget):
-    """待办事项卡片组件"""
+    """待办事项卡片组件（仅用于父任务）"""
 
     card_clicked = Signal(int)
     edit_clicked = Signal(int)
     delete_clicked = Signal(int)
     toggle_done = Signal(int)
+    reorder_requested = Signal(int, int, bool)  # from_id, to_id, insert_after
+    add_subtask_clicked = Signal(int)  # parent_id
 
     def __init__(self, todo_data: dict, parent=None):
         super().__init__(parent)
@@ -55,8 +58,7 @@ class TodoCard(CardWidget):
         # 动态计算高度
         self._base_height = 72
         self._has_files = self._file_service.get_file_count(self.todo_id) > 0
-
-        self.setFixedHeight(self._base_height + (20 if self._has_files else 0))
+        self.setMinimumHeight(self._base_height + (20 if self._has_files else 0))
         self.setCursor(Qt.PointingHandCursor)
 
         self._setup_ui()
@@ -64,23 +66,27 @@ class TodoCard(CardWidget):
 
     def _setup_ui(self):
         """构建卡片 UI"""
-        self.main_layout = QHBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(12, 8, 8, 8)
-        self.main_layout.setSpacing(8)
+        self.main_layout.setSpacing(0)
+
+        # 主行：色条 + 复选框 + 内容 + 按钮
+        self.top_row = QHBoxLayout()
+        self.top_row.setSpacing(8)
 
         # 左侧色条
         self.priority_bar = QFrame()
         self.priority_bar.setFixedWidth(4)
         self.priority_bar.setMinimumHeight(40)
         self._update_bar_color()
-        self.main_layout.addWidget(self.priority_bar)
+        self.top_row.addWidget(self.priority_bar)
 
         # 复选框
         self.checkbox = CheckBox()
         self.checkbox.setFixedSize(20, 20)
         self.checkbox.setChecked(self._is_done)
         self.checkbox.checkStateChanged.connect(lambda: self.toggle_done.emit(self.todo_id))
-        self.main_layout.addWidget(self.checkbox)
+        self.top_row.addWidget(self.checkbox)
 
         # 中间内容区
         self.content_layout = QVBoxLayout()
@@ -105,7 +111,6 @@ class TodoCard(CardWidget):
         desc = self.todo_data.get("description", "")
         due = self.todo_data.get("due_date", "")
 
-        # 描述
         if desc:
             self.desc_label = CaptionLabel(desc)
             self.desc_label.setObjectName("descLabel")
@@ -120,7 +125,6 @@ class TodoCard(CardWidget):
         if priority in PRIORITY_MAP and priority > 0:
             info_parts.append(PRIORITY_MAP[priority])
 
-        # 分类名称
         category = self.todo_data.get("category")
         if category:
             info_parts.append(category.get("name", ""))
@@ -135,7 +139,6 @@ class TodoCard(CardWidget):
             else:
                 info_parts.append(f"{due}")
 
-        # 文件数量
         file_count = self._file_service.get_file_count(self.todo_id)
         if file_count > 0:
             info_parts.append(f"📎 {file_count}")
@@ -146,7 +149,7 @@ class TodoCard(CardWidget):
             self._apply_info_style()
             self.content_layout.addWidget(self.info_label)
 
-        self.main_layout.addLayout(self.content_layout, 1)
+        self.top_row.addLayout(self.content_layout, 1)
 
         # 操作按钮
         self.action_layout = QHBoxLayout()
@@ -158,6 +161,13 @@ class TodoCard(CardWidget):
         action_widget.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
         )
+
+        # 新建子任务按钮
+        self.add_subtask_btn = TransparentToolButton(FluentIcon.ADD_TO)
+        self.add_subtask_btn.setFixedSize(30, 30)
+        self.add_subtask_btn.setToolTip("添加子任务")
+        self.add_subtask_btn.clicked.connect(lambda: self.add_subtask_clicked.emit(self.todo_id))
+        self.action_layout.addWidget(self.add_subtask_btn)
 
         self.edit_btn = TransparentToolButton(FluentIcon.EDIT)
         self.edit_btn.setFixedSize(30, 30)
@@ -171,13 +181,81 @@ class TodoCard(CardWidget):
         self.delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.todo_id))
         self.action_layout.addWidget(self.delete_btn)
 
-        self.main_layout.addWidget(action_widget)
+        self.top_row.addWidget(action_widget)
+        self.main_layout.addLayout(self.top_row)
 
-        self.mousePressEvent = self._on_mouse_press
+        # 启用拖拽
+        self.setAcceptDrops(True)
+        self._drag_start_pos = None
+        self._is_dragging = False
 
-    def _on_mouse_press(self, event):
+    def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.card_clicked.emit(self.todo_id)
+            self._drag_start_pos = event.pos()
+            self._is_dragging = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not self._drag_start_pos:
+            return
+
+        if not self._is_dragging and (event.pos() - self._drag_start_pos).manhattanLength() > 10:
+            self._is_dragging = True
+            self._start_drag()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if not self._is_dragging and self._drag_start_pos:
+                self.card_clicked.emit(self.todo_id)
+            self._drag_start_pos = None
+            self._is_dragging = False
+        super().mouseReleaseEvent(event)
+
+    def _start_drag(self):
+        """开始拖拽"""
+        drag = QDrag(self)
+        mime_data = QMimeData()
+        mime_data.setData("application/x-todo-id", QByteArray(str(self.todo_id).encode()))
+        drag.setMimeData(mime_data)
+
+        pixmap = self.grab()
+        alpha_pixmap = QPixmap(pixmap.size())
+        alpha_pixmap.fill(Qt.transparent)
+        painter = QPainter(alpha_pixmap)
+        painter.setOpacity(0.7)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
+        drag.setPixmap(alpha_pixmap)
+        drag.setHotSpot(self._drag_start_pos)
+
+        drag.exec(Qt.MoveAction)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-todo-id"):
+            source_id = int(bytes(event.mimeData().data("application/x-todo-id")).decode())
+            if source_id != self.todo_id:
+                event.acceptProposedAction()
+                self.setStyleSheet("""
+                    CardWidget {
+                        border: 2px dashed #0078D4;
+                        border-radius: 8px;
+                        background-color: rgba(0, 120, 212, 0.1);
+                    }
+                """)
+
+    def dragLeaveEvent(self, event):
+        self._apply_styles()
+
+    def dropEvent(self, event):
+        self._apply_styles()
+        if event.mimeData().hasFormat("application/x-todo-id"):
+            source_id = int(bytes(event.mimeData().data("application/x-todo-id")).decode())
+            if source_id != self.todo_id:
+                pos = event.position().y() if hasattr(event, 'position') else event.pos().y()
+                height = self.height()
+                insert_after = pos > height / 2
+                self.reorder_requested.emit(source_id, self.todo_id, insert_after)
+            event.acceptProposedAction()
 
     def _update_bar_color(self):
         """更新左侧色条颜色"""

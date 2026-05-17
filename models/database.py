@@ -48,6 +48,7 @@ class Database:
 
         Base.metadata.create_all(self.engine)
         self._migrate_add_category_id()
+        self._migrate_add_pid()
         self._init_default_categories()
 
     def _migrate_add_category_id(self):
@@ -62,6 +63,24 @@ class Database:
                     "ALTER TABLE todos ADD COLUMN category_id INTEGER REFERENCES categories(id)"
                 ))
                 conn.commit()
+
+    def _migrate_add_pid(self):
+        """迁移：为 todos 表添加 pid 列（父任务ID）"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        print(f"[DB Migration] Current columns: {columns}")
+        if "pid" not in columns:
+            print("[DB Migration] Adding pid column...")
+            with self.engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE todos ADD COLUMN pid INTEGER REFERENCES todos(id) ON DELETE CASCADE"
+                ))
+                conn.commit()
+            print("[DB Migration] pid column added successfully")
+        else:
+            print("[DB Migration] pid column already exists")
 
     def _init_default_categories(self):
         """初始化默认分类"""

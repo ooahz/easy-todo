@@ -79,8 +79,7 @@ class SettingsPage(QWidget):
         ]))
 
         self.list_layout.addWidget(self._make_card("排序规则", [
-            self._make_combo_row("一级排序", self._create_sort_primary_combo()),
-            self._make_combo_row("二级排序", self._create_sort_secondary_combo()),
+            self._create_sort_row(),
         ]))
 
         self.list_layout.addWidget(self._make_card("分类", [
@@ -90,6 +89,7 @@ class SettingsPage(QWidget):
         self.list_layout.addWidget(self._make_card("浮窗设置", [
             self._make_slider_row(),
             self._create_floating_top_cb(),
+            self._create_floating_show_subtasks_cb(),
         ]))
 
         self.list_layout.addWidget(self._make_card("数据", [
@@ -343,14 +343,20 @@ class SettingsPage(QWidget):
         dialog.exec()
 
     SORT_OPTIONS = [
+        ("自定义", "custom"),
         ("优先级", "priority"),
         ("创建时间", "created_at"),
         ("截止时间", "due_date"),
     ]
 
-    def _create_sort_primary_combo(self) -> ComboBox:
+    def _create_sort_row(self):
+        """创建排序规则行（并列布局）"""
+        row = QHBoxLayout()
+        row.setSpacing(12)
+
         self.sort_primary_combo = ComboBox()
         self.sort_primary_combo.addItems([label for label, _ in self.SORT_OPTIONS])
+        self.sort_primary_combo.setFixedWidth(150)
         rules = settings.sort_rules
         primary = rules[0] if rules else "priority"
         for i, (_, val) in enumerate(self.SORT_OPTIONS):
@@ -358,35 +364,66 @@ class SettingsPage(QWidget):
                 self.sort_primary_combo.setCurrentIndex(i)
                 break
         self.sort_primary_combo.currentIndexChanged.connect(self._on_sort_rules_changed)
-        return self.sort_primary_combo
+        row.addWidget(self.sort_primary_combo)
 
-    def _create_sort_secondary_combo(self) -> ComboBox:
         self.sort_secondary_combo = ComboBox()
-        self.sort_secondary_combo.addItems(["无"] + [label for label, _ in self.SORT_OPTIONS])
-        rules = settings.sort_rules
+        self.sort_secondary_combo.addItems(["无"] + [label for label, _ in self.SORT_OPTIONS if _ != "custom"])
+        self.sort_secondary_combo.setFixedWidth(150)
         secondary = rules[1] if len(rules) > 1 else ""
         if secondary:
-            for i, (_, val) in enumerate(self.SORT_OPTIONS):
+            field_options = [(label, val) for label, val in self.SORT_OPTIONS if val != "custom"]
+            for i, (_, val) in enumerate(field_options):
                 if val == secondary:
                     self.sort_secondary_combo.setCurrentIndex(i + 1)
                     break
         else:
             self.sort_secondary_combo.setCurrentIndex(0)
         self.sort_secondary_combo.currentIndexChanged.connect(self._on_sort_rules_changed)
-        return self.sort_secondary_combo
+        row.addWidget(self.sort_secondary_combo)
+
+        row.addStretch()
+
+        # 初始状态：自定义时隐藏二级排序
+        if primary == "custom":
+            self.sort_secondary_combo.hide()
+
+        return row
 
     def _on_sort_rules_changed(self):
         primary_idx = self.sort_primary_combo.currentIndex()
+        primary_val = self.SORT_OPTIONS[primary_idx][1]
+
+        # 自定义排序时隐藏二级排序
+        if primary_val == "custom":
+            self.sort_secondary_combo.hide()
+            settings.sort_rules = ["custom"]
+            settings.sort_rule = "custom"
+            self.sort_rules_changed.emit(["custom"])
+            self.sort_rule_changed.emit("custom")
+            return
+
+        self.sort_secondary_combo.show()
+
         secondary_idx = self.sort_secondary_combo.currentIndex()
-        rules = [self.SORT_OPTIONS[primary_idx][1]]
+        rules = [primary_val]
+        field_options = [(label, val) for label, val in self.SORT_OPTIONS if val != "custom"]
         if secondary_idx > 0:
-            secondary_val = self.SORT_OPTIONS[secondary_idx - 1][1]
+            secondary_val = field_options[secondary_idx - 1][1]
             if secondary_val != rules[0]:
                 rules.append(secondary_val)
         settings.sort_rules = rules
         settings.sort_rule = rules[0]
         self.sort_rules_changed.emit(rules)
         self.sort_rule_changed.emit(rules[0])
+
+    def _update_sort_ui(self, rules: list[str]):
+        """外部更新排序 UI 状态"""
+        primary = rules[0] if rules else "priority"
+        for i, (_, val) in enumerate(self.SORT_OPTIONS):
+            if val == primary:
+                self.sort_primary_combo.setCurrentIndex(i)
+                break
+        self._on_sort_rules_changed()
 
     def _create_home_page_combo(self) -> ComboBox:
         self.home_page_combo = ComboBox()
@@ -407,6 +444,12 @@ class SettingsPage(QWidget):
         self.floating_top_cb.setChecked(settings.floating_top)
         self.floating_top_cb.checkStateChanged.connect(self._on_floating_top_changed)
         return self.floating_top_cb
+
+    def _create_floating_show_subtasks_cb(self) -> CheckBox:
+        self.floating_show_subtasks_cb = CheckBox("浮窗显示子任务")
+        self.floating_show_subtasks_cb.setChecked(settings.floating_show_subtasks)
+        self.floating_show_subtasks_cb.checkStateChanged.connect(self._on_floating_show_subtasks_changed)
+        return self.floating_show_subtasks_cb
 
     def _make_slider_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -522,3 +565,7 @@ class SettingsPage(QWidget):
         checked = (state == Qt.CheckState.Checked)
         settings.floating_top = checked
         self.floating_top_changed.emit(checked)
+
+    def _on_floating_show_subtasks_changed(self, state):
+        checked = (state == Qt.CheckState.Checked)
+        settings.floating_show_subtasks = checked

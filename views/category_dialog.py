@@ -1,5 +1,5 @@
 """分类管理对话框"""
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QDialog, QListWidgetItem, QMessageBox
 )
@@ -44,21 +44,24 @@ class CategoryListItem(QWidget):
 
         # 上移按钮
         self.up_btn = TransparentToolButton(FluentIcon.UP)
-        self.up_btn.setFixedSize(20, 20)
+        self.up_btn.setFixedSize(28, 28)
+        self.up_btn.setIconSize(QSize(12, 12))
         self.up_btn.setToolTip("上移")
         self.up_btn.clicked.connect(lambda: self.move_up_clicked.emit(self.category_id))
         layout.addWidget(self.up_btn)
 
         # 编辑按钮
         self.edit_btn = TransparentToolButton(FluentIcon.EDIT)
-        self.edit_btn.setFixedSize(20, 20)
+        self.edit_btn.setFixedSize(28, 28)
+        self.edit_btn.setIconSize(QSize(12, 12))
         self.edit_btn.setToolTip("编辑")
         self.edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.category_id))
         layout.addWidget(self.edit_btn)
 
         # 删除按钮
         self.delete_btn = TransparentToolButton(FluentIcon.DELETE)
-        self.delete_btn.setFixedSize(20, 20)
+        self.delete_btn.setFixedSize(28, 28)
+        self.delete_btn.setIconSize(QSize(12, 12))
         self.delete_btn.setToolTip("删除")
         self.delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.category_id))
         layout.addWidget(self.delete_btn)
