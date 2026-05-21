@@ -15,6 +15,7 @@ from qfluentwidgets import (
 )
 
 from config.constants import PRIORITY_MAP, TODO_COLORS
+from config.settings import settings
 from services.category_service import CategoryService
 from services.file_service import FileService
 
@@ -69,8 +70,14 @@ class TodoDialog(QDialog):
         # 子任务不需要以下字段
         if self._pid is None:
             # 描述输入
-            self.desc_edit = TextEdit()
-            self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
+            self._use_markdown = settings.description_mode == "markdown"
+            if self._use_markdown:
+                from views.markdown_editor import MarkdownEditor
+                self.desc_edit = MarkdownEditor()
+                self.desc_edit.setPlaceholderText("支持 Markdown 语法输入...")
+            else:
+                self.desc_edit = TextEdit()
+                self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
             self.desc_edit.setMinimumHeight(72)
             self.desc_edit.setMaximumHeight(110)
             layout.addWidget(self.desc_edit)
@@ -401,6 +408,7 @@ class TodoDialog(QDialog):
                 "QLabel { color: #DDD; }"
                 "LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }"
                 "TextEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }"
+                "QTextBrowser { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }"
                 "CheckBox { color: #DDD; }"
             )
         else:
@@ -410,5 +418,6 @@ class TodoDialog(QDialog):
                 "QLabel { color: #333; }"
                 "LineEdit { background-color: #FFF; color: #333; }"
                 "TextEdit { background-color: #FFF; color: #333; }"
+                "QTextBrowser { background-color: #FFF; color: #333; border: 1px solid #DDD; border-radius: 6px; }"
                 "CheckBox { color: #333; }"
             )

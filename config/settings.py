@@ -34,6 +34,7 @@ class Settings:
         "floating_view": "all",
         "floating_show_subtasks": True,  # 浮窗是否显示子任务
         "data_path": "",  # 数据保存路径，空则使用默认路径
+        "description_mode": "default",  # default / markdown
     }
 
     def __init__(self):
@@ -247,6 +248,16 @@ class Settings:
     @data_path.setter
     def data_path(self, value: str):
         self._data["data_path"] = value
+        self.save()
+
+    @property
+    def description_mode(self) -> str:
+        """描述输入模式：default / markdown"""
+        return self._data.get("description_mode", "default")
+
+    @description_mode.setter
+    def description_mode(self, value: str):
+        self._data["description_mode"] = value
         self.save()
 
 

@@ -19,6 +19,7 @@ from views.todo_list_view import TodoListView
 from views.todo_dialog import TodoDialog
 from views.settings_dialog import SettingsPage
 from views.floating_widget import FloatingWidget
+from views.todo_detail_panel import TodoDetailDialog
 from services.todo_service import TodoService
 from services.category_service import CategoryService
 from services.file_service import FileService
@@ -223,6 +224,7 @@ class MainWindow(FluentWindow):
             view.toggle_done.connect(self._toggle_todo_done)
             view.reorder_requested.connect(self._on_reorder_todos)
             view.add_subtask_clicked.connect(self._open_todo_dialog_for_subtask)
+            view.card_clicked.connect(self._on_card_clicked)
             # 浮窗按钮 - 传递视图标识
             view.float_clicked.connect(lambda k=key: self._toggle_floating(k))
             # 日程视图按钮
@@ -468,6 +470,19 @@ class MainWindow(FluentWindow):
         if self.todo_service.toggle_done(todo_id):
             self._refresh_all_views()
 
+    def _on_card_clicked(self, todo_id: int):
+        """父任务卡片点击 - 弹出详情对话框"""
+        todo = self.todo_service.get_by_id(todo_id)
+        if todo:
+            todo_tree = self._build_todo_tree([todo])
+            if todo_tree:
+                dialog = TodoDetailDialog(todo_tree[0], parent=self)
+                dialog.edit_clicked.connect(self._open_todo_dialog)
+                dialog.delete_clicked.connect(self._delete_todo)
+                dialog.toggle_done.connect(self._toggle_todo_done)
+                dialog.subtask_toggle_done.connect(self._toggle_todo_done)
+                dialog.exec()
+
     def _open_todo_dialog_for_subtask(self, parent_id: int):
         """为父任务新建子任务"""
         dialog = TodoDialog(pid=parent_id, parent=self)
@@ -649,6 +664,7 @@ class MainWindow(FluentWindow):
         view.toggle_done.connect(self._toggle_todo_done)
         view.reorder_requested.connect(self._on_reorder_todos)
         view.add_subtask_clicked.connect(self._open_todo_dialog_for_subtask)
+        view.card_clicked.connect(self._on_card_clicked)
         view.float_clicked.connect(lambda k=f"cat_{cat.id}": self._toggle_floating(k))
 
         # 缓存

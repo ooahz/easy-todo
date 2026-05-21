@@ -25,6 +25,7 @@ class TodoListView(QWidget):
     calendar_clicked = Signal()  # 日程视图按钮点击
     reorder_requested = Signal(int, int, bool, list)  # from_id, to_id, insert_after, current_order
     add_subtask_clicked = Signal(int)  # parent_id
+    card_clicked = Signal(int)  # 父任务卡片点击
 
     def __init__(self, parent=None, view_name: str = ""):
         super().__init__(parent)
@@ -204,6 +205,7 @@ class TodoListView(QWidget):
             card.delete_clicked.connect(self.delete_clicked.emit)
             card.toggle_done.connect(self.toggle_done.emit)
             card.add_subtask_clicked.connect(self.add_subtask_clicked.emit)
+            card.card_clicked.connect(self.card_clicked.emit)
             card.reorder_requested.connect(
                 lambda from_id, to_id, after, order=parent_ids: self.reorder_requested.emit(from_id, to_id, after, order)
             )
