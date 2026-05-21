@@ -1,4 +1,5 @@
 """待办卡片组件 - 单个待办事项的卡片展示"""
+from __future__ import annotations
 from datetime import date
 
 from PySide6.QtCore import Qt, Signal, QMimeData, QByteArray, QPoint

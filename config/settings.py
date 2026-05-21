@@ -3,6 +3,7 @@
  * @author 十玖八柒（Ahzoo）
  * @date 2026/04
 """
+from __future__ import annotations
 import json
 from pathlib import Path
 
@@ -21,6 +22,7 @@ class Settings:
         "sort_order": "desc",
         "floating_opacity": 0.95,
         "show_done_tasks": False,
+        "show_week_view": True,
         "auto_start": False,
         "home_page": "all",
         "sort_rule": "created_at",
@@ -136,6 +138,15 @@ class Settings:
     @show_done_tasks.setter
     def show_done_tasks(self, value: bool):
         self._data["show_done_tasks"] = value
+        self.save()
+
+    @property
+    def show_week_view(self) -> bool:
+        return self._data.get("show_week_view", True)
+
+    @show_week_view.setter
+    def show_week_view(self, value: bool):
+        self._data["show_week_view"] = value
         self.save()
 
     @property

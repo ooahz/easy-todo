@@ -1,4 +1,5 @@
 """主窗口"""
+from __future__ import annotations
 import json
 import os
 import sys
@@ -94,6 +95,9 @@ class MainWindow(FluentWindow):
         self.done_view = TodoListView(view_name="已完成")
         self.done_view.setObjectName("doneView")
         self.addSubInterface(self.done_view, FluentIcon.COMPLETED, "已完成")
+
+        # 日程视图弹窗（不添加到 stackedWidget）
+        # 通过工具栏按钮打开
 
         # 底部导航 - 设置
         self.settings_page = SettingsPage()
@@ -221,6 +225,8 @@ class MainWindow(FluentWindow):
             view.add_subtask_clicked.connect(self._open_todo_dialog_for_subtask)
             # 浮窗按钮 - 传递视图标识
             view.float_clicked.connect(lambda k=key: self._toggle_floating(k))
+            # 日程视图按钮
+            view.calendar_clicked.connect(self._show_calendar_view)
 
         # 浮窗点击完成待办
         self.floating.todo_toggled.connect(self._toggle_todo_done)
@@ -229,6 +235,7 @@ class MainWindow(FluentWindow):
         self.settings_page.opacity_changed.connect(self.floating.set_opacity)
         self.settings_page.theme_changed.connect(self._on_theme_changed)
         self.settings_page.show_done_changed.connect(self._on_show_done_changed)
+        self.settings_page.show_week_view_changed.connect(self._on_show_week_view_changed)
         self.settings_page.auto_start_changed.connect(self._on_auto_start_changed)
         self.settings_page.home_page_changed.connect(self._on_home_page_changed)
         self.settings_page.sort_rule_changed.connect(self._on_sort_rule_changed)
@@ -384,10 +391,6 @@ class MainWindow(FluentWindow):
         sort_rules = settings.sort_rules
         done_at_bottom = settings.done_at_bottom
 
-        # 获取全部任务（含子任务）
-        all_todos = self.todo_service.get_all()
-        total_count = len(all_todos)
-
         if settings.show_done_tasks:
             todos = self.todo_service.get_all_including_done(
                 sort_rules=sort_rules,
@@ -397,25 +400,19 @@ class MainWindow(FluentWindow):
             todos = self.todo_service.get_all(
                 status=STATUS_TODO, sort_rules=sort_rules
             )
-        self.todo_list_view._total_count = total_count
         self.todo_list_view.set_todos(self._build_todo_tree(todos))
 
         today_todos = self.todo_service.get_today()
-        self.today_view._total_count = total_count
         self.today_view.set_todos(self._build_todo_tree(today_todos))
 
         important_todos = self.todo_service.get_high_priority()
-        self.important_view._total_count = total_count
         self.important_view.set_todos(self._build_todo_tree(important_todos))
 
         done_todos = self.todo_service.get_all(status=STATUS_DONE)
-        self.done_view._total_count = total_count
         self.done_view.set_todos(self._build_todo_tree(done_todos))
 
-        # 加载分类视图数据
         for cat_id, (view, _) in self._category_nav_items.items():
             cat_todos = self.todo_service.get_by_category(cat_id)
-            view._total_count = total_count
             view.set_todos(self._build_todo_tree(cat_todos))
 
         if self.floating.isVisible():
@@ -475,6 +472,13 @@ class MainWindow(FluentWindow):
         """为父任务新建子任务"""
         dialog = TodoDialog(pid=parent_id, parent=self)
         dialog.todo_saved.connect(self._on_todo_saved)
+        dialog.exec()
+
+    def _show_calendar_view(self):
+        """打开日程视图弹窗"""
+        from views.calendar_view import CalendarDialog
+        todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
+        dialog = CalendarDialog(self._build_todo_tree(todos), parent=self)
         dialog.exec()
 
     def _on_reorder_todos(self, from_id: int, to_id: int, insert_after: bool, current_order: list):
@@ -604,6 +608,14 @@ class MainWindow(FluentWindow):
 
     def _on_show_done_changed(self, checked: bool):
         self._refresh_all_views()
+
+    def _on_show_week_view_changed(self, show: bool):
+        self.todo_list_view.set_show_week_view(show)
+        self.today_view.set_show_week_view(show)
+        self.important_view.set_show_week_view(show)
+        self.done_view.set_show_week_view(show)
+        for view, _ in self._category_nav_items.values():
+            view.set_show_week_view(show)
 
     def _on_home_page_changed(self, page: str):
         self._apply_home_page()

@@ -1,8 +1,9 @@
 """新建/编辑待办对话框"""
+from __future__ import annotations
 import os
 from datetime import date
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QDate
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog
 )
@@ -58,23 +59,6 @@ class TodoDialog(QDialog):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(10)
 
-        # 标题（子任务不显示标题标签）
-        if self._pid is None:
-            title_text = "编辑任务" if self._is_edit else "新建任务"
-            title = SubtitleLabel(title_text)
-            layout.addWidget(title)
-
-            # 分隔线
-            sep = QLabel()
-            sep.setFixedHeight(1)
-            sep.setObjectName("dialogSep")
-            setCustomStyleSheet(
-                sep,
-                "#dialogSep { background-color: rgba(0,0,0,0.08); }",
-                "#dialogSep { background-color: rgba(255,255,255,0.06); }"
-            )
-            layout.addWidget(sep)
-
         # 标题输入
         self.title_edit = LineEdit()
         self.title_edit.setPlaceholderText("输入任务标题...")
@@ -116,10 +100,14 @@ class TodoDialog(QDialog):
 
             self.due_picker = CalendarPicker()
             self.due_picker.setFixedWidth(205)
-            try:
-                self.due_picker.setText("截止日期")
-            except Exception:
-                pass
+            # 新建任务时默认填充今日日期
+            if not self._is_edit:
+                self.due_picker.setDate(QDate.currentDate())
+            else:
+                try:
+                    self.due_picker.setText("截止日期")
+                except Exception:
+                    pass
             due_row.addWidget(self.due_picker)
 
             self.auto_postpone_cb = CheckBox("自动延期")

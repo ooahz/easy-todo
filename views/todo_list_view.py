@@ -1,4 +1,6 @@
 """待办列表视图 - 核心内容区域"""
+from __future__ import annotations
+from datetime import date as date_type
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
@@ -8,6 +10,8 @@ from qfluentwidgets import (
 )
 from views.todo_card import TodoCard
 from views.subtask_card import SubtaskCard
+from views.calendar_view import WeekView
+from config.settings import settings
 
 
 class TodoListView(QWidget):
@@ -18,15 +22,17 @@ class TodoListView(QWidget):
     delete_clicked = Signal(int)
     toggle_done = Signal(int)
     float_clicked = Signal()
+    calendar_clicked = Signal()  # 日程视图按钮点击
     reorder_requested = Signal(int, int, bool, list)  # from_id, to_id, insert_after, current_order
     add_subtask_clicked = Signal(int)  # parent_id
 
-    def __init__(self, parent=None, view_name: str = "", total_count: int = 0):
+    def __init__(self, parent=None, view_name: str = ""):
         super().__init__(parent)
-        self._todos: list[dict] = []  # 父任务列表
-        self._cards: list = []  # 所有卡片（TodoCard 或 SubtaskCard）
+        self._todos: list[dict] = []
+        self._all_todos: list[dict] = []
+        self._cards: list = []
         self._view_name = view_name
-        self._total_count = total_count
+        self._filter_date: date_type | None = None
 
         self._setup_ui()
 
@@ -42,6 +48,13 @@ class TodoListView(QWidget):
 
         self.toolbar.addStretch()
 
+        # 日程视图按钮
+        self.calendar_btn = ToolButton(FluentIcon.CALENDAR)
+        self.calendar_btn.setFixedSize(36, 36)
+        self.calendar_btn.setToolTip("日程视图")
+        self.calendar_btn.clicked.connect(self.calendar_clicked.emit)
+        self.toolbar.addWidget(self.calendar_btn)
+
         # 浮窗按钮
         self.float_btn = ToolButton(FluentIcon.ZOOM)
         self.float_btn.setFixedSize(36, 36)
@@ -56,8 +69,13 @@ class TodoListView(QWidget):
 
         self.main_layout.addLayout(self.toolbar)
 
-        # ---- 列表统计 ----
+        self.week_view = WeekView()
+        self.week_view.filter_changed.connect(self._on_filter_changed)
+        self.week_view.setVisible(settings.show_week_view)
+        self.main_layout.addWidget(self.week_view)
+
         self.stats_label = CaptionLabel("")
+        self.stats_label.setContentsMargins(0, 0, 0, 4)
         self.main_layout.addWidget(self.stats_label)
 
         # ---- 滚动区域 ----
@@ -106,8 +124,60 @@ class TodoListView(QWidget):
 
     def set_todos(self, todos: list[dict]):
         """设置待办列表数据（父任务列表，已包含 children）"""
-        self._todos = todos
+        self._all_todos = todos
+        self.week_view.set_todos(todos)
+        
+        if self._filter_date:
+            self._todos = self._filter_todos_by_date(todos, self._filter_date)
+        else:
+            self._todos = todos
+        
         self._refresh_list()
+
+    def _on_filter_changed(self, filter_date: date_type | None):
+        """处理周视图过滤变化"""
+        self._filter_date = filter_date
+        
+        if filter_date:
+            self._todos = self._filter_todos_by_date(self._all_todos, filter_date)
+        else:
+            self._todos = self._all_todos
+        
+        self._refresh_list()
+
+    def _filter_todos_by_date(self, todos: list[dict], target_date: date_type) -> list[dict]:
+        """根据截止日期过滤任务"""
+        filtered = []
+        
+        for todo in todos:
+            filtered_children = []
+            for child in todo.get("children", []):
+                child_due = child.get("due_date")
+                if child_due:
+                    try:
+                        child_date = date_type.fromisoformat(child_due)
+                        if child_date == target_date:
+                            filtered_children.append(child)
+                    except (ValueError, TypeError):
+                        pass
+            
+            due_date = todo.get("due_date")
+            parent_match = False
+            if due_date:
+                try:
+                    task_date = date_type.fromisoformat(due_date)
+                    if task_date == target_date:
+                        parent_match = True
+                except (ValueError, TypeError):
+                    pass
+            
+            if parent_match or filtered_children:
+                filtered_todo = todo.copy()
+                if not parent_match:
+                    filtered_todo["children"] = filtered_children
+                filtered.append(filtered_todo)
+        
+        return filtered
 
     def _refresh_list(self):
         """刷新列表显示 - 树形渲染：父任务 + 缩进子任务"""
@@ -161,16 +231,30 @@ class TodoListView(QWidget):
         self.list_layout.addStretch()
 
         parent_count = len(self._todos)
-        # 统计当前页面所有任务（父任务+子任务）
         child_count = sum(len(t.get("children", [])) for t in self._todos)
         total_count = parent_count + child_count
-        # 统计已完成数量（父任务+子任务）
-        done_parent = sum(1 for t in self._todos if t.get("status") == 1)
-        done_child = sum(
-            1 for t in self._todos for c in t.get("children", []) if c.get("status") == 1
-        )
-        done_count = done_parent + done_child
-        self.stats_label.setText(f"已完成{done_count}个任务，共{total_count}个任务")
+        
+        if self._filter_date:
+            self.stats_label.setText(f"筛选: {self._filter_date.month}月{self._filter_date.day}日 · 共{total_count}个任务")
+        elif self._view_name == "全部任务":
+            # 全部任务页面：只统计父任务（不统计子任务）
+            from datetime import date
+            all_count = parent_count
+            done_count = sum(1 for t in self._todos if t.get("status") == 1)
+            overdue_count = 0
+            today = date.today()
+            for t in self._todos:
+                if t.get("status") == 0:  # 只统计未完成的
+                    due = t.get("due_date")
+                    if due:
+                        try:
+                            if date.fromisoformat(due) < today:
+                                overdue_count += 1
+                        except:
+                            pass
+            self.stats_label.setText(f"全部任务{all_count} · 已完成{done_count} · 已超期{overdue_count}")
+        else:
+            self.stats_label.setText(f"共{total_count}个任务")
 
     def update_single_todo(self, todo_data: dict):
         """更新单个卡片（父任务或子任务）"""
@@ -191,9 +275,14 @@ class TodoListView(QWidget):
         parent_cards = [c for c in self._cards if not isinstance(c, SubtaskCard)]
         child_cards = [c for c in self._cards if isinstance(c, SubtaskCard)]
         total_count = len(parent_cards) + len(child_cards)
-        done_count = sum(1 for c in self._cards if c.todo_data.get("status") == 1)
-        self.stats_label.setText(f"已完成{done_count}个任务，共{total_count}个任务")
+        self.stats_label.setText(f"共{total_count}个任务")
 
         if len(self._cards) == 0:
             self.scroll_area.setVisible(False)
             self.empty_widget.setVisible(True)
+
+    def set_show_week_view(self, show: bool):
+        """设置是否显示周日程视图"""
+        self.week_view.setVisible(show)
+        if not show:
+            self.week_view.clear_selection()

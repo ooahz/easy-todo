@@ -1,4 +1,5 @@
 """浮窗组件 - 显示当前页面任务列表"""
+from __future__ import annotations
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGraphicsOpacityEffect,

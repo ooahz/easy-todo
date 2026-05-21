@@ -1,4 +1,5 @@
 """Todo 数据模型"""
+from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import Column, Integer, String, Text, Date, DateTime, Boolean, ForeignKey

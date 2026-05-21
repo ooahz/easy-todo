@@ -1,4 +1,5 @@
 """设置页面 - 内嵌导航子页面"""
+from __future__ import annotations
 import os
 import sys
 from pathlib import Path
@@ -24,6 +25,7 @@ class SettingsPage(QWidget):
     opacity_changed = Signal(float)
     theme_changed = Signal(str)
     show_done_changed = Signal(bool)
+    show_week_view_changed = Signal(bool)
     auto_start_changed = Signal(bool)
     home_page_changed = Signal(str)
     sort_rule_changed = Signal(str)
@@ -76,6 +78,7 @@ class SettingsPage(QWidget):
         self.list_layout.addWidget(self._make_card("任务列表", [
             self._create_show_done_cb(),
             self._create_done_at_bottom_cb(),
+            self._create_show_week_view_cb(),
         ]))
 
         self.list_layout.addWidget(self._make_card("排序规则", [
@@ -309,6 +312,12 @@ class SettingsPage(QWidget):
         self.done_at_bottom_cb.setChecked(settings.done_at_bottom)
         self.done_at_bottom_cb.checkStateChanged.connect(self._on_done_at_bottom_changed)
         return self.done_at_bottom_cb
+
+    def _create_show_week_view_cb(self) -> CheckBox:
+        self.show_week_view_cb = CheckBox("显示周日程视图")
+        self.show_week_view_cb.setChecked(settings.show_week_view)
+        self.show_week_view_cb.checkStateChanged.connect(self._on_show_week_view_changed)
+        return self.show_week_view_cb
 
     def _make_category_manage_row(self) -> QHBoxLayout:
         """创建分类管理行"""
@@ -544,6 +553,11 @@ class SettingsPage(QWidget):
         checked = (state == Qt.CheckState.Checked)
         settings.show_done_tasks = checked
         self.show_done_changed.emit(checked)
+
+    def _on_show_week_view_changed(self, state):
+        checked = (state == Qt.CheckState.Checked)
+        settings.show_week_view = checked
+        self.show_week_view_changed.emit(checked)
 
     def _on_auto_start_changed(self, state):
         checked = (state == Qt.CheckState.Checked)

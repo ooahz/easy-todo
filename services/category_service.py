@@ -1,4 +1,5 @@
 """分类业务逻辑"""
+from __future__ import annotations
 from typing import Optional
 
 from models.database import db
