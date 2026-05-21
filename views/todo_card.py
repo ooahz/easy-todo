@@ -14,6 +14,7 @@ from qfluentwidgets import (
 )
 
 from config.constants import PRIORITY_MAP
+from config.settings import settings
 from services.file_service import FileService
 
 
@@ -261,12 +262,7 @@ class TodoCard(CardWidget):
     def _update_bar_color(self):
         """更新左侧色条颜色"""
         color_tag = self.todo_data.get("color_tag")
-        if color_tag:
-            color = color_tag
-        else:
-            priority = self.todo_data.get("priority", 0)
-            colors = {0: "transparent", 1: "#0078D4", 2: "#FF8C00", 3: "#D13438"}
-            color = colors.get(priority, "transparent")
+        color = color_tag if color_tag else "transparent"
         self.priority_bar.setStyleSheet(f"""
             QFrame {{
                 background-color: {color};

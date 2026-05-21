@@ -8,6 +8,8 @@ from PySide6.QtGui import QMouseEvent, QCursor, QIcon, QPainter, QPixmap
 
 from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit, FluentIcon, TransparentToolButton
 
+from config.settings import settings
+
 
 class FloatingWidget(QWidget):
     """浮窗布局"""
@@ -109,6 +111,7 @@ class FloatingWidget(QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setStyleSheet("SmoothScrollArea { border: none; background: transparent; }")
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.list_widget = QWidget()
         self.list_widget.setStyleSheet("background: transparent;")
@@ -403,8 +406,20 @@ class FloatingWidget(QWidget):
             border_left = f"border-left: 3px solid {color_tag};" if color_tag else "border-left: 3px solid transparent;"
 
         status = todo.get("status", 0)
+        due = todo.get("due_date")
+        is_overdue = False
+        if due and status != 1:
+            try:
+                from datetime import date as pydate
+                if pydate.fromisoformat(due) < pydate.today():
+                    is_overdue = True
+            except:
+                pass
+
         if status == 1:
             text_style = f"color: {c['done_text']}; text-decoration: line-through;"
+        elif is_overdue:
+            text_style = f"color: {settings.warning_color};"
         else:
             text_style = f"color: {c['title']};"
 

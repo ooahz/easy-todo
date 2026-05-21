@@ -1,12 +1,12 @@
 """分类管理对话框"""
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QWidget, QDialog, QListWidgetItem, QMessageBox
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QListWidgetItem
 )
 
 from qfluentwidgets import (
     LineEdit, PushButton, PrimaryPushButton, ListWidget,
-    TransparentToolButton, FluentIcon, isDarkTheme, MessageBox
+    TransparentToolButton, FluentIcon, isDarkTheme, SubtitleLabel, MessageBox
 )
 
 from services.category_service import CategoryService
@@ -81,15 +81,62 @@ class CategoryDialog(QDialog):
         self.category_service = CategoryService()
         self._editing_id = None
         super().__init__(parent)
-        self.setWindowTitle("管理分类")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setFixedSize(400, 420)
         self._setup_ui()
         self._load_categories()
 
+        # 窗口拖动相关
+        self._drag_pos = None
+
+    def mousePressEvent(self, event):
+        """鼠标按下记录位置"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        """鼠标移动时拖动窗口"""
+        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        """鼠标释放清除位置"""
+        self._drag_pos = None
+
+    def closeEvent(self, event):
+        """关闭时释放数据库连接"""
+        if hasattr(self, 'category_service') and self.category_service:
+            self.category_service.close()
+        super().closeEvent(event)
+
     def _setup_ui(self):
+        from PySide6.QtWidgets import QFrame
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(20, 12, 20, 16)
         layout.setSpacing(12)
+
+        # ---- 顶部栏 ----
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(8)
+
+        title_label = SubtitleLabel("管理分类")
+        title_label.setStyleSheet(f"font-weight: bold; color: {'#EEE' if isDarkTheme() else '#111'};")
+        top_bar.addWidget(title_label, 1)
+
+        close_btn = TransparentToolButton(FluentIcon.CLOSE)
+        close_btn.setFixedSize(28, 28)
+        close_btn.clicked.connect(self.reject)
+        top_bar.addWidget(close_btn)
+
+        layout.addLayout(top_bar)
+
+        # 分隔线
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background-color: {'#444' if isDarkTheme() else '#DDD'};")
+        layout.addWidget(divider)
 
         # ---- 新建分类输入区 ----
         input_row = QHBoxLayout()
@@ -116,13 +163,20 @@ class CategoryDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
-        # 对话框背景跟随主题
+        screen = self.screen().availableGeometry()
+        x = screen.x() + (screen.width() - self.width()) // 2
+        y = screen.y() + (screen.height() - self.height()) // 2
+        self.move(x, y)
+        # 设置弹窗整体背景色
         if isDarkTheme():
-            self.setStyleSheet(
-                "QDialog { background-color: rgb(43, 43, 43); }"
-                "BodyLabel { color: #DDD; }"
-                "LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }"
-            )
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: rgb(43, 43, 43);
+                }
+                BodyLabel { color: #DDD; }
+                LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+                ListWidget { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+            """)
             # 更新列表项图标颜色
             for i in range(self.category_list.count()):
                 item = self.category_list.item(i)
@@ -130,7 +184,14 @@ class CategoryDialog(QDialog):
                 if widget:
                     widget._update_icon_color()
         else:
-            self.setStyleSheet("")
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: rgb(249, 249, 249);
+                }
+                BodyLabel { color: #333; }
+                LineEdit { background-color: #FFF; color: #333; }
+                ListWidget { background-color: #FFF; color: #333; }
+            """)
             # 更新列表项图标颜色
             for i in range(self.category_list.count()):
                 item = self.category_list.item(i)

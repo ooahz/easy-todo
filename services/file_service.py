@@ -28,10 +28,15 @@ class FileService:
             self._base_path.mkdir(parents=True, exist_ok=True)
         return self._base_path
 
-    def _get_task_folder(self, todo_id: int) -> Path:
-        """获取任务关联文件夹路径"""
+    def _get_task_folder(self, todo_id: int, create: bool = False) -> Path:
+        """获取任务关联文件夹路径
+        
+        :param todo_id: 任务ID
+        :param create: 是否创建文件夹（仅在保存文件时为True）
+        """
         folder = self.base_path / f"task_{todo_id}"
-        folder.mkdir(parents=True, exist_ok=True)
+        if create and not folder.exists():
+            folder.mkdir(parents=True, exist_ok=True)
         return folder
 
     def save_file(self, todo_id: int, source_path: str) -> str:
@@ -45,7 +50,7 @@ class FileService:
         if not source.exists():
             raise FileNotFoundError(f"文件不存在: {source_path}")
 
-        task_folder = self._get_task_folder(todo_id)
+        task_folder = self._get_task_folder(todo_id, create=True)
 
         # 生成唯一文件名避免冲突
         original_name = source.name
@@ -133,3 +138,6 @@ class FileService:
             shutil.rmtree(task_folder)
             return True
         return False
+
+    def close(self):
+        pass

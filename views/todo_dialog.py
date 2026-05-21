@@ -1,20 +1,20 @@
 """新建/编辑待办对话框"""
 from __future__ import annotations
-import os
+
 from datetime import date
 
 from PySide6.QtCore import Signal, Qt, QDate
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame
 )
-
 from qfluentwidgets import (
     LineEdit, TextEdit, ComboBox, CalendarPicker,
     PrimaryPushButton, PushButton, SubtitleLabel, CheckBox,
-    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel
+    FluentIcon, isDarkTheme, TransparentToolButton
 )
 
 from config.constants import PRIORITY_MAP, TODO_COLORS
+from config.settings import settings
 from services.category_service import CategoryService
 from services.file_service import FileService
 
@@ -26,6 +26,8 @@ class TodoDialog(QDialog):
 
     def __init__(self, todo_data: dict = None, parent=None, pid: int = None):
         super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+
         self.todo_data = todo_data
         self._is_edit = todo_data is not None
         # 父任务ID：新建时传入，编辑时从数据读取
@@ -37,11 +39,9 @@ class TodoDialog(QDialog):
 
         # 子任务窗口更小、更简洁
         if self._pid is not None:
-            self.setWindowTitle("新建子任务" if not self._is_edit else "编辑子任务")
-            self.setFixedSize(400, 120)
+            self.setFixedSize(400, 160)
         else:
-            self.setWindowTitle("编辑任务" if self._is_edit else "新建任务")
-            self.setFixedSize(480, 560)
+            self.setFixedSize(480, 500)
 
         self._setup_ui()
         self._connect_signals()
@@ -53,11 +53,56 @@ class TodoDialog(QDialog):
 
         self.setAcceptDrops(True)
 
+        # 窗口拖动相关
+        self._drag_pos = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+
+    def closeEvent(self, event):
+        """关闭时释放数据库连接"""
+        if hasattr(self, '_category_service') and self._category_service:
+            self._category_service.close()
+        if hasattr(self, '_file_service') and self._file_service:
+            self._file_service.close()
+        super().closeEvent(event)
+
     def _setup_ui(self):
         """构建对话框 UI"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(20, 12, 20, 16)
         layout.setSpacing(10)
+
+        # ---- 顶部栏 ----
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(8)
+
+        panel_title = SubtitleLabel("编辑任务" if self._is_edit else "新建任务")
+        panel_title.setStyleSheet("font-weight: bold;")
+        top_bar.addWidget(panel_title, 1)
+
+        close_btn = TransparentToolButton(FluentIcon.CLOSE)
+        close_btn.setFixedSize(28, 28)
+        close_btn.clicked.connect(self.reject)
+        top_bar.addWidget(close_btn)
+
+        layout.addLayout(top_bar)
+
+        # 分隔线
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background-color: {'#444' if isDarkTheme() else '#DDD'};")
+        layout.addWidget(divider)
 
         # 标题输入
         self.title_edit = LineEdit()
@@ -69,8 +114,14 @@ class TodoDialog(QDialog):
         # 子任务不需要以下字段
         if self._pid is None:
             # 描述输入
-            self.desc_edit = TextEdit()
-            self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
+            self._use_markdown = settings.description_mode == "markdown"
+            if self._use_markdown:
+                from views.markdown_editor import MarkdownEditor
+                self.desc_edit = MarkdownEditor()
+                self.desc_edit.setPlaceholderText("支持 Markdown 语法输入...")
+            else:
+                self.desc_edit = TextEdit()
+                self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
             self.desc_edit.setMinimumHeight(72)
             self.desc_edit.setMaximumHeight(110)
             layout.addWidget(self.desc_edit)
@@ -100,6 +151,7 @@ class TodoDialog(QDialog):
 
             self.due_picker = CalendarPicker()
             self.due_picker.setFixedWidth(205)
+            self.due_picker.setToolTip("任务截至日期")
             # 新建任务时默认填充今日日期
             if not self._is_edit:
                 self.due_picker.setDate(QDate.currentDate())
@@ -168,7 +220,7 @@ class TodoDialog(QDialog):
 
         layout.addStretch()
 
-        # 按钮区
+        # ---- 底部按钮区 ----
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
 
@@ -181,7 +233,7 @@ class TodoDialog(QDialog):
 
         self.cancel_btn = PushButton("取消")
         self.cancel_btn.setFixedWidth(100)
-        self.cancel_btn.clicked.connect(self.close)
+        self.cancel_btn.clicked.connect(self.reject)
 
         self.save_btn = PrimaryPushButton("保存")
         self.save_btn.setFixedWidth(100)
@@ -392,23 +444,36 @@ class TodoDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        screen = self.screen().availableGeometry()
+        x = screen.x() + (screen.width() - self.width()) // 2
+        y = screen.y() + (screen.height() - self.height()) // 2
+        self.move(x, y)
         self.title_edit.setFocus()
         self.title_edit.setStyleSheet("")
+        # 设置弹窗整体背景色，使标题栏与内容区一致
         if isDarkTheme():
-            self.setStyleSheet(
-                "QDialog { background-color: rgb(43, 43, 43); }"
-                "SubtitleLabel { color: #EEE; }"
-                "QLabel { color: #DDD; }"
-                "LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }"
-                "TextEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }"
-                "CheckBox { color: #DDD; }"
-            )
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: rgb(43, 43, 43);
+                }
+                SubtitleLabel { color: #EEE; }
+                QLabel { color: #DDD; }
+                LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+                TextEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+                QTextBrowser { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+                CheckBox { color: #DDD; }
+                CompactSpinBox { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+            """)
         else:
-            self.setStyleSheet(
-                "QDialog { background-color: rgb(249, 249, 249); }"
-                "SubtitleLabel { color: #111; }"
-                "QLabel { color: #333; }"
-                "LineEdit { background-color: #FFF; color: #333; }"
-                "TextEdit { background-color: #FFF; color: #333; }"
-                "CheckBox { color: #333; }"
-            )
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: rgb(249, 249, 249);
+                }
+                SubtitleLabel { color: #111; }
+                QLabel { color: #333; }
+                LineEdit { background-color: #FFF; color: #333; }
+                TextEdit { background-color: #FFF; color: #333; }
+                QTextBrowser { background-color: #FFF; color: #333; border: 1px solid #DDD; border-radius: 6px; }
+                CheckBox { color: #333; }
+                CompactSpinBox { background-color: #FFF; color: #333; }
+            """)

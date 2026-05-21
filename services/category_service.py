@@ -100,3 +100,10 @@ class CategoryService:
     def get_count(self) -> int:
         """获取分类数量"""
         return self.session.query(Category).count()
+
+    def close(self):
+        """关闭数据库会话"""
+        try:
+            self.session.close()
+        except Exception:
+            pass
