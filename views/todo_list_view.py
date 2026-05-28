@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
 from qfluentwidgets import (
     PrimaryPushButton, ToolButton, BodyLabel, CaptionLabel, FluentIcon,
-    SmoothScrollArea,
+    SmoothScrollArea, PipsPager, PipsScrollButtonDisplayMode
 )
 from views.todo_card import TodoCard
 from views.subtask_card import SubtaskCard
@@ -34,6 +34,8 @@ class TodoListView(QWidget):
         self._cards: list = []
         self._view_name = view_name
         self._filter_date: date_type | None = None
+        self._page_size = 100  # 每页最多100个父任务
+        self._current_page = 0  # 当前页码（从0开始）
 
         self._setup_ui()
 
@@ -99,6 +101,14 @@ class TodoListView(QWidget):
         self.scroll_area.setWidget(self.scroll_widget)
         self.main_layout.addWidget(self.scroll_area, 1)
 
+        # ---- 分页器 ----
+        self.pager = PipsPager(Qt.Horizontal)
+        self.pager.setNextButtonDisplayMode(PipsScrollButtonDisplayMode.ALWAYS)
+        self.pager.setPreviousButtonDisplayMode(PipsScrollButtonDisplayMode.ALWAYS)
+        self.pager.setVisible(False)
+        self.pager.currentIndexChanged.connect(self._on_page_changed)
+        self.main_layout.addWidget(self.pager, alignment=Qt.AlignCenter)
+
         # ---- 空状态 ----
         self.empty_widget = QWidget()
         empty_layout = QVBoxLayout(self.empty_widget)
@@ -123,7 +133,7 @@ class TodoListView(QWidget):
         self.empty_widget.setVisible(False)
         self.main_layout.addWidget(self.empty_widget)
 
-    def set_todos(self, todos: list[dict]):
+    def set_todos(self, todos: list[dict], recurring_instances: list[dict] = None):
         """设置待办列表数据（父任务列表，已包含 children）"""
         self._all_todos = todos
         self.week_view.set_todos(todos)
@@ -132,7 +142,7 @@ class TodoListView(QWidget):
             self._todos = self._filter_todos_by_date(todos, self._filter_date)
         else:
             self._todos = todos
-        
+
         self._refresh_list()
 
     def _on_filter_changed(self, filter_date: date_type | None):
@@ -144,6 +154,29 @@ class TodoListView(QWidget):
         else:
             self._todos = self._all_todos
         
+        # 重置到第一页
+        self._current_page = 0
+        self._update_pager()
+        self._refresh_list()
+
+    def _update_pager(self):
+        """更新分页器状态"""
+        total = len(self._todos)
+        total_pages = (total + self._page_size - 1) // self._page_size if total > 0 else 1
+        
+        if total_pages <= 1:
+            self.pager.setVisible(False)
+        else:
+            self.pager.setVisible(True)
+            self.pager.setPageNumber(total_pages)
+            # 确保当前页不越界
+            if self._current_page >= total_pages:
+                self._current_page = total_pages - 1
+            self.pager.setCurrentIndex(self._current_page)
+
+    def _on_page_changed(self, index: int):
+        """分页器页码变化"""
+        self._current_page = index
         self._refresh_list()
 
     def _filter_todos_by_date(self, todos: list[dict], target_date: date_type) -> list[dict]:
@@ -191,14 +224,19 @@ class TodoListView(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        has_todos = len(self._todos) > 0
+        # 分页：计算当前页的数据
+        start = self._current_page * self._page_size
+        end = start + self._page_size
+        page_todos = self._todos[start:end]
+
+        has_todos = len(page_todos) > 0
         self.scroll_area.setVisible(has_todos)
         self.empty_widget.setVisible(not has_todos)
 
         # 构建父任务 ID 列表（用于拖拽排序）
-        parent_ids = [t["id"] for t in self._todos]
+        parent_ids = [t["id"] for t in page_todos]
 
-        for todo_data in self._todos:
+        for todo_data in page_todos:
             # 父任务卡片
             card = TodoCard(todo_data)
             card.edit_clicked.connect(self.edit_clicked.emit)

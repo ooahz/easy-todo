@@ -36,7 +36,7 @@ class Todo(Base):
     )
 
     def to_dict(self):
-        """序列化为字典，不包含 children（由调用方在内存中构建树形）"""
+        """序列化为字典"""
         return {
             "id": self.id,
             "pid": self.pid,

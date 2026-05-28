@@ -1,21 +1,20 @@
-"""日程视图 - 月历形式展示任务（弹窗模式）"""
+"""日程视图"""
 from __future__ import annotations
-from datetime import date, timedelta
+
 from calendar import monthrange
+from datetime import date, timedelta
 
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
-    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QGraphicsDropShadowEffect, QSizePolicy
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QSizePolicy
 )
-from PySide6.QtGui import QColor
-
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, ToolButton, FluentIcon, isDarkTheme, StrongBodyLabel, IconWidget
+    BodyLabel, CaptionLabel, ToolButton, FluentIcon, isDarkTheme, StrongBodyLabel, SubtitleLabel, TransparentToolButton
 )
 
 
 class WeekView(QWidget):
-    """周视图组件 - 显示当前周的日程概览"""
+    """周视图组件"""
 
     filter_changed = Signal(object)
 
@@ -29,22 +28,22 @@ class WeekView(QWidget):
 
     def _setup_ui(self):
         dark = isDarkTheme()
-        
+
         self.setStyleSheet(f"""
             WeekView {{
                 background-color: transparent;
             }}
         """)
-        
+
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(4)
-        
+
         # 导航行
         nav_layout = QHBoxLayout()
         nav_layout.setSpacing(4)
         nav_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # 上一周按钮
         self.prev_week_btn = ToolButton(FluentIcon.LEFT_ARROW)
         self.prev_week_btn.setFixedSize(24, 56)
@@ -52,20 +51,20 @@ class WeekView(QWidget):
         self.prev_week_btn.setToolTip("上一周")
         self.prev_week_btn.clicked.connect(self._prev_week)
         nav_layout.addWidget(self.prev_week_btn)
-        
+
         # 日期显示区域
         self.days_layout = QHBoxLayout()
         self.days_layout.setSpacing(4)
         self.days_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self._day_widgets: list[dict] = []
         for i in range(7):
             day_widget = self._create_day_widget(i)
             self.days_layout.addWidget(day_widget["frame"])
             self._day_widgets.append(day_widget)
-        
+
         nav_layout.addLayout(self.days_layout)
-        
+
         # 下一周按钮
         self.next_week_btn = ToolButton(FluentIcon.RIGHT_ARROW)
         self.next_week_btn.setFixedSize(24, 56)
@@ -73,9 +72,9 @@ class WeekView(QWidget):
         self.next_week_btn.setToolTip("下一周")
         self.next_week_btn.clicked.connect(self._next_week)
         nav_layout.addWidget(self.next_week_btn)
-        
+
         self.main_layout.addLayout(nav_layout)
-        
+
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setStyleSheet(f"""
@@ -86,7 +85,7 @@ class WeekView(QWidget):
             }}
         """)
         self.main_layout.addWidget(separator)
-        
+
         self._update_week_display()
 
     def _prev_week(self):
@@ -109,18 +108,18 @@ class WeekView(QWidget):
 
     def _create_day_widget(self, index: int) -> dict:
         dark = isDarkTheme()
-        
+
         frame = QFrame()
         frame.setObjectName("dayFrame")
         frame.setCursor(Qt.PointingHandCursor)
         frame.setFixedHeight(56)
         frame.mousePressEvent = lambda e, idx=index: self._on_day_clicked(idx)
-        
+
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(2)
         layout.setAlignment(Qt.AlignCenter)
-        
+
         weekday_label = CaptionLabel()
         weekday_label.setAlignment(Qt.AlignCenter)
         if dark:
@@ -132,7 +131,7 @@ class WeekView(QWidget):
             font-size: 10px;
         """)
         layout.addWidget(weekday_label)
-        
+
         day_label = BodyLabel()
         day_label.setAlignment(Qt.AlignCenter)
         day_label.setStyleSheet(f"""
@@ -141,10 +140,10 @@ class WeekView(QWidget):
             font-weight: 600;
         """)
         layout.addWidget(day_label)
-        
-        weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+
+        weekdays = ["一", "二", "三", "四", "五", "六", "日"]
         weekday_label.setText(weekdays[index])
-        
+
         return {
             "frame": frame,
             "weekday_label": weekday_label,
@@ -155,32 +154,32 @@ class WeekView(QWidget):
     def _on_day_clicked(self, index: int):
         day_widget = self._day_widgets[index]
         clicked_date = day_widget["date"]
-        
+
         if self._selected_date == clicked_date:
             self._selected_date = None
         else:
             self._selected_date = clicked_date
-        
+
         self._update_week_display()
         self.filter_changed.emit(self._selected_date)
 
     def _update_week_display(self):
         dark = isDarkTheme()
         today = date.today()
-        
+
         weekday = today.weekday()
-        # 计算当前显示周的起始日期（包含周偏移）
+        # 表头从周一开始，weekday() 返回 0=周一，直接减去得到本周周一
         days_offset = self._week_offset * 7
-        start_of_week = today - timedelta(days=(weekday + 1) % 7) + timedelta(days=days_offset)
-        
+        start_of_week = today - timedelta(days=weekday) + timedelta(days=days_offset)
+
         for i, day_widget in enumerate(self._day_widgets):
             current_date = start_of_week + timedelta(days=i)
             day_widget["date"] = current_date
             day_widget["day_label"].setText(f"{current_date.month}/{current_date.day}")
-            
+
             is_selected = current_date == self._selected_date
             has_pending = current_date in self._pending_dates
-            
+
             if is_selected:
                 day_widget["frame"].setStyleSheet(f"""
                     QFrame#dayFrame {{
@@ -246,18 +245,19 @@ class WeekView(QWidget):
                     font-weight: 600;
                 """)
 
-    def set_todos(self, todos: list[dict]):
+    def set_todos(self, todos: list[dict], recurring_instances: list[dict] = None):
         self._todos = todos
+        self._recurring_instances = recurring_instances or []
         self._calculate_pending_dates()
         self._update_week_display()
 
     def _calculate_pending_dates(self):
         self._pending_dates = set()
-        
+
         for todo in self._todos:
             if todo.get("status") == 1:
                 continue
-            
+
             due_date = todo.get("due_date")
             if due_date:
                 try:
@@ -265,7 +265,7 @@ class WeekView(QWidget):
                     self._pending_dates.add(task_date)
                 except (ValueError, TypeError):
                     pass
-            
+
             for child in todo.get("children", []):
                 if child.get("status") == 1:
                     continue
@@ -295,13 +295,12 @@ class WeekView(QWidget):
 class CalendarDialog(QDialog):
     """日程视图弹窗"""
 
-    def __init__(self, todos: list[dict], parent=None):
+    def __init__(self, todos: list[dict], recurring_instances: list[dict] = None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("日程视图")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setMinimumSize(680, 400)
         self.setMaximumSize(1200, 900)
         self.resize(760, 520)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
 
         self._current_date = date.today()
         self._todos = todos
@@ -309,6 +308,30 @@ class CalendarDialog(QDialog):
         self.refresh_calendar()
         # 根据内容调整窗口大小
         self.adjustSize()
+
+        # 窗口拖动相关
+        self._drag_pos = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        """鼠标释放清除位置"""
+        self._drag_pos = None
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        screen = self.screen().availableGeometry()
+        x = screen.x() + (screen.width() - self.width()) // 2
+        y = screen.y() + (screen.height() - self.height()) // 2
+        self.move(x, y)
 
     def _get_tooltip_style(self) -> str:
         """获取 tooltip 样式片段"""
@@ -339,39 +362,40 @@ class CalendarDialog(QDialog):
         """构建 UI"""
         dark = isDarkTheme()
         tooltip_style = self._get_tooltip_style()
-        
+
+        # 设置弹窗整体背景色，使标题栏与内容区一致
         bg_color = "#1E1E1E" if dark else "#FAFAFA"
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {bg_color};
-                border-radius: 12px;
             }}
             {tooltip_style}
         """)
 
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(24, 20, 24, 20)
+        self.main_layout.setContentsMargins(24, 12, 24, 20)
         self.main_layout.setSpacing(12)
 
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(0)
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(8)
 
-        title_label = StrongBodyLabel("日程视图")
-        title_label.setStyleSheet(f"""
-            font-size: 18px;
-            font-weight: bold;
-            color: {'#FFF' if dark else '#1A1A1A'};
-        """)
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
+        title_label = SubtitleLabel("日程视图")
+        title_label.setStyleSheet(f"font-weight: bold; color: {'#EEE' if dark else '#111'};")
+        top_bar.addWidget(title_label, 1)
 
-        today_btn = ToolButton(FluentIcon.CALENDAR)
-        today_btn.setFixedSize(32, 32)
-        today_btn.setToolTip("回到今天")
-        today_btn.clicked.connect(self._go_to_today)
-        header_layout.addWidget(today_btn)
+        close_btn = TransparentToolButton(FluentIcon.CLOSE)
+        close_btn.setFixedSize(28, 28)
+        close_btn.clicked.connect(self.reject)
+        top_bar.addWidget(close_btn)
 
-        self.main_layout.addLayout(header_layout)
+        self.main_layout.addLayout(top_bar)
+
+        # 导航栏
+        nav_layout = QHBoxLayout()
+        nav_layout.setSpacing(8)
+
+        nav_layout.addStretch()
+        self.main_layout.addLayout(nav_layout)
 
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
@@ -410,14 +434,20 @@ class CalendarDialog(QDialog):
         self.next_btn.clicked.connect(self._next_month)
         self.toolbar.addWidget(self.next_btn)
 
+        self.today_btn = ToolButton(FluentIcon.CALENDAR)
+        self.today_btn.setFixedSize(32, 32)
+        self.today_btn.setToolTip("回到今天")
+        self.today_btn.clicked.connect(self._go_to_today)
+        self.toolbar.addWidget(self.today_btn)
+
         self.toolbar.addStretch()
 
         self.main_layout.addLayout(self.toolbar)
 
         self.week_header = QHBoxLayout()
         self.week_header.setSpacing(4)
-        weekdays = ["日", "一", "二", "三", "四", "五", "六"]
-        
+        weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+
         for i, wd in enumerate(weekdays):
             label = CaptionLabel(wd)
             label.setAlignment(Qt.AlignCenter)
@@ -525,7 +555,6 @@ class CalendarDialog(QDialog):
         _, days_in_month = monthrange(year, month)
 
         start_weekday = first_day.weekday()
-        start_weekday = (start_weekday + 1) % 7
 
         for row in range(6):
             for col in range(7):
@@ -557,7 +586,7 @@ class CalendarDialog(QDialog):
 
             is_today = (cell_date == today)
             cell.setProperty("is_today", is_today)
-            
+
             day_label_style = self._get_day_label_style(is_today, col)
             cell.day_label.setStyleSheet(day_label_style)
             cell.day_label.setText(str(day))
@@ -601,10 +630,9 @@ class CalendarDialog(QDialog):
         return tasks
 
     def _get_day_label_style(self, is_today: bool, col: int) -> str:
-        """获取日期数字样式"""
         dark = isDarkTheme()
         is_weekend = col == 0 or col == 6
-        
+
         if is_today:
             return """
                 QLabel {
@@ -617,19 +645,19 @@ class CalendarDialog(QDialog):
                     min-height: 20px;
                 }
             """
-        
+
         if dark:
             color = "#FF8A80" if is_weekend else "#E0E0E0"
         else:
             color = "#E53935" if is_weekend else "#424242"
-        
+
         return f"color: {color}; font-size: 12px; font-weight: {'600' if is_weekend else '500'};"
 
     def _get_cell_style(self, is_today: bool, has_tasks: bool, col: int) -> str:
         """获取单元格样式"""
         dark = isDarkTheme()
         is_weekend = col == 0 or col == 6
-        
+
         if dark:
             if is_today:
                 bg_color = "rgba(0, 120, 212, 0.15)"

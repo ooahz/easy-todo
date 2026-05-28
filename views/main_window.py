@@ -39,6 +39,7 @@ class MainWindow(FluentWindow):
         # 当前视图标识
         self._current_view_key = "all"
         self._tray_tip_shown = False
+        self._detail_dialog = None  # 任务详情对话框引用
 
         # 分类导航项缓存 {category_id: (interface, navigation_widget)}
         self._category_nav_items: dict[int, tuple] = {}
@@ -127,7 +128,7 @@ class MainWindow(FluentWindow):
         else:
             self._position_floating()
 
-        # 固定状态下自动显示浮窗（延迟到主题应用后）
+        # 固定状态下自动显示浮窗
         self._restore_floating_pending = settings.floating_pinned
 
     def _position_floating(self):
@@ -193,13 +194,12 @@ class MainWindow(FluentWindow):
         self.raise_()
 
     def _tray_toggle_floating(self):
-        """从托盘切换浮窗显示"""
-        if self.floating.isVisible():
-            self.floating.hide()
-        else:
+        """从托盘显示浮窗"""
+        if not self.floating.isVisible():
             self._position_floating()
             self._update_floating_data(self._current_view_key)
-            self.floating.show()
+        self.floating.show()
+        self.floating.activateWindow()
 
     def _tray_quit(self):
         """从托盘退出应用"""
@@ -272,13 +272,12 @@ class MainWindow(FluentWindow):
                     break
 
     def _toggle_floating(self, view_key: str = None):
-        """切换浮窗显示/隐藏"""
-        if self.floating.isVisible():
-            self.floating.hide()
-        else:
+        """显示浮窗"""
+        if not self.floating.isVisible():
             self._position_floating()
-            self._update_floating_data(view_key or self._current_view_key)
-            self.floating.show()
+        self._update_floating_data(view_key or self._current_view_key)
+        self.floating.show()
+        self.floating.activateWindow()
 
     def _update_floating_data(self, view_key: str):
         """根据视图标识更新浮窗数据"""
@@ -477,14 +476,31 @@ class MainWindow(FluentWindow):
             todo_tree = self._build_todo_tree([todo])
             if todo_tree:
                 dialog = TodoDetailDialog(todo_tree[0], parent=self)
-                dialog.edit_clicked.connect(self._open_todo_dialog)
-                dialog.delete_clicked.connect(self._delete_todo)
-                dialog.toggle_done.connect(self._toggle_todo_done)
-                dialog.subtask_toggle_done.connect(self._toggle_todo_done)
                 dialog.exec()
+                if dialog._pending_action:
+                    action, tid = dialog._pending_action
+                if action == "toggle_done":
+                    self._toggle_todo_done(tid)
+                elif action == "edit":
+                    self._open_todo_dialog(tid)
+                elif action == "delete":
+                    self._delete_todo(tid)
+                elif action == "subtask_toggle_done":
+                    self._toggle_todo_done(tid)
 
     def _open_todo_dialog_for_subtask(self, parent_id: int):
         """为父任务新建子任务"""
+        # 检查子任务数量限制
+        children_count = self.todo_service.get_children_count(parent_id)
+        if children_count >= 15:
+            InfoBar.warning(
+                title="子任务已达上限",
+                content="每个父任务最多创建 15 个子任务",
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000
+            )
+            return
         dialog = TodoDialog(pid=parent_id, parent=self)
         dialog.todo_saved.connect(self._on_todo_saved)
         dialog.exec()

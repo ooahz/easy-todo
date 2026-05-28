@@ -79,7 +79,7 @@ class TodoService:
         return todo
 
     def delete(self, todo_id: int) -> bool:
-        """删除待办事项（子任务级联删除由数据库处理）"""
+        """删除待办事项"""
         todo = self.session.query(Todo).filter(Todo.id == todo_id).first()
         if not todo:
             return False
@@ -137,7 +137,7 @@ class TodoService:
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:
-        """自动延期过期任务（仅父任务，不处理子任务）"""
+        """自动延期过期任务"""
         today = date.today()
         count = self.session.query(Todo).filter(
             Todo.pid.is_(None),  # 只处理父任务
@@ -149,14 +149,12 @@ class TodoService:
         self.session.commit()
         return count
 
-    # ---- 查询：返回所有任务（含子任务），由调用方构建树形结构 ----
-
+    # ---- 查询：返回所有任务（含子任务） ----
     def get_all(self, status: int = STATUS_TODO,
                 priority: Optional[int] = None, color_tag: Optional[str] = None,
                 category_id: Optional[int] = None,
                 sort_by: str = "created_at", sort_order: str = "desc",
                 sort_rules: list[str] = None) -> list[Todo]:
-        """获取所有任务（含子任务），由调用方在内存中构建树形"""
         query = self.session.query(Todo).filter(Todo.status == status)
 
         if priority is not None:
@@ -181,7 +179,7 @@ class TodoService:
                                 sort_rules: list[str] = None,
                                 category_id: Optional[int] = None,
                                 **kwargs) -> list[Todo]:
-        """获取所有任务（含已完成），由调用方在内存中构建树形"""
+        """获取所有任务（含已完成）"""
         query = self.session.query(Todo).filter(
             Todo.status.in_([STATUS_TODO, STATUS_DONE])
         )

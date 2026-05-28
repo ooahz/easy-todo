@@ -304,7 +304,7 @@ class SettingsPage(QWidget):
         return row
 
     def _create_show_done_cb(self) -> CheckBox:
-        self.show_done_cb = CheckBox("在任务列表中展示已完成的任务")
+        self.show_done_cb = CheckBox("显示已完成的任务")
         self.show_done_cb.setChecked(settings.show_done_tasks)
         self.show_done_cb.checkStateChanged.connect(self._on_show_done_changed)
         return self.show_done_cb

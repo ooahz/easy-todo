@@ -14,7 +14,8 @@ class Settings:
     DEFAULT = {
         "theme": "light",  # light / dark / system
         "theme_color": "#0078D4",
-        "window_width": 520,
+        "warning_color": "#FF8C00",
+        "window_width": 720,
         "window_height": 520,
         "window_x": None,
         "window_y": None,
@@ -79,7 +80,17 @@ class Settings:
         self.save()
 
     @property
+    def warning_color(self) -> str:
+        return self._data.get("warning_color", "#FF8C00")
+
+    @warning_color.setter
+    def warning_color(self, value: str):
+        self._data["warning_color"] = value
+        self.save()
+
+    @property
     def window_size(self) -> tuple:
+        print("window_size", self._data.get("window_width", 1100),)
         return (self._data.get("window_width", 1100),
                 self._data.get("window_height", 700))
 

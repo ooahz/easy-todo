@@ -177,7 +177,7 @@ class FileItem(CardWidget):
 
 
 class TodoDetailDialog(MessageBoxBase):
-    """任务详情对话框 - 模态弹窗"""
+    """任务详情对话框"""
 
     edit_clicked = Signal(int)
     delete_clicked = Signal(int)
@@ -189,12 +189,19 @@ class TodoDetailDialog(MessageBoxBase):
         self._todo_data = todo_data
         self._file_service = FileService()
         self._current_todo_id = todo_data["id"]
+        self._pending_action = None
 
         self.widget.setMinimumWidth(480)
         self.widget.setMaximumWidth(560)
 
         self._setup_content()
         self._rebuild_content()
+
+    def closeEvent(self, event):
+        """关闭时释放数据库连接"""
+        if hasattr(self, '_file_service') and self._file_service:
+            self._file_service.close()
+        super().closeEvent(event)
 
     def _setup_content(self):
         """构建对话框内容 - 使用 viewLayout 而非覆盖 vBoxLayout"""
@@ -262,16 +269,6 @@ class TodoDetailDialog(MessageBoxBase):
             QScrollArea {{
                 border: none;
                 background-color: transparent;
-            }}
-            QScrollBar:vertical {{
-                border: none;
-                background: transparent;
-                width: 6px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {c['divider']};
-                border-radius: 3px;
-                min-height: 30px;
             }}
         """)
 
@@ -592,13 +589,17 @@ class TodoDetailDialog(MessageBoxBase):
             self.done_btn.setIcon(FluentIcon.COMPLETED)
 
     def _on_toggle_done(self):
-        self.toggle_done.emit(self._current_todo_id)
+        self._pending_action = ("toggle_done", self._current_todo_id)
         self.reject()
 
     def _on_edit(self):
-        self.edit_clicked.emit(self._current_todo_id)
+        self._pending_action = ("edit", self._current_todo_id)
         self.reject()
 
     def _on_delete(self):
-        self.delete_clicked.emit(self._current_todo_id)
+        self._pending_action = ("delete", self._current_todo_id)
+        self.reject()
+
+    def _on_subtask_toggle(self, todo_id: int):
+        self._pending_action = ("subtask_toggle_done", todo_id)
         self.reject()

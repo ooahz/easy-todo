@@ -138,3 +138,6 @@ class FileService:
             shutil.rmtree(task_folder)
             return True
         return False
+
+    def close(self):
+        pass
