@@ -53,7 +53,7 @@ class TodoCard(CardWidget):
         super().__init__(parent)
         self.todo_data = todo_data
         self.todo_id = todo_data["id"]
-        self._is_done = todo_data["status"] == 1
+        self._is_done = self._calc_is_done(todo_data)
         self._is_selected = False
         self._file_service = FileService()
 
@@ -65,6 +65,13 @@ class TodoCard(CardWidget):
 
         self._setup_ui()
         self._apply_styles()
+
+    def _calc_is_done(self, todo_data: dict) -> bool:
+        if todo_data["status"] == 1:
+            return True
+        if todo_data.get("recurrence_type"):
+            return date.today() in todo_data.get("_completed_dates", set())
+        return False
 
     def _setup_ui(self):
         """构建卡片 UI"""
@@ -140,6 +147,17 @@ class TodoCard(CardWidget):
                 info_parts.append("今天")
             else:
                 info_parts.append(f"{due}")
+
+        recurrence = self.todo_data.get("recurrence_type")
+        if recurrence:
+            from config.constants import RECURRENCE_TYPES
+            interval = self.todo_data.get("recurrence_interval", 1)
+            type_name = RECURRENCE_TYPES.get(recurrence, "")
+            if interval > 1:
+                unit = {"daily": "天", "weekly": "周", "monthly": "月", "yearly": "年"}.get(recurrence, "")
+                info_parts.append(f"每{interval}{unit}")
+            else:
+                info_parts.append(type_name)
 
         file_count = self._file_service.get_file_count(self.todo_id)
         if file_count > 0:
@@ -338,7 +356,7 @@ class TodoCard(CardWidget):
     def update_data(self, todo_data: dict):
         """更新卡片数据"""
         self.todo_data = todo_data
-        self._is_done = todo_data["status"] == 1
+        self._is_done = self._calc_is_done(todo_data)
         self.checkbox.blockSignals(True)
         self.checkbox.setChecked(self._is_done)
         self.checkbox.blockSignals(False)

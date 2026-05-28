@@ -20,6 +20,9 @@ class Todo(Base):
     color_tag = Column(String(7), default=None, nullable=True)
     due_date = Column(Date, nullable=True)
     auto_postpone = Column(Boolean, default=False)  # 自动延期
+    recurrence_type = Column(String(20), default=None, nullable=True)  # daily/weekly/monthly/yearly
+    recurrence_interval = Column(Integer, default=1)  # 间隔数
+    recurrence_end_date = Column(Date, nullable=True)  # 重复结束日期
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     sort_order = Column(Integer, default=0)
@@ -47,6 +50,9 @@ class Todo(Base):
             "color_tag": self.color_tag,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "auto_postpone": self.auto_postpone,
+            "recurrence_type": self.recurrence_type,
+            "recurrence_interval": self.recurrence_interval,
+            "recurrence_end_date": self.recurrence_end_date.isoformat() if self.recurrence_end_date else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "sort_order": self.sort_order,

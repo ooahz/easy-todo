@@ -43,6 +43,14 @@ TODO_COLORS = [
     ("棕色", "#8B4513"),
 ]
 
+# 重复类型
+RECURRENCE_TYPES = {
+    "daily": "每天",
+    "weekly": "每周",
+    "monthly": "每月",
+    "yearly": "每年",
+}
+
 # 应用信息
 APP_NAME = "Easy Todo"
 APP_VERSION = "1.1.0"

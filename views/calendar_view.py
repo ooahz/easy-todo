@@ -1,15 +1,19 @@
-"""日程视图"""
+"""日程视图 - 月历形式展示任务（弹窗模式）"""
 from __future__ import annotations
-
-from calendar import monthrange
 from datetime import date, timedelta
+from calendar import monthrange
+
+from services.recurrence_utils import matches_recurrence, generate_occurrences
 
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
-    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QSizePolicy
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QGraphicsDropShadowEffect, QSizePolicy
 )
+from PySide6.QtGui import QColor
+
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, ToolButton, FluentIcon, isDarkTheme, StrongBodyLabel, SubtitleLabel, TransparentToolButton
+    BodyLabel, CaptionLabel, ToolButton, FluentIcon, isDarkTheme, StrongBodyLabel, IconWidget, SubtitleLabel,
+    TransparentToolButton
 )
 
 
@@ -28,22 +32,22 @@ class WeekView(QWidget):
 
     def _setup_ui(self):
         dark = isDarkTheme()
-
+        
         self.setStyleSheet(f"""
             WeekView {{
                 background-color: transparent;
             }}
         """)
-
+        
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(4)
-
+        
         # 导航行
         nav_layout = QHBoxLayout()
         nav_layout.setSpacing(4)
         nav_layout.setContentsMargins(0, 0, 0, 0)
-
+        
         # 上一周按钮
         self.prev_week_btn = ToolButton(FluentIcon.LEFT_ARROW)
         self.prev_week_btn.setFixedSize(24, 56)
@@ -51,20 +55,20 @@ class WeekView(QWidget):
         self.prev_week_btn.setToolTip("上一周")
         self.prev_week_btn.clicked.connect(self._prev_week)
         nav_layout.addWidget(self.prev_week_btn)
-
+        
         # 日期显示区域
         self.days_layout = QHBoxLayout()
         self.days_layout.setSpacing(4)
         self.days_layout.setContentsMargins(0, 0, 0, 0)
-
+        
         self._day_widgets: list[dict] = []
         for i in range(7):
             day_widget = self._create_day_widget(i)
             self.days_layout.addWidget(day_widget["frame"])
             self._day_widgets.append(day_widget)
-
+        
         nav_layout.addLayout(self.days_layout)
-
+        
         # 下一周按钮
         self.next_week_btn = ToolButton(FluentIcon.RIGHT_ARROW)
         self.next_week_btn.setFixedSize(24, 56)
@@ -72,9 +76,9 @@ class WeekView(QWidget):
         self.next_week_btn.setToolTip("下一周")
         self.next_week_btn.clicked.connect(self._next_week)
         nav_layout.addWidget(self.next_week_btn)
-
+        
         self.main_layout.addLayout(nav_layout)
-
+        
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setStyleSheet(f"""
@@ -85,7 +89,7 @@ class WeekView(QWidget):
             }}
         """)
         self.main_layout.addWidget(separator)
-
+        
         self._update_week_display()
 
     def _prev_week(self):
@@ -108,18 +112,18 @@ class WeekView(QWidget):
 
     def _create_day_widget(self, index: int) -> dict:
         dark = isDarkTheme()
-
+        
         frame = QFrame()
         frame.setObjectName("dayFrame")
         frame.setCursor(Qt.PointingHandCursor)
         frame.setFixedHeight(56)
         frame.mousePressEvent = lambda e, idx=index: self._on_day_clicked(idx)
-
+        
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(2)
         layout.setAlignment(Qt.AlignCenter)
-
+        
         weekday_label = CaptionLabel()
         weekday_label.setAlignment(Qt.AlignCenter)
         if dark:
@@ -131,7 +135,7 @@ class WeekView(QWidget):
             font-size: 10px;
         """)
         layout.addWidget(weekday_label)
-
+        
         day_label = BodyLabel()
         day_label.setAlignment(Qt.AlignCenter)
         day_label.setStyleSheet(f"""
@@ -141,7 +145,7 @@ class WeekView(QWidget):
         """)
         layout.addWidget(day_label)
 
-        weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+        weekdays = ["日", "一", "二", "三", "四", "五", "六"]
         weekday_label.setText(weekdays[index])
 
         return {
@@ -168,9 +172,9 @@ class WeekView(QWidget):
         today = date.today()
 
         weekday = today.weekday()
-        # 表头从周一开始，weekday() 返回 0=周一，直接减去得到本周周一
+        # 计算当前显示周的起始日期（包含周偏移）
         days_offset = self._week_offset * 7
-        start_of_week = today - timedelta(days=weekday) + timedelta(days=days_offset)
+        start_of_week = today - timedelta(days=(weekday + 1) % 7) + timedelta(days=days_offset)
 
         for i, day_widget in enumerate(self._day_widgets):
             current_date = start_of_week + timedelta(days=i)
@@ -245,24 +249,41 @@ class WeekView(QWidget):
                     font-weight: 600;
                 """)
 
-    def set_todos(self, todos: list[dict], recurring_instances: list[dict] = None):
+    def set_todos(self, todos: list[dict]):
         self._todos = todos
-        self._recurring_instances = recurring_instances or []
         self._calculate_pending_dates()
         self._update_week_display()
 
     def _calculate_pending_dates(self):
         self._pending_dates = set()
 
+        today = date.today()
+        week_start = today - timedelta(days=(today.weekday() + 1) % 7) - timedelta(weeks=2)
+        week_end = week_start + timedelta(weeks=5) - timedelta(days=1)
+
         for todo in self._todos:
             if todo.get("status") == 1:
                 continue
 
-            due_date = todo.get("due_date")
-            if due_date:
+            due_date_str = todo.get("due_date")
+            if due_date_str:
                 try:
-                    task_date = date.fromisoformat(due_date)
-                    self._pending_dates.add(task_date)
+                    task_date = date.fromisoformat(due_date_str)
+                    recurrence_type = todo.get("recurrence_type")
+                    if recurrence_type:
+                        end_str = todo.get("recurrence_end_date")
+                        end_date = date.fromisoformat(end_str) if end_str else None
+                        interval = todo.get("recurrence_interval", 1)
+                        completed_dates = todo.get("_completed_dates", set())
+                        occurrences = generate_occurrences(
+                            task_date, week_start, week_end,
+                            recurrence_type, interval, end_date
+                        )
+                        for occ in occurrences:
+                            if occ not in completed_dates:
+                                self._pending_dates.add(occ)
+                    else:
+                        self._pending_dates.add(task_date)
                 except (ValueError, TypeError):
                     pass
 
@@ -295,7 +316,7 @@ class WeekView(QWidget):
 class CalendarDialog(QDialog):
     """日程视图弹窗"""
 
-    def __init__(self, todos: list[dict], recurring_instances: list[dict] = None, parent=None):
+    def __init__(self, todos: list[dict], parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setMinimumSize(680, 400)
@@ -362,8 +383,7 @@ class CalendarDialog(QDialog):
         """构建 UI"""
         dark = isDarkTheme()
         tooltip_style = self._get_tooltip_style()
-
-        # 设置弹窗整体背景色，使标题栏与内容区一致
+        
         bg_color = "#1E1E1E" if dark else "#FAFAFA"
         self.setStyleSheet(f"""
             QDialog {{
@@ -446,7 +466,7 @@ class CalendarDialog(QDialog):
 
         self.week_header = QHBoxLayout()
         self.week_header.setSpacing(4)
-        weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+        weekdays = ["日", "一", "二", "三", "四", "五", "六"]
 
         for i, wd in enumerate(weekdays):
             label = CaptionLabel(wd)
@@ -555,6 +575,7 @@ class CalendarDialog(QDialog):
         _, days_in_month = monthrange(year, month)
 
         start_weekday = first_day.weekday()
+        start_weekday = (start_weekday + 1) % 7
 
         for row in range(6):
             for col in range(7):
@@ -594,7 +615,11 @@ class CalendarDialog(QDialog):
             day_tasks = self._get_tasks_for_date(cell_date)
 
             for task in day_tasks[:4]:
-                task_label = QLabel(task["title"][:8] + ".." if len(task["title"]) > 8 else task["title"])
+                title = task["title"]
+                if task.get("_is_virtual"):
+                    title = "🔁 " + title
+                display = title[:8] + ".." if len(title) > 8 else title
+                task_label = QLabel(display)
                 task_label.setStyleSheet(self._get_task_style(task))
                 task_label.setToolTip(task["title"])
                 cell.tasks_layout.addWidget(task_label)
@@ -610,12 +635,25 @@ class CalendarDialog(QDialog):
         """获取指定日期的任务"""
         tasks = []
         for todo in self._todos:
-            due_date = todo.get("due_date")
-            if due_date:
+            due_date_str = todo.get("due_date")
+            if due_date_str:
                 try:
-                    task_date = date.fromisoformat(due_date)
-                    if task_date == target_date:
-                        tasks.append(todo)
+                    task_date = date.fromisoformat(due_date_str)
+                    recurrence_type = todo.get("recurrence_type")
+                    if recurrence_type:
+                        end_str = todo.get("recurrence_end_date")
+                        end_date = date.fromisoformat(end_str) if end_str else None
+                        interval = todo.get("recurrence_interval", 1)
+                        if matches_recurrence(task_date, target_date, recurrence_type, interval, end_date):
+                            virtual = dict(todo)
+                            virtual["_virtual_date"] = target_date.isoformat()
+                            virtual["_is_virtual"] = target_date != task_date
+                            completed_dates = todo.get("_completed_dates", set())
+                            virtual["_occurrence_done"] = target_date in completed_dates
+                            tasks.append(virtual)
+                    else:
+                        if task_date == target_date:
+                            tasks.append(todo)
                 except (ValueError, TypeError):
                     pass
             for child in todo.get("children", []):
@@ -632,7 +670,7 @@ class CalendarDialog(QDialog):
     def _get_day_label_style(self, is_today: bool, col: int) -> str:
         dark = isDarkTheme()
         is_weekend = col == 0 or col == 6
-
+        
         if is_today:
             return """
                 QLabel {
@@ -645,19 +683,19 @@ class CalendarDialog(QDialog):
                     min-height: 20px;
                 }
             """
-
+        
         if dark:
             color = "#FF8A80" if is_weekend else "#E0E0E0"
         else:
             color = "#E53935" if is_weekend else "#424242"
-
+        
         return f"color: {color}; font-size: 12px; font-weight: {'600' if is_weekend else '500'};"
 
     def _get_cell_style(self, is_today: bool, has_tasks: bool, col: int) -> str:
         """获取单元格样式"""
         dark = isDarkTheme()
         is_weekend = col == 0 or col == 6
-
+        
         if dark:
             if is_today:
                 bg_color = "rgba(0, 120, 212, 0.15)"
@@ -700,7 +738,7 @@ class CalendarDialog(QDialog):
     def _get_task_style(self, task: dict) -> str:
         """获取任务标签样式"""
         dark = isDarkTheme()
-        is_done = task.get("status") == 1
+        is_done = task.get("status") == 1 or task.get("_occurrence_done", False)
         color_tag = task.get("color_tag")
 
         if is_done:

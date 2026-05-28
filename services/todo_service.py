@@ -28,11 +28,18 @@ class TodoService:
     def create(self, title: str, description: str = "", priority: int = 0,
                color_tag: Optional[str] = None, due_date=None,
                auto_postpone: bool = False, category_id: Optional[int] = None,
-               pid: Optional[int] = None) -> Todo:
+               pid: Optional[int] = None,
+               recurrence_type: Optional[str] = None,
+               recurrence_interval: int = 1,
+               recurrence_end_date=None) -> Todo:
         """创建待办事项，pid 为 None 则创建父任务，否则创建子任务"""
         if due_date is not None and hasattr(due_date, 'year') and not isinstance(due_date, date):
             from datetime import date as pydate
             due_date = pydate(due_date.year(), due_date.month(), due_date.day())
+
+        if recurrence_end_date is not None and hasattr(recurrence_end_date, 'year') and not isinstance(recurrence_end_date, date):
+            from datetime import date as pydate
+            recurrence_end_date = pydate(recurrence_end_date.year(), recurrence_end_date.month(), recurrence_end_date.day())
 
         # 子任务：在父任务下按 sort_order 追加；父任务：在同级中追加
         max_order = self.session.query(Todo).filter(
@@ -50,6 +57,9 @@ class TodoService:
             sort_order=max_order,
             category_id=category_id,
             pid=pid,
+            recurrence_type=recurrence_type,
+            recurrence_interval=recurrence_interval,
+            recurrence_end_date=recurrence_end_date,
         )
         self.session.add(todo)
         self.session.commit()
@@ -67,6 +77,11 @@ class TodoService:
             from datetime import date as pydate
             qd = kwargs['due_date']
             kwargs['due_date'] = pydate(qd.year(), qd.month(), qd.day())
+
+        if 'recurrence_end_date' in kwargs and kwargs['recurrence_end_date'] is not None and hasattr(kwargs['recurrence_end_date'], 'year') and not isinstance(kwargs['recurrence_end_date'], date):
+            from datetime import date as pydate
+            qd = kwargs['recurrence_end_date']
+            kwargs['recurrence_end_date'] = pydate(qd.year(), qd.month(), qd.day())
 
         update_fields = set(kwargs.keys())
         for key, value in kwargs.items():
@@ -98,6 +113,12 @@ class TodoService:
         todo = self.get_by_id(todo_id)
         if not todo:
             return None
+
+        # 重复任务
+        if todo.recurrence_type and todo.pid is None:
+            self.toggle_occurrence_done(todo_id, date.today())
+            self.session.refresh(todo)
+            return todo
 
         if todo.status == STATUS_TODO:
             new_status = STATUS_DONE
@@ -336,6 +357,43 @@ class TodoService:
             if todo:
                 todo.sort_order = order * 10
         self.session.commit()
+
+    # ---- 重复任务完成记录 ----
+
+    def toggle_occurrence_done(self, todo_id: int, occurrence_date: date) -> bool:
+        """切换重复任务某次重复日期的完成状态，返回新状态（True=完成）"""
+        from models.recurrence_completion import RecurrenceCompletion
+        existing = self.session.query(RecurrenceCompletion).filter_by(
+            todo_id=todo_id, completed_date=occurrence_date
+        ).first()
+        if existing:
+            self.session.delete(existing)
+        else:
+            comp = RecurrenceCompletion(todo_id=todo_id, completed_date=occurrence_date)
+            self.session.add(comp)
+        self.session.commit()
+        return existing is None
+
+    def get_completed_dates(self, todo_id: int) -> set[date]:
+        """获取重复任务已完成的日期集合"""
+        from models.recurrence_completion import RecurrenceCompletion
+        rows = self.session.query(RecurrenceCompletion.completed_date).filter_by(
+            todo_id=todo_id
+        ).all()
+        return {r[0] for r in rows}
+
+    def get_all_completed_dates(self, todo_ids: list[int]) -> dict[int, set[date]]:
+        """批量获取多个重复任务的已完成日期"""
+        if not todo_ids:
+            return {}
+        from models.recurrence_completion import RecurrenceCompletion
+        rows = self.session.query(
+            RecurrenceCompletion.todo_id, RecurrenceCompletion.completed_date
+        ).filter(RecurrenceCompletion.todo_id.in_(todo_ids)).all()
+        result: dict[int, set[date]] = {}
+        for tid, d in rows:
+            result.setdefault(tid, set()).add(d)
+        return result
 
     def close(self):
         """关闭会话"""

@@ -45,10 +45,12 @@ class Database:
         # 导入所有模型以确保表被创建
         from models.todo import Todo  # noqa: F401
         from models.category import Category  # noqa: F401
+        from models.recurrence_completion import RecurrenceCompletion  # noqa: F401
 
         Base.metadata.create_all(self.engine)
         self._migrate_add_category_id()
         self._migrate_add_pid()
+        self._migrate_add_recurrence()
         self._init_default_categories()
 
     def _migrate_add_category_id(self):
@@ -81,6 +83,21 @@ class Database:
             print("[DB Migration] pid column added successfully")
         else:
             print("[DB Migration] pid column already exists")
+
+    def _migrate_add_recurrence(self):
+        """迁移：为 todos 表添加重复任务相关列"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        with self.engine.connect() as conn:
+            if "recurrence_type" not in columns:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN recurrence_type VARCHAR(20)"))
+            if "recurrence_interval" not in columns:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN recurrence_interval INTEGER DEFAULT 1"))
+            if "recurrence_end_date" not in columns:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN recurrence_end_date DATE"))
+            conn.commit()
 
     def _init_default_categories(self):
         """初始化默认分类"""
