@@ -145,7 +145,7 @@ class WeekView(QWidget):
         """)
         layout.addWidget(day_label)
 
-        weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+        weekdays = ["一", "二", "三", "四", "五", "六", "日"]
         weekday_label.setText(weekdays[index])
 
         return {
@@ -172,9 +172,9 @@ class WeekView(QWidget):
         today = date.today()
 
         weekday = today.weekday()
-        # 计算当前显示周的起始日期（包含周偏移）
+        # 计算当前显示周的起始日期（包含周偏移）- 从周一开始
         days_offset = self._week_offset * 7
-        start_of_week = today - timedelta(days=(weekday + 1) % 7) + timedelta(days=days_offset)
+        start_of_week = today - timedelta(days=weekday) + timedelta(days=days_offset)
 
         for i, day_widget in enumerate(self._day_widgets):
             current_date = start_of_week + timedelta(days=i)
@@ -258,7 +258,8 @@ class WeekView(QWidget):
         self._pending_dates = set()
 
         today = date.today()
-        week_start = today - timedelta(days=(today.weekday() + 1) % 7) - timedelta(weeks=2)
+        # 从周一开始计算
+        week_start = today - timedelta(days=today.weekday()) - timedelta(weeks=2)
         week_end = week_start + timedelta(weeks=5) - timedelta(days=1)
 
         for todo in self._todos:
@@ -466,13 +467,13 @@ class CalendarDialog(QDialog):
 
         self.week_header = QHBoxLayout()
         self.week_header.setSpacing(4)
-        weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+        weekdays = ["一", "二", "三", "四", "五", "六", "日"]
 
         for i, wd in enumerate(weekdays):
             label = CaptionLabel(wd)
             label.setAlignment(Qt.AlignCenter)
             label.setFixedHeight(28)
-            is_weekend = i == 0 or i == 6
+            is_weekend = i == 5 or i == 6  # 周六、周日
             if dark:
                 color = "#FF6B6B" if is_weekend else "#AAA"
             else:
@@ -574,8 +575,9 @@ class CalendarDialog(QDialog):
         first_day = date(year, month, 1)
         _, days_in_month = monthrange(year, month)
 
+        # 调整为从周一开始 (Monday=0, Sunday=6)
         start_weekday = first_day.weekday()
-        start_weekday = (start_weekday + 1) % 7
+        # 周一为0，所以直接使用weekday()
 
         for row in range(6):
             for col in range(7):
@@ -669,7 +671,7 @@ class CalendarDialog(QDialog):
 
     def _get_day_label_style(self, is_today: bool, col: int) -> str:
         dark = isDarkTheme()
-        is_weekend = col == 0 or col == 6
+        is_weekend = col == 5 or col == 6  # 周六、周日
         
         if is_today:
             return """
@@ -694,7 +696,7 @@ class CalendarDialog(QDialog):
     def _get_cell_style(self, is_today: bool, has_tasks: bool, col: int) -> str:
         """获取单元格样式"""
         dark = isDarkTheme()
-        is_weekend = col == 0 or col == 6
+        is_weekend = col == 5 or col == 6  # 周六、周日
         
         if dark:
             if is_today:

@@ -142,7 +142,7 @@ class TodoCard(CardWidget):
             due_date = date.fromisoformat(due)
             today = date.today()
             if due_date < today:
-                info_parts.append(f"已过期 ({due})")
+                info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
             elif due_date == today:
                 info_parts.append("今天")
             else:
