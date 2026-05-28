@@ -3,15 +3,15 @@ from __future__ import annotations
 import os
 from datetime import date
 
-from PySide6.QtCore import Signal, Qt, QDate
+from PySide6.QtCore import Signal, Qt, QDate, QSize
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame, QWidget
 )
 
 from qfluentwidgets import (
     LineEdit, TextEdit, ComboBox, CalendarPicker,
     PrimaryPushButton, PushButton, SubtitleLabel, CheckBox,
-    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel, SpinBox, TransparentToolButton
+    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel, SpinBox, TransparentToolButton, CompactSpinBox
 )
 
 from config.constants import PRIORITY_MAP, TODO_COLORS, RECURRENCE_TYPES
@@ -150,9 +150,14 @@ class TodoDialog(QDialog):
             due_row = QHBoxLayout()
             due_row.setSpacing(20)
 
+            due_container = QWidget()
+            due_container.setFixedWidth(240)
+            due_container_layout = QHBoxLayout(due_container)
+            due_container_layout.setContentsMargins(0, 0, 0, 0)
+            due_container_layout.setSpacing(0)
+
             self.due_picker = CalendarPicker()
             self.due_picker.setFixedWidth(205)
-            # 新建任务时默认填充今日日期
             if not self._is_edit:
                 self.due_picker.setDate(QDate.currentDate())
             else:
@@ -160,7 +165,32 @@ class TodoDialog(QDialog):
                     self.due_picker.setText("截止日期")
                 except Exception:
                     pass
-            due_row.addWidget(self.due_picker)
+            due_container_layout.addWidget(self.due_picker)
+
+            dark = isDarkTheme()
+            btn_bg = "rgba(255,255,255,1)" if dark else "rgba(0,0,0,0.04)"
+            btn_hover = "rgba(255,255,255,0.5)" if dark else "rgba(0,0,0,0.08)"
+            btn_border = "#555" if dark else "#ccc"
+            icon_color = "#aaa" if dark else "#888"
+
+            self._clear_due_btn = TransparentToolButton(FluentIcon.CLOSE)
+            self._clear_due_btn.setFixedSize(30, 30)
+            self._clear_due_btn.setIconSize(QSize(12, 12))
+            self._clear_due_btn.setToolTip("清除截止日期")
+            self._clear_due_btn.clicked.connect(self._on_clear_due_date)
+            self._clear_due_btn.setStyleSheet(f"""
+                TransparentToolButton {{
+                    border: 1px solid {btn_border};
+                    border-radius: 6px;
+                    color: {icon_color};
+                }}
+                TransparentToolButton:hover {{
+                    background: {btn_hover};
+                }}
+            """)
+            due_container_layout.addWidget(self._clear_due_btn)
+
+            due_row.addWidget(due_container)
 
             self.auto_postpone_cb = CheckBox("自动延期")
             self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
@@ -179,7 +209,7 @@ class TodoDialog(QDialog):
                 self.recurrence_combo.addItem(label, userData=key)
             recurrence_row.addWidget(self.recurrence_combo)
 
-            self.recurrence_interval_spin = SpinBox()
+            self.recurrence_interval_spin = CompactSpinBox()
             self.recurrence_interval_spin.setRange(1, 99)
             self.recurrence_interval_spin.setValue(1)
             self.recurrence_interval_spin.setFixedWidth(80)
@@ -294,6 +324,13 @@ class TodoDialog(QDialog):
         show = index > 0
         self.recurrence_interval_spin.setVisible(show)
         self.recurrence_end_picker.setVisible(show)
+
+    def _on_clear_due_date(self):
+        self.due_picker.setDate(QDate())
+        try:
+            self.due_picker.setText("截止日期")
+        except Exception:
+            pass
 
     def _on_color_clicked(self, color: str, btn: QPushButton):
         if self._selected_color == color:

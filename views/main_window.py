@@ -496,14 +496,14 @@ class MainWindow(FluentWindow):
                 dialog.exec()
                 if dialog._pending_action:
                     action, tid = dialog._pending_action
-                if action == "toggle_done":
-                    self._toggle_todo_done(tid)
-                elif action == "edit":
-                    self._open_todo_dialog(tid)
-                elif action == "delete":
-                    self._delete_todo(tid)
-                elif action == "subtask_toggle_done":
-                    self._toggle_todo_done(tid)
+                    if action == "toggle_done":
+                        self._toggle_todo_done(tid)
+                    elif action == "edit":
+                        self._open_todo_dialog(tid)
+                    elif action == "delete":
+                        self._delete_todo(tid)
+                    elif action == "subtask_toggle_done":
+                        self._toggle_todo_done(tid)
 
     def _open_todo_dialog_for_subtask(self, parent_id: int):
         """为父任务新建子任务"""
