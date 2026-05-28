@@ -575,63 +575,67 @@ class CalendarDialog(QDialog):
         first_day = date(year, month, 1)
         _, days_in_month = monthrange(year, month)
 
-        # 调整为从周一开始 (Monday=0, Sunday=6)
         start_weekday = first_day.weekday()
-        # 周一为0，所以直接使用weekday()
+
+        # 构建 42 个单元格对应的日期列表，包含上月填充和下月填充
+        calendar_dates = []
+        # 上月填充
+        for i in range(start_weekday):
+            calendar_dates.append(first_day - timedelta(days=start_weekday - i))
+        # 当月日期
+        for day in range(1, days_in_month + 1):
+            calendar_dates.append(date(year, month, day))
+        # 下月填充
+        while len(calendar_dates) < 42:
+            calendar_dates.append(calendar_dates[-1] + timedelta(days=1))
+
+        today = date.today()
 
         for row in range(6):
             for col in range(7):
+                idx = row * 7 + col
                 cell = self.calendar_grid.itemAtPosition(row, col).widget()
-                cell.day_label.setText("")
-                cell.setProperty("date", None)
-                cell.setProperty("is_today", False)
 
                 while cell.tasks_layout.count():
                     item = cell.tasks_layout.takeAt(0)
                     if item.widget():
                         item.widget().deleteLater()
 
-                cell.setStyleSheet(self._get_cell_style(False, False, col))
+                cell_date = calendar_dates[idx]
+                is_current_month = cell_date.month == month and cell_date.year == year
+                cell.setProperty("date", cell_date)
 
-        today = date.today()
+                is_today = (cell_date == today)
+                cell.setProperty("is_today", is_today)
 
-        for day in range(1, days_in_month + 1):
-            cell_index = start_weekday + day - 1
-            row = cell_index // 7
-            col = cell_index % 7
+                if is_current_month:
+                    day_label_style = self._get_day_label_style(is_today, col)
+                else:
+                    day_label_style = self._get_day_label_style_dim(col)
+                cell.day_label.setStyleSheet(day_label_style)
+                cell.day_label.setText(str(cell_date.day))
 
-            if row >= 6:
-                break
+                day_tasks = self._get_tasks_for_date(cell_date)
 
-            cell = self.calendar_grid.itemAtPosition(row, col).widget()
-            cell_date = date(year, month, day)
-            cell.setProperty("date", cell_date)
+                for task in day_tasks[:4]:
+                    title = task["title"]
+                    if task.get("_is_virtual"):
+                        title = "🔁 " + title
+                    display = title[:8] + ".." if len(title) > 8 else title
+                    task_label = QLabel(display)
+                    task_label.setStyleSheet(self._get_task_style(task))
+                    task_label.setToolTip(task["title"])
+                    cell.tasks_layout.addWidget(task_label)
 
-            is_today = (cell_date == today)
-            cell.setProperty("is_today", is_today)
+                if len(day_tasks) > 4:
+                    more_label = CaptionLabel(f"+{len(day_tasks) - 4}")
+                    more_label.setStyleSheet(self._get_more_style())
+                    cell.tasks_layout.addWidget(more_label)
 
-            day_label_style = self._get_day_label_style(is_today, col)
-            cell.day_label.setStyleSheet(day_label_style)
-            cell.day_label.setText(str(day))
-
-            day_tasks = self._get_tasks_for_date(cell_date)
-
-            for task in day_tasks[:4]:
-                title = task["title"]
-                if task.get("_is_virtual"):
-                    title = "🔁 " + title
-                display = title[:8] + ".." if len(title) > 8 else title
-                task_label = QLabel(display)
-                task_label.setStyleSheet(self._get_task_style(task))
-                task_label.setToolTip(task["title"])
-                cell.tasks_layout.addWidget(task_label)
-
-            if len(day_tasks) > 4:
-                more_label = CaptionLabel(f"+{len(day_tasks) - 4}")
-                more_label.setStyleSheet(self._get_more_style())
-                cell.tasks_layout.addWidget(more_label)
-
-            cell.setStyleSheet(self._get_cell_style(is_today, len(day_tasks) > 0, col))
+                if is_current_month:
+                    cell.setStyleSheet(self._get_cell_style(is_today, len(day_tasks) > 0, col))
+                else:
+                    cell.setStyleSheet(self._get_cell_style_dim(col))
 
     def _get_tasks_for_date(self, target_date: date) -> list[dict]:
         """获取指定日期的任务"""
@@ -692,6 +696,32 @@ class CalendarDialog(QDialog):
             color = "#E53935" if is_weekend else "#424242"
         
         return f"color: {color}; font-size: 12px; font-weight: {'600' if is_weekend else '500'};"
+
+    def _get_day_label_style_dim(self, col: int) -> str:
+        """非当月日期的日期标签样式（灰色淡化）"""
+        dark = isDarkTheme()
+        if dark:
+            color = "#555"
+        else:
+            color = "#C0C0C0"
+        return f"color: {color}; font-size: 12px; font-weight: 400;"
+
+    def _get_cell_style_dim(self, col: int) -> str:
+        """非当月日期的单元格样式（淡化）"""
+        dark = isDarkTheme()
+        if dark:
+            bg_color = "rgba(255, 255, 255, 0.01)"
+            border_color = "rgba(255, 255, 255, 0.03)"
+        else:
+            bg_color = "rgba(0, 0, 0, 0.005)"
+            border_color = "rgba(0, 0, 0, 0.03)"
+        return f"""
+            QFrame#dayCell {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+            }}
+        """
 
     def _get_cell_style(self, is_today: bool, has_tasks: bool, col: int) -> str:
         """获取单元格样式"""
