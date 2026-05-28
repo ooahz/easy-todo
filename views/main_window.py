@@ -387,6 +387,15 @@ class MainWindow(FluentWindow):
 
         return parents
 
+    def _inject_completed_dates(self, tree: list[dict]):
+        """为重复任务注入已完成日期集合"""
+        recurring_ids = [t["id"] for t in tree if t.get("recurrence_type")]
+        if recurring_ids:
+            completed_map = self.todo_service.get_all_completed_dates(recurring_ids)
+            for t in tree:
+                if t.get("recurrence_type"):
+                    t["_completed_dates"] = completed_map.get(t["id"], set())
+
     def _load_todos(self):
         """加载待办数据"""
         sort_rules = settings.sort_rules
@@ -401,20 +410,28 @@ class MainWindow(FluentWindow):
             todos = self.todo_service.get_all(
                 status=STATUS_TODO, sort_rules=sort_rules
             )
-        self.todo_list_view.set_todos(self._build_todo_tree(todos))
+        tree = self._build_todo_tree(todos)
+        self._inject_completed_dates(tree)
+        self.todo_list_view.set_todos(tree)
 
         today_todos = self.todo_service.get_today()
-        self.today_view.set_todos(self._build_todo_tree(today_todos))
+        today_tree = self._build_todo_tree(today_todos)
+        self._inject_completed_dates(today_tree)
+        self.today_view.set_todos(today_tree)
 
         important_todos = self.todo_service.get_high_priority()
-        self.important_view.set_todos(self._build_todo_tree(important_todos))
+        important_tree = self._build_todo_tree(important_todos)
+        self._inject_completed_dates(important_tree)
+        self.important_view.set_todos(important_tree)
 
         done_todos = self.todo_service.get_all(status=STATUS_DONE)
         self.done_view.set_todos(self._build_todo_tree(done_todos))
 
         for cat_id, (view, _) in self._category_nav_items.items():
             cat_todos = self.todo_service.get_by_category(cat_id)
-            view.set_todos(self._build_todo_tree(cat_todos))
+            cat_tree = self._build_todo_tree(cat_todos)
+            self._inject_completed_dates(cat_tree)
+            view.set_todos(cat_tree)
 
         if self.floating.isVisible():
             self._update_floating_data(self._current_view_key)
@@ -509,7 +526,9 @@ class MainWindow(FluentWindow):
         """打开日程视图弹窗"""
         from views.calendar_view import CalendarDialog
         todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
-        dialog = CalendarDialog(self._build_todo_tree(todos), parent=self)
+        tree = self._build_todo_tree(todos)
+        self._inject_completed_dates(tree)
+        dialog = CalendarDialog(tree, parent=self)
         dialog.exec()
 
     def _on_reorder_todos(self, from_id: int, to_id: int, insert_after: bool, current_order: list):

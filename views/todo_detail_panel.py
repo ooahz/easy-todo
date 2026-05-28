@@ -492,6 +492,27 @@ class TodoDetailDialog(MessageBoxBase):
             line.setStyleSheet(f"background-color: {c['divider']};")
             info_layout.addWidget(line)
 
+        # 重复任务
+        recurrence_type = todo.get("recurrence_type")
+        if recurrence_type:
+            from config.constants import RECURRENCE_TYPES
+            interval = todo.get("recurrence_interval", 1)
+            type_name = RECURRENCE_TYPES.get(recurrence_type, "")
+            if interval > 1:
+                unit = {"daily": "天", "weekly": "周", "monthly": "月", "yearly": "年"}.get(recurrence_type, "")
+                text = f"每{interval}{unit}"
+            else:
+                text = type_name
+            end_str = todo.get("recurrence_end_date")
+            if end_str:
+                text += f"（至 {end_str}）"
+            row = InfoRow(FluentIcon.UPDATE, "重复", text)
+            info_layout.addWidget(row)
+            line = QFrame()
+            line.setFixedHeight(1)
+            line.setStyleSheet(f"background-color: {c['divider']};")
+            info_layout.addWidget(line)
+
         # 创建时间
         created = todo.get("created_at")
         if created:

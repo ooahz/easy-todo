@@ -1,19 +1,20 @@
 """新建/编辑待办对话框"""
 from __future__ import annotations
-
+import os
 from datetime import date
 
 from PySide6.QtCore import Signal, Qt, QDate
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame
 )
+
 from qfluentwidgets import (
     LineEdit, TextEdit, ComboBox, CalendarPicker,
     PrimaryPushButton, PushButton, SubtitleLabel, CheckBox,
-    FluentIcon, isDarkTheme, TransparentToolButton
+    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel, SpinBox, TransparentToolButton
 )
 
-from config.constants import PRIORITY_MAP, TODO_COLORS
+from config.constants import PRIORITY_MAP, TODO_COLORS, RECURRENCE_TYPES
 from config.settings import settings
 from services.category_service import CategoryService
 from services.file_service import FileService
@@ -151,7 +152,6 @@ class TodoDialog(QDialog):
 
             self.due_picker = CalendarPicker()
             self.due_picker.setFixedWidth(205)
-            self.due_picker.setToolTip("任务截至日期")
             # 新建任务时默认填充今日日期
             if not self._is_edit:
                 self.due_picker.setDate(QDate.currentDate())
@@ -167,6 +167,39 @@ class TodoDialog(QDialog):
             due_row.addWidget(self.auto_postpone_cb)
             due_row.addStretch()
             layout.addLayout(due_row)
+
+            # 重复设置行
+            recurrence_row = QHBoxLayout()
+            recurrence_row.setSpacing(10)
+
+            self.recurrence_combo = ComboBox()
+            self.recurrence_combo.setFixedWidth(205)
+            self.recurrence_combo.addItem("不重复", userData=None)
+            for key, label in RECURRENCE_TYPES.items():
+                self.recurrence_combo.addItem(label, userData=key)
+            recurrence_row.addWidget(self.recurrence_combo)
+
+            self.recurrence_interval_spin = SpinBox()
+            self.recurrence_interval_spin.setRange(1, 99)
+            self.recurrence_interval_spin.setValue(1)
+            self.recurrence_interval_spin.setFixedWidth(80)
+            self.recurrence_interval_spin.setVisible(False)
+            self.recurrence_interval_spin.setToolTip("重复间隔")
+            recurrence_row.addWidget(self.recurrence_interval_spin)
+
+            self.recurrence_end_picker = CalendarPicker()
+            self.recurrence_end_picker.setFixedWidth(140)
+            self.recurrence_end_picker.setVisible(False)
+            try:
+                self.recurrence_end_picker.setText("结束日期")
+            except Exception:
+                pass
+            recurrence_row.addWidget(self.recurrence_end_picker)
+
+            recurrence_row.addStretch()
+            layout.addLayout(recurrence_row)
+
+            self.recurrence_combo.currentIndexChanged.connect(self._on_recurrence_changed)
 
             # 颜色标签
             color_row = QHBoxLayout()
@@ -220,7 +253,7 @@ class TodoDialog(QDialog):
 
         layout.addStretch()
 
-        # ---- 底部按钮区 ----
+        # 按钮区
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
 
@@ -256,6 +289,11 @@ class TodoDialog(QDialog):
             cursor.setPosition(1000)
             cursor.movePosition(cursor.MoveOperation.End, cursor.MoveMode.KeepAnchor)
             cursor.removeSelectedText()
+
+    def _on_recurrence_changed(self, index: int):
+        show = index > 0
+        self.recurrence_interval_spin.setVisible(show)
+        self.recurrence_end_picker.setVisible(show)
 
     def _on_color_clicked(self, color: str, btn: QPushButton):
         if self._selected_color == color:
@@ -351,6 +389,26 @@ class TodoDialog(QDialog):
                 except Exception:
                     pass
 
+            # 重复设置
+            recurrence_type = data.get("recurrence_type")
+            if recurrence_type:
+                for i in range(self.recurrence_combo.count()):
+                    if self.recurrence_combo.itemData(i) == recurrence_type:
+                        self.recurrence_combo.setCurrentIndex(i)
+                        break
+                self.recurrence_interval_spin.setValue(data.get("recurrence_interval", 1))
+                end_str = data.get("recurrence_end_date")
+                if end_str:
+                    try:
+                        from PySide6.QtCore import QDate
+                        if isinstance(end_str, str):
+                            pyd = date.fromisoformat(end_str)
+                            self.recurrence_end_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
+                        else:
+                            self.recurrence_end_picker.setDate(QDate(end_str.year, end_str.month, end_str.day))
+                    except Exception:
+                        pass
+
     def _on_save(self):
         title = self.title_edit.text().strip()
         if not title:
@@ -387,6 +445,19 @@ class TodoDialog(QDialog):
             data["color_tag"] = self._selected_color
             data["auto_postpone"] = self.auto_postpone_cb.isChecked() if hasattr(self, 'auto_postpone_cb') else False
             data["category_id"] = self.category_combo.currentData() if hasattr(self, 'category_combo') else None
+
+            # 重复设置
+            data["recurrence_type"] = self.recurrence_combo.currentData() if hasattr(self, 'recurrence_combo') else None
+            data["recurrence_interval"] = self.recurrence_interval_spin.value() if hasattr(self, 'recurrence_interval_spin') else 1
+            recurrence_end = None
+            if hasattr(self, 'recurrence_end_picker') and data["recurrence_type"]:
+                try:
+                    qdate = self.recurrence_end_picker.date
+                    if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                        recurrence_end = date(qdate.year(), qdate.month(), qdate.day())
+                except Exception:
+                    pass
+            data["recurrence_end_date"] = recurrence_end
         else:
             data["pid"] = self._pid
 
@@ -450,7 +521,6 @@ class TodoDialog(QDialog):
         self.move(x, y)
         self.title_edit.setFocus()
         self.title_edit.setStyleSheet("")
-        # 设置弹窗整体背景色，使标题栏与内容区一致
         if isDarkTheme():
             self.setStyleSheet("""
                 QDialog {
