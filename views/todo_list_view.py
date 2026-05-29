@@ -184,11 +184,11 @@ class TodoListView(QWidget):
         """设置待办列表数据（父任务列表，已包含 children）"""
         self._all_todos = todos
         self.week_view.set_todos(todos)
-        
+
         if self._filter_date:
             self._todos = self._filter_todos_by_date(todos, self._filter_date)
         else:
-            self._todos = todos
+            self._todos = self._dedup_recurrence(todos)
 
         self._update_pager()
         self._refresh_list()
@@ -196,12 +196,12 @@ class TodoListView(QWidget):
     def _on_filter_changed(self, filter_date: date_type | None):
         """处理周视图过滤变化"""
         self._filter_date = filter_date
-        
+
         if filter_date:
             self._todos = self._filter_todos_by_date(self._all_todos, filter_date)
         else:
-            self._todos = self._all_todos
-        
+            self._todos = self._dedup_recurrence(self._all_todos)
+
         # 重置到第一页
         self._current_page = 0
         self._update_pager()
@@ -228,6 +228,38 @@ class TodoListView(QWidget):
         """分页器页码变化"""
         self._current_page = index
         self._refresh_list()
+
+    @staticmethod
+    def _dedup_recurrence(todos: list[dict]) -> list[dict]:
+        """每个重复系列只保留离今天最近的未完成实例"""
+        from datetime import date
+        today = date.today()
+        best: dict[int, dict] = {}
+        result = []
+        for todo in todos:
+            tmpl_id = todo.get("recurrence_template_id")
+            if not tmpl_id:
+                result.append(todo)
+                continue
+            prev = best.get(tmpl_id)
+
+            def _score(t):
+                d_str = t.get("due_date")
+                try:
+                    d = date.fromisoformat(d_str) if d_str else date.min
+                except (ValueError, TypeError):
+                    d = date.min
+                is_done = t.get("_is_done", False)
+                if not is_done and d >= today:
+                    return (0, abs((d - today).days))
+                if not is_done:
+                    return (1, abs((d - today).days))
+                return (2, abs((d - today).days))
+
+            if prev is None or _score(todo) < _score(prev):
+                best[tmpl_id] = todo
+        result.extend(best.values())
+        return result
 
     def _filter_todos_by_date(self, todos: list[dict], target_date: date_type) -> list[dict]:
         """根据截止日期过滤任务"""

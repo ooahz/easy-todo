@@ -93,12 +93,45 @@ class TodoService:
             qd = kwargs['recurrence_end_date']
             kwargs['recurrence_end_date'] = pydate(qd.year(), qd.month(), qd.day())
 
+        old_recurrence_type = todo.recurrence_type
+        was_template = todo.is_recurrence_template
+
         update_fields = set(kwargs.keys())
         for key, value in kwargs.items():
             if hasattr(todo, key) and (value is not None or key in update_fields):
                 setattr(todo, key, value)
 
         todo.updated_at = datetime.now()
+
+        new_recurrence_type = todo.recurrence_type
+
+        if not was_template and new_recurrence_type and todo.pid is None:
+            todo.is_recurrence_template = True
+            self.session.commit()
+            self.session.refresh(todo)
+            self.ensure_instances(todo.id)
+            return todo
+
+        if was_template and not new_recurrence_type:
+            todo.is_recurrence_template = False
+            self.session.query(Todo).filter(
+                Todo.recurrence_template_id == todo.id
+            ).delete()
+            self.session.commit()
+            self.session.refresh(todo)
+            return todo
+
+        if was_template and new_recurrence_type:
+            self.session.commit()
+            self.session.query(Todo).filter(
+                Todo.recurrence_template_id == todo.id,
+                Todo.is_exception == False,
+                Todo.occurrence_date >= date.today(),
+            ).delete()
+            self.session.refresh(todo)
+            self.ensure_instances(todo.id)
+            return todo
+
         self.session.commit()
         self.session.refresh(todo)
         return todo
@@ -181,6 +214,7 @@ class TodoService:
         return count
 
     # ---- 查询：返回所有任务（含子任务） ----
+
     def get_all(self, status: int = STATUS_TODO,
                 priority: Optional[int] = None, color_tag: Optional[str] = None,
                 category_id: Optional[int] = None,
@@ -205,7 +239,8 @@ class TodoService:
         else:
             query = self._apply_sort(query, sort_by, sort_order)
 
-        return query.all()
+        todos = query.all()
+        return todos
 
     def get_all_including_done(self, sort_by: str = "created_at",
                                 sort_order: str = "desc",
@@ -244,7 +279,8 @@ class TodoService:
             else:
                 query = self._apply_sort(query, sort_by, sort_order)
 
-        return query.all()
+        todos = query.all()
+        return todos
 
     def _apply_sort(self, query, sort_by: str = "created_at", sort_order: str = "desc"):
         """应用排序规则"""
