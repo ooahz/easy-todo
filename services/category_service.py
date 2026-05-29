@@ -30,11 +30,14 @@ class CategoryService:
         return category
 
     def update(self, category_id: int, **kwargs) -> Optional[Category]:
-        """更新分类"""
+        """更新分类（系统分类不允许编辑）"""
         category = self.session.query(Category).filter(
             Category.id == category_id
         ).first()
         if not category:
+            return None
+
+        if category.is_system:
             return None
 
         for key, value in kwargs.items():
@@ -45,12 +48,12 @@ class CategoryService:
         return category
 
     def delete(self, category_id: int, move_to_id: Optional[int] = None) -> bool:
-        """删除分类
-        
+        """删除分类（系统分类不允许删除）
+
         Args:
             category_id: 要删除的分类ID
             move_to_id: 将关联任务移动到的分类ID，None表示设为无分类
-        
+
         Returns:
             是否删除成功
         """
@@ -62,7 +65,9 @@ class CategoryService:
         if not category:
             return False
 
-        # 更新关联任务的分类
+        if category.is_system:
+            return False
+
         if move_to_id:
             self.session.query(Todo).filter(
                 Todo.category_id == category_id

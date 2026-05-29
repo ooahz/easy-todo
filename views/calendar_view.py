@@ -27,7 +27,7 @@ class WeekView(QWidget):
         self._todos: list[dict] = []
         self._pending_dates: set[date] = set()
         self._selected_date: date | None = None
-        self._week_offset: int = 0  # 周偏移量
+        self._week_offset: int = 0
         self._setup_ui()
 
     def _setup_ui(self):
@@ -275,10 +275,11 @@ class WeekView(QWidget):
                         end_str = todo.get("recurrence_end_date")
                         end_date = date.fromisoformat(end_str) if end_str else None
                         interval = todo.get("recurrence_interval", 1)
+                        recurrence_day = todo.get("recurrence_day")
                         completed_dates = todo.get("_completed_dates", set())
                         occurrences = generate_occurrences(
                             task_date, week_start, week_end,
-                            recurrence_type, interval, end_date
+                            recurrence_type, interval, end_date, recurrence_day
                         )
                         for occ in occurrences:
                             if occ not in completed_dates:
@@ -650,7 +651,8 @@ class CalendarDialog(QDialog):
                         end_str = todo.get("recurrence_end_date")
                         end_date = date.fromisoformat(end_str) if end_str else None
                         interval = todo.get("recurrence_interval", 1)
-                        if matches_recurrence(task_date, target_date, recurrence_type, interval, end_date):
+                        recurrence_day = todo.get("recurrence_day")
+                        if matches_recurrence(task_date, target_date, recurrence_type, interval, end_date, recurrence_day):
                             virtual = dict(todo)
                             virtual["_virtual_date"] = target_date.isoformat()
                             virtual["_is_virtual"] = target_date != task_date

@@ -1,15 +1,75 @@
 """分类管理对话框"""
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QListWidgetItem
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QListWidgetItem, QLabel
 )
 
 from qfluentwidgets import (
     LineEdit, PushButton, PrimaryPushButton, ListWidget,
-    TransparentToolButton, FluentIcon, isDarkTheme, SubtitleLabel, MessageBox
+    TransparentToolButton, FluentIcon, isDarkTheme, SubtitleLabel, MessageBox,
+    BodyLabel, CaptionLabel
 )
 
 from services.category_service import CategoryService
+
+SYSTEM_VIEWS = [
+    ("all", "全部任务", FluentIcon.HOME),
+    ("today", "今日任务", FluentIcon.CALENDAR),
+    ("important", "重要任务", FluentIcon.HEART),
+    ("done", "已完成", FluentIcon.COMPLETED),
+]
+
+SYSTEM_VIEW_MAP = {key: (name, icon) for key, name, icon in SYSTEM_VIEWS}
+
+
+class SystemViewItem(QWidget):
+    """系统视图项（不可编辑/删除，支持排序）"""
+
+    move_up_clicked = Signal(str)
+    move_down_clicked = Signal(str)
+
+    def __init__(self, view_key: str, name: str, icon: FluentIcon, parent=None):
+        super().__init__(parent)
+        self._view_key = view_key
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
+
+        self.icon_w = QWidget()
+        self.icon_w.setFixedSize(12, 12)
+        self._update_icon_color()
+        layout.addWidget(self.icon_w)
+
+        name_label = BodyLabel(name)
+        layout.addWidget(name_label, 1)
+
+        sys_tag = CaptionLabel("系统")
+        self._update_sys_tag_style(sys_tag)
+        layout.addWidget(sys_tag)
+
+        self.up_btn = TransparentToolButton(FluentIcon.UP)
+        self.up_btn.setFixedSize(28, 28)
+        self.up_btn.setIconSize(QSize(12, 12))
+        self.up_btn.setToolTip("上移")
+        self.up_btn.clicked.connect(lambda: self.move_up_clicked.emit(self._view_key))
+        layout.addWidget(self.up_btn)
+
+        self.down_btn = TransparentToolButton(FluentIcon.DOWN)
+        self.down_btn.setFixedSize(28, 28)
+        self.down_btn.setIconSize(QSize(12, 12))
+        self.down_btn.setToolTip("下移")
+        self.down_btn.clicked.connect(lambda: self.move_down_clicked.emit(self._view_key))
+        layout.addWidget(self.down_btn)
+
+    def _update_icon_color(self):
+        color = "#0078D4" if not isDarkTheme() else "#60CDFF"
+        self.icon_w.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
+
+    def _update_sys_tag_style(self, tag):
+        if isDarkTheme():
+            tag.setStyleSheet("color: #AAA; font-size: 11px; padding: 1px 6px; background: rgba(255,255,255,0.08); border-radius: 3px;")
+        else:
+            tag.setStyleSheet("color: #888; font-size: 11px; padding: 1px 6px; background: rgba(0,0,0,0.06); border-radius: 3px;")
 
 
 class CategoryListItem(QWidget):
@@ -31,18 +91,14 @@ class CategoryListItem(QWidget):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(8)
 
-        # 分类图标
         self.icon_label = QWidget()
         self.icon_label.setFixedSize(12, 12)
         self.icon_label.setStyleSheet("border-radius: 2px;")
         layout.addWidget(self.icon_label)
 
-        # 分类名称
-        from qfluentwidgets import BodyLabel
         self.name_label = BodyLabel(self._name)
         layout.addWidget(self.name_label, 1)
 
-        # 上移按钮
         self.up_btn = TransparentToolButton(FluentIcon.UP)
         self.up_btn.setFixedSize(28, 28)
         self.up_btn.setIconSize(QSize(12, 12))
@@ -50,7 +106,6 @@ class CategoryListItem(QWidget):
         self.up_btn.clicked.connect(lambda: self.move_up_clicked.emit(self.category_id))
         layout.addWidget(self.up_btn)
 
-        # 编辑按钮
         self.edit_btn = TransparentToolButton(FluentIcon.EDIT)
         self.edit_btn.setFixedSize(28, 28)
         self.edit_btn.setIconSize(QSize(12, 12))
@@ -58,7 +113,6 @@ class CategoryListItem(QWidget):
         self.edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.category_id))
         layout.addWidget(self.edit_btn)
 
-        # 删除按钮
         self.delete_btn = TransparentToolButton(FluentIcon.DELETE)
         self.delete_btn.setFixedSize(28, 28)
         self.delete_btn.setIconSize(QSize(12, 12))
@@ -67,7 +121,6 @@ class CategoryListItem(QWidget):
         layout.addWidget(self.delete_btn)
 
     def _update_icon_color(self):
-        """根据主题更新图标颜色"""
         color = "#0078D4" if not isDarkTheme() else "#60CDFF"
         self.icon_label.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
 
@@ -181,7 +234,7 @@ class CategoryDialog(QDialog):
             for i in range(self.category_list.count()):
                 item = self.category_list.item(i)
                 widget = self.category_list.itemWidget(item)
-                if widget:
+                if widget and hasattr(widget, '_update_icon_color'):
                     widget._update_icon_color()
         else:
             self.setStyleSheet("""
@@ -196,12 +249,35 @@ class CategoryDialog(QDialog):
             for i in range(self.category_list.count()):
                 item = self.category_list.item(i)
                 widget = self.category_list.itemWidget(item)
-                if widget:
+                if widget and hasattr(widget, '_update_icon_color'):
                     widget._update_icon_color()
 
     def _load_categories(self):
         """加载分类列表"""
         self.category_list.clear()
+
+        from config.settings import settings
+        order = settings.system_view_order
+        for key in order:
+            if key in SYSTEM_VIEW_MAP:
+                name, icon = SYSTEM_VIEW_MAP[key]
+                item = QListWidgetItem()
+                widget = SystemViewItem(key, name, icon)
+                widget.move_up_clicked.connect(self._on_system_view_move_up)
+                widget.move_down_clicked.connect(self._on_system_view_move_down)
+                self.category_list.addItem(item)
+                self.category_list.setItemWidget(item, widget)
+                item.setSizeHint(widget.sizeHint())
+
+        sep_item = QListWidgetItem()
+        sep_widget = QLabel()
+        sep_widget.setFixedHeight(1)
+        c = "#444" if isDarkTheme() else "#DDD"
+        sep_widget.setStyleSheet(f"background-color: {c}; margin: 4px 8px;")
+        self.category_list.addItem(sep_item)
+        self.category_list.setItemWidget(sep_item, sep_widget)
+        sep_item.setSizeHint(sep_widget.sizeHint())
+
         categories = self.category_service.get_all()
         for cat in categories:
             item = QListWidgetItem()
@@ -263,5 +339,27 @@ class CategoryDialog(QDialog):
         if idx > 0:
             cat_ids[idx], cat_ids[idx - 1] = cat_ids[idx - 1], cat_ids[idx]
             self.category_service.reorder(cat_ids)
+            self._load_categories()
+            self.categories_changed.emit()
+
+    def _on_system_view_move_up(self, view_key: str):
+        """上移系统视图"""
+        from config.settings import settings
+        order = list(settings.system_view_order)
+        idx = order.index(view_key) if view_key in order else -1
+        if idx > 0:
+            order[idx], order[idx - 1] = order[idx - 1], order[idx]
+            settings.system_view_order = order
+            self._load_categories()
+            self.categories_changed.emit()
+
+    def _on_system_view_move_down(self, view_key: str):
+        """下移系统视图"""
+        from config.settings import settings
+        order = list(settings.system_view_order)
+        idx = order.index(view_key) if view_key in order else -1
+        if 0 <= idx < len(order) - 1:
+            order[idx], order[idx + 1] = order[idx + 1], order[idx]
+            settings.system_view_order = order
             self._load_categories()
             self.categories_changed.emit()

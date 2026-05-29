@@ -23,7 +23,7 @@ from views.todo_detail_panel import TodoDetailDialog
 from services.todo_service import TodoService
 from services.category_service import CategoryService
 from services.file_service import FileService
-from config.constants import STATUS_TODO, STATUS_DONE, APP_NAME
+from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED, APP_NAME
 from config.settings import settings
 
 
@@ -62,7 +62,6 @@ class MainWindow(FluentWindow):
         self._schedule_postpone_timer()
 
         self._load_todos()
-        self._apply_home_page()
 
     def _setup_ui(self):
         """初始化窗口"""
@@ -73,7 +72,7 @@ class MainWindow(FluentWindow):
         if pos:
             self.move(*pos)
 
-        self.setMinimumSize(400, 400)
+        self.setMinimumSize(700, 400)
 
         screen = QApplication.primaryScreen().geometry()
         x = (screen.width() - self.width()) // 2
@@ -82,21 +81,42 @@ class MainWindow(FluentWindow):
 
     def _setup_navigation(self):
         """设置导航栏"""
-        self.todo_list_view = TodoListView(view_name="全部任务")
-        self.todo_list_view.setObjectName("todoListView")
-        self.addSubInterface(self.todo_list_view, FluentIcon.HOME, "全部任务")
+        self._view_instances = {
+            "all": TodoListView(view_name="全部任务"),
+            "today": TodoListView(view_name="今日任务"),
+            "important": TodoListView(view_name="重要任务"),
+            "done": TodoListView(view_name="已完成", readonly=True),
+        }
+        self._view_instances["all"].setObjectName("todoListView")
+        self._view_instances["today"].setObjectName("todayView")
+        self._view_instances["important"].setObjectName("importantView")
+        self._view_instances["done"].setObjectName("doneView")
 
-        self.today_view = TodoListView(view_name="今日任务")
-        self.today_view.setObjectName("todayView")
-        self.addSubInterface(self.today_view, FluentIcon.CALENDAR, "今日任务")
+        self.todo_list_view = self._view_instances["all"]
+        self.today_view = self._view_instances["today"]
+        self.important_view = self._view_instances["important"]
+        self.done_view = self._view_instances["done"]
 
-        self.important_view = TodoListView(view_name="重要任务")
-        self.important_view.setObjectName("importantView")
-        self.addSubInterface(self.important_view, FluentIcon.HEART, "重要任务")
+        self._view_map = {
+            "all": FluentIcon.HOME,
+            "today": FluentIcon.CALENDAR,
+            "important": FluentIcon.HEART,
+            "done": FluentIcon.COMPLETED,
+        }
+        self._view_names = {
+            "all": "全部任务",
+            "today": "今日任务",
+            "important": "重要任务",
+            "done": "已完成",
+        }
 
-        self.done_view = TodoListView(view_name="已完成")
-        self.done_view.setObjectName("doneView")
-        self.addSubInterface(self.done_view, FluentIcon.COMPLETED, "已完成")
+        order = settings.system_view_order
+        for key in order:
+            if key in self._view_instances:
+                view = self._view_instances[key]
+                icon = self._view_map[key]
+                name = self._view_names[key]
+                self.addSubInterface(view, icon, name)
 
         # 日程视图弹窗（不添加到 stackedWidget）
         # 通过工具栏按钮打开
@@ -206,6 +226,7 @@ class MainWindow(FluentWindow):
         self.tray_icon.hide()
         self.floating.close()
         self.todo_service.close()
+        self.category_service.close()
         QApplication.quit()
 
     def _connect_signals(self):
@@ -225,10 +246,12 @@ class MainWindow(FluentWindow):
             view.reorder_requested.connect(self._on_reorder_todos)
             view.add_subtask_clicked.connect(self._open_todo_dialog_for_subtask)
             view.card_clicked.connect(self._on_card_clicked)
-            # 浮窗按钮 - 传递视图标识
+            view.archive_clicked.connect(self._archive_todo)
             view.float_clicked.connect(lambda k=key: self._toggle_floating(k))
-            # 日程视图按钮
             view.calendar_clicked.connect(self._show_calendar_view)
+
+        self.done_view.filter_combo.setVisible(True)
+        self.done_view.filter_changed.connect(self._on_done_filter_changed)
 
         # 浮窗点击完成待办
         self.floating.todo_toggled.connect(self._toggle_todo_done)
@@ -239,7 +262,6 @@ class MainWindow(FluentWindow):
         self.settings_page.show_done_changed.connect(self._on_show_done_changed)
         self.settings_page.show_week_view_changed.connect(self._on_show_week_view_changed)
         self.settings_page.auto_start_changed.connect(self._on_auto_start_changed)
-        self.settings_page.home_page_changed.connect(self._on_home_page_changed)
         self.settings_page.sort_rule_changed.connect(self._on_sort_rule_changed)
         self.settings_page.done_at_bottom_changed.connect(self._on_done_at_bottom_changed)
         self.settings_page.floating_top_changed.connect(self._on_floating_top_changed)
@@ -332,27 +354,6 @@ class MainWindow(FluentWindow):
             self.floating.refresh_theme()
             self.floating.show()
 
-    def _apply_home_page(self):
-        """应用首屏设置"""
-        page_map = {
-            "all": 0, "today": 1, "important": 2, "done": 3
-        }
-        idx = page_map.get(settings.home_page, 0)
-        self.navigationInterface.setCurrentItem(idx)
-        self.switchTo(self.todo_list_view)
-        # 根据设置切换到目标页面
-        view_map = {
-            0: self.todo_list_view,
-            1: self.today_view,
-            2: self.important_view,
-            3: self.done_view,
-        }
-        target = view_map.get(idx, self.todo_list_view)
-        self.switchTo(target)
-        self._current_view_key = {"all": "all", "today": "today", "important": "important", "done": "done"}.get(
-            settings.home_page, "all"
-        )
-
     def _schedule_postpone_timer(self):
         """计算距离下一个零点的毫秒数，设置单次定时器"""
         from datetime import datetime, timedelta
@@ -424,8 +425,13 @@ class MainWindow(FluentWindow):
         self._inject_completed_dates(important_tree)
         self.important_view.set_todos(important_tree)
 
-        done_todos = self.todo_service.get_all(status=STATUS_DONE)
-        self.done_view.set_todos(self._build_todo_tree(done_todos))
+        self._done_filter = getattr(self, '_done_filter', 'done')
+        if self._done_filter == 'archived':
+            archived_todos = self.todo_service.get_all(status=STATUS_ARCHIVED)
+            self.done_view.set_todos(self._build_todo_tree(archived_todos))
+        else:
+            done_todos = self.todo_service.get_all(status=STATUS_DONE)
+            self.done_view.set_todos(self._build_todo_tree(done_todos))
 
         for cat_id, (view, _) in self._category_nav_items.items():
             cat_todos = self.todo_service.get_by_category(cat_id)
@@ -486,6 +492,25 @@ class MainWindow(FluentWindow):
         if self.todo_service.toggle_done(todo_id):
             self._refresh_all_views()
 
+    def _archive_todo(self, todo_id: int):
+        msg = MessageBox("确认归档", "确定要归档这个任务吗？归档后可在「已完成」页面筛选查看。", self)
+        msg.yesButton.setText("归档")
+        msg.cancelButton.setText("取消")
+        if msg.exec():
+            self.todo_service.update(todo_id, status=STATUS_ARCHIVED)
+            self._refresh_all_views()
+            InfoBar.success(title="已归档", content="任务已归档", parent=self,
+                           position=InfoBarPosition.TOP, duration=2000)
+
+    def _on_done_filter_changed(self, filter_key: str):
+        self._done_filter = filter_key
+        if filter_key == 'archived':
+            archived_todos = self.todo_service.get_all(status=STATUS_ARCHIVED)
+            self.done_view.set_todos(self._build_todo_tree(archived_todos))
+        else:
+            done_todos = self.todo_service.get_all(status=STATUS_DONE)
+            self.done_view.set_todos(self._build_todo_tree(done_todos))
+
     def _on_card_clicked(self, todo_id: int):
         """父任务卡片点击 - 弹出详情对话框"""
         todo = self.todo_service.get_by_id(todo_id)
@@ -504,6 +529,8 @@ class MainWindow(FluentWindow):
                         self._delete_todo(tid)
                     elif action == "subtask_toggle_done":
                         self._toggle_todo_done(tid)
+                    elif action == "archive":
+                        self._archive_todo(tid)
 
     def _open_todo_dialog_for_subtask(self, parent_id: int):
         """为父任务新建子任务"""
@@ -667,9 +694,6 @@ class MainWindow(FluentWindow):
         for view, _ in self._category_nav_items.values():
             view.set_show_week_view(show)
 
-    def _on_home_page_changed(self, page: str):
-        self._apply_home_page()
-
     def _on_sort_rule_changed(self, rule: str):
         self._refresh_all_views()
 
@@ -683,7 +707,8 @@ class MainWindow(FluentWindow):
         """设置分类导航"""
         categories = self.category_service.get_all()
         for cat in categories:
-            self._add_category_nav_item(cat)
+            if not cat.is_system:
+                self._add_category_nav_item(cat)
 
     def _add_category_nav_item(self, cat):
         """添加单个分类导航项"""
@@ -700,6 +725,7 @@ class MainWindow(FluentWindow):
         view.reorder_requested.connect(self._on_reorder_todos)
         view.add_subtask_clicked.connect(self._open_todo_dialog_for_subtask)
         view.card_clicked.connect(self._on_card_clicked)
+        view.archive_clicked.connect(self._archive_todo)
         view.float_clicked.connect(lambda k=f"cat_{cat.id}": self._toggle_floating(k))
 
         # 缓存
@@ -707,14 +733,47 @@ class MainWindow(FluentWindow):
 
     def _on_categories_changed(self):
         """分类变更时刷新导航"""
-        # 移除旧的分类导航
         for cat_id, (view, _) in list(self._category_nav_items.items()):
-            self.removeInterface(view)
+            try:
+                self.removeInterface(view)
+            except Exception:
+                pass
             view.deleteLater()
         self._category_nav_items.clear()
 
-        # 重新加载
+        order = settings.system_view_order
+        for key in order:
+            if key in self._view_instances:
+                view = self._view_instances[key]
+                if view is None:
+                    continue
+                icon = self._view_map[key]
+                name = self._view_names[key]
+                try:
+                    self.removeInterface(view, isDelete=False)
+                except Exception:
+                    pass
+                try:
+                    self.addSubInterface(view, icon, name)
+                except Exception:
+                    pass
+
         self._setup_category_navigation()
+
+        if self.settings_page is not None:
+            try:
+                self.removeInterface(self.settings_page, isDelete=False)
+            except Exception:
+                pass
+            try:
+                self.addSubInterface(
+                    self.settings_page, FluentIcon.SETTING,
+                    "设置",
+                    position=NavigationItemPosition.BOTTOM,
+                )
+            except Exception:
+                pass
+
         self._refresh_all_views()
 
     def _on_floating_pin_changed(self, pinned: bool):

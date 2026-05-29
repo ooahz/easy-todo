@@ -25,7 +25,6 @@ class Settings:
         "show_done_tasks": False,
         "show_week_view": True,
         "auto_start": False,
-        "home_page": "all",
         "sort_rule": "created_at",
         "sort_rules": ["priority", "created_at"],
         "done_at_bottom": True,
@@ -36,6 +35,7 @@ class Settings:
         "floating_show_subtasks": True,  # 浮窗是否显示子任务
         "data_path": "",  # 数据保存路径，空则使用默认路径
         "description_mode": "default",  # default / markdown
+        "system_view_order": ["all", "today", "important", "done"],
     }
 
     def __init__(self):
@@ -171,15 +171,6 @@ class Settings:
         self.save()
 
     @property
-    def home_page(self) -> str:
-        return self._data.get("home_page", "all")
-
-    @home_page.setter
-    def home_page(self, value: str):
-        self._data["home_page"] = value
-        self.save()
-
-    @property
     def sort_rule(self) -> str:
         return self._data.get("sort_rule", "created_at")
 
@@ -269,6 +260,15 @@ class Settings:
     @description_mode.setter
     def description_mode(self, value: str):
         self._data["description_mode"] = value
+        self.save()
+
+    @property
+    def system_view_order(self) -> list:
+        return self._data.get("system_view_order", ["all", "today", "important", "done"])
+
+    @system_view_order.setter
+    def system_view_order(self, value: list):
+        self._data["system_view_order"] = value
         self.save()
 
 

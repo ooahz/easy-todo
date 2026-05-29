@@ -5,7 +5,8 @@ from datetime import date
 
 from PySide6.QtCore import Signal, Qt, QDate, QSize
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame, QWidget,
+    QTextEdit
 )
 
 from qfluentwidgets import (
@@ -115,14 +116,9 @@ class TodoDialog(QDialog):
         # 子任务不需要以下字段
         if self._pid is None:
             # 描述输入
-            self._use_markdown = settings.description_mode == "markdown"
-            if self._use_markdown:
-                from views.markdown_editor import MarkdownEditor
-                self.desc_edit = MarkdownEditor()
-                self.desc_edit.setPlaceholderText("支持 Markdown 语法输入...")
-            else:
-                self.desc_edit = TextEdit()
-                self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
+            self.desc_edit = QTextEdit()
+            self.desc_edit.setAcceptRichText(True)
+            self.desc_edit.setPlaceholderText("添加详细描述（可选）...")
             self.desc_edit.setMinimumHeight(72)
             self.desc_edit.setMaximumHeight(110)
             layout.addWidget(self.desc_edit)
@@ -150,9 +146,9 @@ class TodoDialog(QDialog):
             due_row = QHBoxLayout()
             due_row.setSpacing(20)
 
-            due_container = QWidget()
-            due_container.setFixedWidth(240)
-            due_container_layout = QHBoxLayout(due_container)
+            self.due_container = QWidget()
+            self.due_container.setFixedWidth(240)
+            due_container_layout = QHBoxLayout(self.due_container)
             due_container_layout.setContentsMargins(0, 0, 0, 0)
             due_container_layout.setSpacing(0)
 
@@ -190,7 +186,7 @@ class TodoDialog(QDialog):
             """)
             due_container_layout.addWidget(self._clear_due_btn)
 
-            due_row.addWidget(due_container)
+            due_row.addWidget(self.due_container)
 
             self.auto_postpone_cb = CheckBox("自动延期")
             self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
@@ -216,6 +212,14 @@ class TodoDialog(QDialog):
             self.recurrence_interval_spin.setVisible(False)
             self.recurrence_interval_spin.setToolTip("重复间隔")
             recurrence_row.addWidget(self.recurrence_interval_spin)
+
+            self.recurrence_day_spin = CompactSpinBox()
+            self.recurrence_day_spin.setRange(1, 7)
+            self.recurrence_day_spin.setValue(1)
+            self.recurrence_day_spin.setFixedWidth(100)
+            self.recurrence_day_spin.setVisible(False)
+            self.recurrence_day_spin.setToolTip("选择日期")
+            recurrence_row.addWidget(self.recurrence_day_spin)
 
             self.recurrence_end_picker = CalendarPicker()
             self.recurrence_end_picker.setFixedWidth(140)
@@ -316,14 +320,31 @@ class TodoDialog(QDialog):
         text = self.desc_edit.toPlainText()
         if len(text) > 1000:
             cursor = self.desc_edit.textCursor()
-            cursor.setPosition(1000)
-            cursor.movePosition(cursor.MoveOperation.End, cursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
+            cursor.movePosition(cursor.MoveOperation.End)
+            cursor.deletePreviousChar()
 
     def _on_recurrence_changed(self, index: int):
         show = index > 0
-        self.recurrence_interval_spin.setVisible(show)
         self.recurrence_end_picker.setVisible(show)
+
+        recurrence_type = self.recurrence_combo.currentData()
+        is_weekly = recurrence_type == "weekly"
+        is_monthly = recurrence_type == "monthly"
+
+        self.recurrence_interval_spin.setVisible(show)
+        self.recurrence_day_spin.setVisible(show and (is_weekly or is_monthly))
+
+        if is_weekly:
+            self.recurrence_day_spin.setRange(1, 7)
+            self.recurrence_day_spin.setSuffix(" 周几")
+            self.recurrence_day_spin.setValue(1)
+        elif is_monthly:
+            self.recurrence_day_spin.setRange(1, 31)
+            self.recurrence_day_spin.setSuffix(" 号")
+            self.recurrence_day_spin.setValue(1)
+
+        self.due_container.setVisible(not show)
+        self.auto_postpone_cb.setVisible(not show)
 
     def _on_clear_due_date(self):
         self.due_picker.setDate(QDate())
@@ -390,7 +411,9 @@ class TodoDialog(QDialog):
         self.title_edit.setText(data.get("title", ""))
 
         if hasattr(self, 'desc_edit'):
-            self.desc_edit.setPlainText(data.get("description", ""))
+            desc = data.get("description", "")
+            if desc:
+                self.desc_edit.setMarkdown(desc)
 
             priority = data.get("priority", 0)
             for i in range(self.priority_combo.count()):
@@ -434,6 +457,9 @@ class TodoDialog(QDialog):
                         self.recurrence_combo.setCurrentIndex(i)
                         break
                 self.recurrence_interval_spin.setValue(data.get("recurrence_interval", 1))
+                recurrence_day = data.get("recurrence_day")
+                if recurrence_day:
+                    self.recurrence_day_spin.setValue(recurrence_day)
                 end_str = data.get("recurrence_end_date")
                 if end_str:
                     try:
@@ -461,7 +487,7 @@ class TodoDialog(QDialog):
 
         # 子任务只传 title
         if self._pid is None:
-            data["description"] = self.desc_edit.toPlainText().strip()
+            data["description"] = self.desc_edit.toMarkdown().strip()
 
             due_date = None
             if hasattr(self, 'due_picker'):
@@ -486,6 +512,14 @@ class TodoDialog(QDialog):
             # 重复设置
             data["recurrence_type"] = self.recurrence_combo.currentData() if hasattr(self, 'recurrence_combo') else None
             data["recurrence_interval"] = self.recurrence_interval_spin.value() if hasattr(self, 'recurrence_interval_spin') else 1
+            recurrence_type = data.get("recurrence_type")
+            if recurrence_type in ("weekly", "monthly") and hasattr(self, 'recurrence_day_spin'):
+                data["recurrence_day"] = self.recurrence_day_spin.value()
+            else:
+                data["recurrence_day"] = None
+
+            if recurrence_type:
+                data["auto_postpone"] = False
             recurrence_end = None
             if hasattr(self, 'recurrence_end_picker') and data["recurrence_type"]:
                 try:
@@ -567,6 +601,7 @@ class TodoDialog(QDialog):
                 QLabel { color: #DDD; }
                 LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
                 TextEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+                QTextEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
                 QTextBrowser { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
                 CheckBox { color: #DDD; }
                 CompactSpinBox { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
@@ -580,6 +615,7 @@ class TodoDialog(QDialog):
                 QLabel { color: #333; }
                 LineEdit { background-color: #FFF; color: #333; }
                 TextEdit { background-color: #FFF; color: #333; }
+                QTextEdit { background-color: #FFF; color: #333; border: 1px solid #DDD; border-radius: 6px; }
                 QTextBrowser { background-color: #FFF; color: #333; border: 1px solid #DDD; border-radius: 6px; }
                 CheckBox { color: #333; }
                 CompactSpinBox { background-color: #FFF; color: #333; }

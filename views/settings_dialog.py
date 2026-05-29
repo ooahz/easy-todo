@@ -27,7 +27,6 @@ class SettingsPage(QWidget):
     show_done_changed = Signal(bool)
     show_week_view_changed = Signal(bool)
     auto_start_changed = Signal(bool)
-    home_page_changed = Signal(str)
     sort_rule_changed = Signal(str)
     sort_rules_changed = Signal(list)
     done_at_bottom_changed = Signal(bool)
@@ -102,7 +101,6 @@ class SettingsPage(QWidget):
         ]))
 
         self.list_layout.addWidget(self._make_card("启动", [
-            self._make_combo_row("首屏", self._create_home_page_combo()),
             self._create_auto_start_cb(),
         ]))
 
@@ -350,8 +348,12 @@ class SettingsPage(QWidget):
     def _update_category_count(self):
         """更新分类数量显示"""
         from services.category_service import CategoryService
-        count = CategoryService().get_count()
-        self.category_count_label.setText(f"当前有 {count} 个分类")
+        cs = CategoryService()
+        try:
+            count = cs.get_count()
+            self.category_count_label.setText(f"当前有 {count} 个分类")
+        finally:
+            cs.close()
 
     def _on_manage_categories(self):
         """打开分类管理对话框"""
@@ -443,14 +445,6 @@ class SettingsPage(QWidget):
                 self.sort_primary_combo.setCurrentIndex(i)
                 break
         self._on_sort_rules_changed()
-
-    def _create_home_page_combo(self) -> ComboBox:
-        self.home_page_combo = ComboBox()
-        self.home_page_combo.addItems(["全部任务", "今日任务", "重要任务", "已完成"])
-        idx = {"all": 0, "today": 1, "important": 2, "done": 3}.get(settings.home_page, 0)
-        self.home_page_combo.setCurrentIndex(idx)
-        self.home_page_combo.currentIndexChanged.connect(self._on_home_page_changed)
-        return self.home_page_combo
 
     def _create_auto_start_cb(self) -> CheckBox:
         self.auto_start_cb = CheckBox("开机自动启动")
@@ -573,12 +567,6 @@ class SettingsPage(QWidget):
         checked = (state == Qt.CheckState.Checked)
         settings.auto_start = checked
         self.auto_start_changed.emit(checked)
-
-    def _on_home_page_changed(self, index: int):
-        pages = ["all", "today", "important", "done"]
-        page = pages[index] if index < len(pages) else "all"
-        settings.home_page = page
-        self.home_page_changed.emit(page)
 
     def _on_done_at_bottom_changed(self, state):
         checked = (state == Qt.CheckState.Checked)
