@@ -21,6 +21,7 @@ from views.todo_dialog import TodoDialog
 from views.settings_dialog import SettingsPage
 from views.floating_widget import FloatingWidget
 from views.todo_detail_panel import TodoDetailDialog
+from views.recurrence_delete_dialog import RecurrenceDeleteDialog
 from services.todo_service import TodoService
 from services.category_service import CategoryService
 from services.file_service import FileService
@@ -321,9 +322,7 @@ class MainWindow(FluentWindow):
 
         if view_key == "done":
             done_todos = self.todo_service.get_all(status=STATUS_DONE)
-            recurring_done = self.todo_service.get_today_completed_recurring()
-            existing_ids = {t.id for t in done_todos}
-            todos = done_todos + [t for t in recurring_done if t.id not in existing_ids]
+            todos = done_todos
         elif view_key == "today":
             todos = self.todo_service.get_today()
         elif view_key == "important":
@@ -411,21 +410,8 @@ class MainWindow(FluentWindow):
         return parents
 
     def _inject_completed_dates(self, tree: list[dict], done_at_bottom: bool = False):
-        """为重复任务注入完成状态：直接修改 dict 的 status，使所有视图代码自动生效"""
-        recurring_ids = [t["id"] for t in tree if t.get("recurrence_type")]
-        completed_map = {}
-        if recurring_ids:
-            completed_map = self.todo_service.get_all_completed_dates(recurring_ids)
-
-        today = date.today()
+        """为任务树设置完成/归档标志"""
         for t in tree:
-            if t.get("recurrence_type"):
-                t["_completed_dates"] = completed_map.get(t["id"], set())
-                t["due_date"] = today.isoformat()
-                if today in t["_completed_dates"]:
-                    t["status"] = 1
-                    for ch in t.get("children", []):
-                        ch["status"] = 1
             t["_is_done"] = t.get("status", 0) == 1
             t["_is_archived"] = t.get("status", 0) == 2
             for ch in t.get("children", []):
@@ -482,10 +468,7 @@ class MainWindow(FluentWindow):
             self.done_view.set_todos(archived_tree)
         else:
             done_todos = self.todo_service.get_all(status=STATUS_DONE)
-            recurring_done = self.todo_service.get_today_completed_recurring()
-            existing_ids = {t.id for t in done_todos}
-            all_done = done_todos + [t for t in recurring_done if t.id not in existing_ids]
-            done_tree = self._build_todo_tree(all_done)
+            done_tree = self._build_todo_tree(done_todos)
             self._inject_completed_dates(done_tree)
             self.done_view.set_todos(done_tree)
 
@@ -517,6 +500,9 @@ class MainWindow(FluentWindow):
         temp_files = data.pop("temp_files", [])
 
         if "id" in data:
+            existing = self.todo_service.get_by_id(data["id"])
+            if existing and existing.recurrence_template_id:
+                data["is_exception"] = True
             todo = self.todo_service.update(data["id"], **data)
         else:
             todo = self.todo_service.create(**data)
@@ -535,6 +521,16 @@ class MainWindow(FluentWindow):
                            position=InfoBarPosition.TOP, duration=2000)
 
     def _delete_todo(self, todo_id: int):
+        todo = self.todo_service.get_by_id(todo_id)
+        if todo and todo.recurrence_template_id:
+            dlg = RecurrenceDeleteDialog(self)
+            if dlg.exec() and dlg.result_mode:
+                self.todo_service.delete_instance(todo_id, mode=dlg.result_mode)
+                self._refresh_all_views()
+                InfoBar.success(title="已删除", content="任务已删除", parent=self,
+                               position=InfoBarPosition.TOP, duration=2000)
+            return
+
         msg = MessageBox("确认删除", "确定要删除这个任务吗？此操作不可撤销。", self)
         msg.yesButton.setText("删除")
         msg.cancelButton.setText("取消")
@@ -567,10 +563,7 @@ class MainWindow(FluentWindow):
             self.done_view.set_todos(archived_tree)
         else:
             done_todos = self.todo_service.get_all(status=STATUS_DONE)
-            recurring_done = self.todo_service.get_today_completed_recurring()
-            existing_ids = {t.id for t in done_todos}
-            all_done = done_todos + [t for t in recurring_done if t.id not in existing_ids]
-            done_tree = self._build_todo_tree(all_done)
+            done_tree = self._build_todo_tree(done_todos)
             self._inject_completed_dates(done_tree)
             self.done_view.set_todos(done_tree)
 
@@ -619,7 +612,9 @@ class MainWindow(FluentWindow):
         todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
         tree = self._build_todo_tree(todos)
         self._inject_completed_dates(tree)
-        dialog = CalendarDialog(tree, parent=self)
+        templates = self.todo_service.get_all_templates()
+        tpl_dicts = [t.to_dict() for t in templates]
+        dialog = CalendarDialog(tree + tpl_dicts, parent=self)
         dialog.exec()
 
     def _on_reorder_todos(self, from_id: int, to_id: int, insert_after: bool, current_order: list):

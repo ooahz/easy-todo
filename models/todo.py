@@ -24,6 +24,10 @@ class Todo(Base):
     recurrence_interval = Column(Integer, default=1)  # 间隔数
     recurrence_day = Column(Integer, default=None, nullable=True)  # 周几(1-7)或几号(1-31)
     recurrence_end_date = Column(Date, nullable=True)  # 重复结束日期
+    is_recurrence_template = Column(Boolean, default=False)  # 是否为重复模板
+    recurrence_template_id = Column(Integer, ForeignKey("todos.id", ondelete="SET NULL"), nullable=True)  # 所属模板ID
+    occurrence_date = Column(Date, nullable=True)  # 实例对应的重复日期
+    is_exception = Column(Boolean, default=False)  # 是否为例外实例（已被单独编辑）
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     sort_order = Column(Integer, default=0)
@@ -37,6 +41,13 @@ class Todo(Base):
         backref="parent",
         remote_side="Todo.id",
         order_by="Todo.sort_order",
+        foreign_keys="Todo.pid",
+    )
+    # 模板关联：实例指向模板
+    template = relationship(
+        "Todo",
+        remote_side="Todo.id",
+        foreign_keys="Todo.recurrence_template_id",
     )
 
     def to_dict(self):
@@ -55,6 +66,10 @@ class Todo(Base):
             "recurrence_interval": self.recurrence_interval,
             "recurrence_day": self.recurrence_day,
             "recurrence_end_date": self.recurrence_end_date.isoformat() if self.recurrence_end_date else None,
+            "is_recurrence_template": self.is_recurrence_template,
+            "recurrence_template_id": self.recurrence_template_id,
+            "occurrence_date": self.occurrence_date.isoformat() if self.occurrence_date else None,
+            "is_exception": self.is_exception,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "sort_order": self.sort_order,

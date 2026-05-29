@@ -657,10 +657,6 @@ class TodoDetailDialog(MessageBoxBase):
             self.edit_btn.hide()
             self.archive_btn.hide()
             self.done_btn.hide()
-        elif is_done and todo.get("recurrence_type"):
-            self.edit_btn.show()
-            self.archive_btn.hide()
-            self.done_btn.show()
         elif is_done:
             self.edit_btn.hide()
             self.archive_btn.show()

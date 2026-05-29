@@ -54,6 +54,7 @@ class Database:
         self._migrate_add_recurrence()
         self._migrate_add_recurrence_day()
         self._migrate_add_category_is_system()
+        self._migrate_add_recurrence_template()
         self._init_default_categories()
 
     def _migrate_add_category_id(self):
@@ -123,6 +124,23 @@ class Database:
             with self.engine.connect() as conn:
                 conn.execute(text("ALTER TABLE categories ADD COLUMN is_system BOOLEAN DEFAULT 0"))
                 conn.commit()
+
+    def _migrate_add_recurrence_template(self):
+        """迁移：为 todos 表添加重复模板相关列"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        with self.engine.connect() as conn:
+            if "is_recurrence_template" not in columns:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN is_recurrence_template BOOLEAN DEFAULT 0"))
+            if "recurrence_template_id" not in columns:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN recurrence_template_id INTEGER REFERENCES todos(id) ON DELETE SET NULL"))
+            if "occurrence_date" not in columns:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN occurrence_date DATE"))
+            if "is_exception" not in columns:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN is_exception BOOLEAN DEFAULT 0"))
+            conn.commit()
 
     def _init_default_categories(self):
         """清理旧的系统分类（系统视图由导航栏硬编码，不存入数据库）"""

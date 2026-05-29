@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from calendar import monthrange
 
-from services.recurrence_utils import matches_recurrence, generate_occurrences
+from services.recurrence_utils import matches_recurrence
 
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
@@ -262,7 +262,11 @@ class WeekView(QWidget):
         week_start = today - timedelta(days=today.weekday()) - timedelta(weeks=2)
         week_end = week_start + timedelta(weeks=5) - timedelta(days=1)
 
+        instance_limit = today + timedelta(days=14)
+
         for todo in self._todos:
+            if todo.get("is_recurrence_template"):
+                continue
             if not todo.get("recurrence_type") and todo.get("status") == 1:
                 continue
             if todo.get("_is_archived", False):
@@ -272,22 +276,7 @@ class WeekView(QWidget):
             if due_date_str:
                 try:
                     task_date = date.fromisoformat(due_date_str)
-                    recurrence_type = todo.get("recurrence_type")
-                    if recurrence_type:
-                        end_str = todo.get("recurrence_end_date")
-                        end_date = date.fromisoformat(end_str) if end_str else None
-                        interval = todo.get("recurrence_interval", 1)
-                        recurrence_day = todo.get("recurrence_day")
-                        completed_dates = todo.get("_completed_dates", set())
-                        occurrences = generate_occurrences(
-                            task_date, week_start, week_end,
-                            recurrence_type, interval, end_date, recurrence_day
-                        )
-                        for occ in occurrences:
-                            if occ not in completed_dates:
-                                self._pending_dates.add(occ)
-                    else:
-                        self._pending_dates.add(task_date)
+                    self._pending_dates.add(task_date)
                 except (ValueError, TypeError):
                     pass
 
@@ -643,29 +632,18 @@ class CalendarDialog(QDialog):
     def _get_tasks_for_date(self, target_date: date) -> list[dict]:
         """获取指定日期的任务"""
         tasks = []
+        today = date.today()
+        instance_limit = today + timedelta(days=14)
+
         for todo in self._todos:
+            if todo.get("is_recurrence_template"):
+                continue
             due_date_str = todo.get("due_date")
             if due_date_str:
                 try:
                     task_date = date.fromisoformat(due_date_str)
-                    recurrence_type = todo.get("recurrence_type")
-                    if recurrence_type:
-                        end_str = todo.get("recurrence_end_date")
-                        end_date = date.fromisoformat(end_str) if end_str else None
-                        interval = todo.get("recurrence_interval", 1)
-                        recurrence_day = todo.get("recurrence_day")
-                        if matches_recurrence(task_date, target_date, recurrence_type, interval, end_date, recurrence_day):
-                            virtual = dict(todo)
-                            virtual["_virtual_date"] = target_date.isoformat()
-                            virtual["_is_virtual"] = target_date != task_date
-                            completed_dates = todo.get("_completed_dates", set())
-                            virtual["_occurrence_done"] = target_date in completed_dates
-                            virtual["_is_done"] = virtual["_occurrence_done"]
-                            virtual["status"] = 1 if virtual["_occurrence_done"] else 0
-                            tasks.append(virtual)
-                    else:
-                        if task_date == target_date:
-                            tasks.append(todo)
+                    if task_date == target_date:
+                        tasks.append(todo)
                 except (ValueError, TypeError):
                     pass
             for child in todo.get("children", []):
@@ -677,6 +655,33 @@ class CalendarDialog(QDialog):
                             tasks.append(child)
                     except (ValueError, TypeError):
                         pass
+
+        if target_date > instance_limit:
+            for todo in self._todos:
+                if not todo.get("is_recurrence_template"):
+                    continue
+                due_str = todo.get("due_date")
+                if not due_str:
+                    continue
+                try:
+                    tpl_date = date.fromisoformat(due_str)
+                    recurrence_type = todo.get("recurrence_type")
+                    if not recurrence_type:
+                        continue
+                    end_str = todo.get("recurrence_end_date")
+                    end_date = date.fromisoformat(end_str) if end_str else None
+                    interval = todo.get("recurrence_interval", 1)
+                    recurrence_day = todo.get("recurrence_day")
+                    if matches_recurrence(tpl_date, target_date, recurrence_type, interval, end_date, recurrence_day):
+                        virtual = dict(todo)
+                        virtual["_virtual_date"] = target_date.isoformat()
+                        virtual["_is_virtual"] = True
+                        virtual["_is_done"] = False
+                        virtual["status"] = 0
+                        tasks.append(virtual)
+                except (ValueError, TypeError):
+                    pass
+
         return tasks
 
     def _get_day_label_style(self, is_today: bool, col: int) -> str:
