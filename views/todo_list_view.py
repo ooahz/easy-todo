@@ -230,9 +230,7 @@ class TodoListView(QWidget):
         self._refresh_list()
 
     def _filter_todos_by_date(self, todos: list[dict], target_date: date_type) -> list[dict]:
-        """根据截止日期过滤任务（含重复任务匹配）"""
-        from services.recurrence_utils import matches_recurrence
-
+        """根据截止日期过滤任务"""
         filtered = []
 
         for todo in todos:
@@ -252,15 +250,7 @@ class TodoListView(QWidget):
             if due_date:
                 try:
                     task_date = date_type.fromisoformat(due_date)
-                    recurrence_type = todo.get("recurrence_type")
-                    if recurrence_type:
-                        end_str = todo.get("recurrence_end_date")
-                        end_date = date_type.fromisoformat(end_str) if end_str else None
-                        interval = todo.get("recurrence_interval", 1)
-                        recurrence_day = todo.get("recurrence_day")
-                        if matches_recurrence(task_date, target_date, recurrence_type, interval, end_date, recurrence_day):
-                            parent_match = True
-                    elif task_date == target_date:
+                    if task_date == target_date:
                         parent_match = True
                 except (ValueError, TypeError):
                     pass
