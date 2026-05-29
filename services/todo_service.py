@@ -31,6 +31,7 @@ class TodoService:
                pid: Optional[int] = None,
                recurrence_type: Optional[str] = None,
                recurrence_interval: int = 1,
+               recurrence_day: Optional[int] = None,
                recurrence_end_date=None) -> Todo:
         """创建待办事项，pid 为 None 则创建父任务，否则创建子任务"""
         if due_date is not None and hasattr(due_date, 'year') and not isinstance(due_date, date):
@@ -41,7 +42,6 @@ class TodoService:
             from datetime import date as pydate
             recurrence_end_date = pydate(recurrence_end_date.year(), recurrence_end_date.month(), recurrence_end_date.day())
 
-        # 子任务：在父任务下按 sort_order 追加；父任务：在同级中追加
         max_order = self.session.query(Todo).filter(
             Todo.pid == pid
         ).count()
@@ -59,6 +59,7 @@ class TodoService:
             pid=pid,
             recurrence_type=recurrence_type,
             recurrence_interval=recurrence_interval,
+            recurrence_day=recurrence_day,
             recurrence_end_date=recurrence_end_date,
         )
         self.session.add(todo)
@@ -155,16 +156,21 @@ class TodoService:
             return False
         return all(c.status == STATUS_DONE for c in children)
 
+    def get_children_count(self, parent_id: int) -> int:
+        """获取父任务的子任务数量"""
+        return self.session.query(Todo).filter(Todo.pid == parent_id).count()
+
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:
-        """自动延期过期任务"""
+        """自动延期过期任务（排除重复任务）"""
         today = date.today()
         count = self.session.query(Todo).filter(
-            Todo.pid.is_(None),  # 只处理父任务
+            Todo.pid.is_(None),
             Todo.status == STATUS_TODO,
             Todo.auto_postpone == True,
             Todo.due_date < today,
+            Todo.recurrence_type.is_(None),
         ).update({Todo.due_date: today, Todo.updated_at: datetime.now()},
                  synchronize_session=False)
         self.session.commit()
@@ -200,7 +206,7 @@ class TodoService:
                                 sort_rules: list[str] = None,
                                 category_id: Optional[int] = None,
                                 **kwargs) -> list[Todo]:
-        """获取所有任务（含已完成）"""
+        """获取所有任务（含已完成，不含已归档）"""
         query = self.session.query(Todo).filter(
             Todo.status.in_([STATUS_TODO, STATUS_DONE])
         )
@@ -307,11 +313,12 @@ class TodoService:
         ).order_by(Todo.created_at.desc()).all()
 
     def get_overdue(self) -> list[Todo]:
-        """获取已过期的所有任务"""
+        """获取已过期的所有任务（排除重复任务）"""
         today = date.today()
         return self.session.query(Todo).filter(
             Todo.status == STATUS_TODO,
             Todo.due_date < today,
+            Todo.recurrence_type.is_(None),
         ).order_by(Todo.due_date.asc()).all()
 
     # ---- 统计 ----
@@ -337,6 +344,7 @@ class TodoService:
             Todo.pid.is_(None),
             Todo.status == STATUS_TODO,
             Todo.due_date < today,
+            Todo.recurrence_type.is_(None),
         ).count()
 
     # ---- 清理 ----

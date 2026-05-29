@@ -34,6 +34,7 @@ class Database:
         self.engine = create_engine(
             f"sqlite:///{db_path}",
             echo=False,
+            pool_pre_ping=True,
         )
         self.SessionLocal = sessionmaker(
             bind=self.engine,
@@ -51,6 +52,8 @@ class Database:
         self._migrate_add_category_id()
         self._migrate_add_pid()
         self._migrate_add_recurrence()
+        self._migrate_add_recurrence_day()
+        self._migrate_add_category_is_system()
         self._init_default_categories()
 
     def _migrate_add_category_id(self):
@@ -99,9 +102,54 @@ class Database:
                 conn.execute(text("ALTER TABLE todos ADD COLUMN recurrence_end_date DATE"))
             conn.commit()
 
+    def _migrate_add_recurrence_day(self):
+        """迁移：为 todos 表添加 recurrence_day 列"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        if "recurrence_day" not in columns:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN recurrence_day INTEGER"))
+                conn.commit()
+
+    def _migrate_add_category_is_system(self):
+        """迁移：为 categories 表添加 is_system 列"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("categories")]
+        if "is_system" not in columns:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE categories ADD COLUMN is_system BOOLEAN DEFAULT 0"))
+                conn.commit()
+
     def _init_default_categories(self):
-        """初始化默认分类"""
-        pass
+        """清理旧的系统分类（系统视图由导航栏硬编码，不存入数据库）"""
+        from models.category import Category
+        from models.todo import Todo
+
+        session = self.get_session()
+        try:
+            system_cats = session.query(Category).filter(
+                Category.is_system == True
+            ).all()
+            if not system_cats:
+                return
+
+            system_ids = [c.id for c in system_cats]
+            session.query(Todo).filter(
+                Todo.category_id.in_(system_ids)
+            ).update({"category_id": None}, synchronize_session=False)
+
+            for cat in system_cats:
+                session.delete(cat)
+
+            session.commit()
+        except Exception:
+            session.rollback()
+        finally:
+            session.close()
 
     def get_session(self):
         """获取数据库会话"""

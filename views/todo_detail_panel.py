@@ -11,12 +11,11 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, SubtitleLabel, TitleLabel,
     TransparentToolButton, FluentIcon, isDarkTheme, CheckBox,
-    ToolButton, PrimaryPushButton, CardWidget, IconWidget,
+    ToolButton, PrimaryPushButton, PushButton, CardWidget, IconWidget,
     MessageBoxBase
 )
 
 from config.constants import PRIORITY_MAP, STATUS_MAP
-from config.settings import settings
 from services.file_service import FileService
 
 
@@ -138,11 +137,12 @@ class SubtaskItem(CardWidget):
 
 
 class FileItem(CardWidget):
-    """详情中的文件项"""
+    """详情中的文件项 - 点击打开文件"""
 
     def __init__(self, file_info: dict, todo_id: int, parent=None):
         super().__init__(parent)
         self._todo_id = todo_id
+        self._file_path = file_info.get("path", "")
         c = _tc()
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 6, 10, 6)
@@ -154,7 +154,7 @@ class FileItem(CardWidget):
         layout.addWidget(icon_w)
 
         name = BodyLabel(file_info.get("name", ""))
-        name.setStyleSheet(f"color: {c['body']}; font-size: 12px;")
+        name.setStyleSheet(f"color: {c['accent']}; font-size: 12px;")
         name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(name, 1)
 
@@ -175,6 +175,27 @@ class FileItem(CardWidget):
             }}
         """)
 
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._open_file()
+        super().mouseReleaseEvent(event)
+
+    def _open_file(self):
+        import os
+        import platform
+        if not self._file_path or not os.path.exists(self._file_path):
+            return
+        system = platform.system()
+        try:
+            if system == "Windows":
+                os.startfile(self._file_path)
+            elif system == "Darwin":
+                os.system(f'open "{self._file_path}"')
+            else:
+                os.system(f'xdg-open "{self._file_path}"')
+        except Exception:
+            pass
+
 
 class TodoDetailDialog(MessageBoxBase):
     """任务详情对话框"""
@@ -183,6 +204,7 @@ class TodoDetailDialog(MessageBoxBase):
     delete_clicked = Signal(int)
     toggle_done = Signal(int)
     subtask_toggle_done = Signal(int)
+    archive_clicked = Signal(int)
 
     def __init__(self, todo_data: dict, parent=None):
         super().__init__(parent)
@@ -226,6 +248,12 @@ class TodoDetailDialog(MessageBoxBase):
         self.done_btn.setFixedHeight(32)
         self.done_btn.clicked.connect(self._on_toggle_done)
         self.buttonLayout.addWidget(self.done_btn, 1)
+
+        self.archive_btn = ToolButton(FluentIcon.FOLDER)
+        self.archive_btn.setFixedSize(28, 28)
+        self.archive_btn.setToolTip("归档")
+        self.archive_btn.clicked.connect(self._on_archive)
+        self.buttonLayout.addWidget(self.archive_btn)
 
         self.edit_btn = ToolButton(FluentIcon.EDIT)
         self.edit_btn.setFixedSize(28, 28)
@@ -304,7 +332,8 @@ class TodoDetailDialog(MessageBoxBase):
                     if sub.widget():
                         sub.widget().deleteLater()
 
-        is_done = todo.get("status", 0) == 1
+        is_done = todo.get("status", 0) in (1, 2)
+        is_archived = todo.get("status", 0) == 2
 
         # ---- 标题区 ----
         title_layout = QVBoxLayout()
@@ -389,27 +418,21 @@ class TodoDetailDialog(MessageBoxBase):
             desc_header.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
             desc_layout.addWidget(desc_header)
 
-            if settings.description_mode == "markdown":
-                desc_body = QTextBrowser()
-                desc_body.setOpenExternalLinks(True)
-                desc_body.setMarkdown(desc)
-                desc_body.setReadOnly(True)
-                desc_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-                desc_body.setStyleSheet(f"""
-                    QTextBrowser {{
-                        background-color: transparent;
-                        border: none;
-                        color: {c['body']};
-                        font-size: 13px;
-                        line-height: 1.5;
-                        padding: 0;
-                    }}
-                """)
-            else:
-                desc_body = BodyLabel(desc)
-                desc_body.setWordWrap(True)
-                desc_body.setStyleSheet(f"color: {c['body']}; font-size: 13px; line-height: 1.5;")
-                desc_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            desc_body = QTextBrowser()
+            desc_body.setOpenExternalLinks(True)
+            desc_body.setMarkdown(desc)
+            desc_body.setReadOnly(True)
+            desc_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            desc_body.setStyleSheet(f"""
+                QTextBrowser {{
+                    background-color: transparent;
+                    border: none;
+                    color: {c['body']};
+                    font-size: 13px;
+                    line-height: 1.5;
+                    padding: 0;
+                }}
+            """)
             desc_layout.addWidget(desc_body)
 
             self.content_layout.addWidget(desc_card)
@@ -497,9 +520,22 @@ class TodoDetailDialog(MessageBoxBase):
         if recurrence_type:
             from config.constants import RECURRENCE_TYPES
             interval = todo.get("recurrence_interval", 1)
+            recurrence_day = todo.get("recurrence_day")
             type_name = RECURRENCE_TYPES.get(recurrence_type, "")
-            if interval > 1:
-                unit = {"daily": "天", "weekly": "周", "monthly": "月", "yearly": "年"}.get(recurrence_type, "")
+            if recurrence_type == "weekly" and recurrence_day:
+                weekday_names = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日"}
+                day_name = weekday_names.get(recurrence_day, "")
+                if interval > 1:
+                    text = f"每{interval}周周{day_name}"
+                else:
+                    text = f"每周{day_name}"
+            elif recurrence_type == "monthly" and recurrence_day:
+                if interval > 1:
+                    text = f"每{interval}月{recurrence_day}号"
+                else:
+                    text = f"每月{recurrence_day}号"
+            elif interval > 1:
+                unit = {"daily": "天", "weekly": "周", "monthly": "月"}.get(recurrence_type, "")
                 text = f"每{interval}{unit}"
             else:
                 text = type_name
@@ -594,20 +630,40 @@ class TodoDetailDialog(MessageBoxBase):
                 self.content_layout.addSpacing(4)
 
             if file_count > 5:
-                more = CaptionLabel(f"还有 {file_count - 5} 个文件...")
-                more.setStyleSheet(f"color: {c['muted']}; font-size: 11px;")
-                self.content_layout.addWidget(more)
+                more_btn = PushButton("查看全部")
+                more_btn.setFixedHeight(28)
+                more_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+                more_btn.clicked.connect(lambda: self._open_task_folder())
+                self.content_layout.addWidget(more_btn)
+            elif file_count > 0:
+                view_all_btn = PushButton("查看全部")
+                view_all_btn.setFixedHeight(28)
+                view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+                view_all_btn.clicked.connect(lambda: self._open_task_folder())
+                self.content_layout.addWidget(view_all_btn)
 
         # 底部弹性空间
         self.content_layout.addStretch()
 
         # 更新底部按钮状态
-        if is_done:
+        if is_done and not is_archived:
             self.done_btn.setText("标记待办")
             self.done_btn.setIcon(FluentIcon.CANCEL)
         else:
             self.done_btn.setText("标记完成")
             self.done_btn.setIcon(FluentIcon.COMPLETED)
+
+        if is_archived:
+            self.edit_btn.hide()
+            self.archive_btn.hide()
+            self.done_btn.hide()
+        elif is_done:
+            self.edit_btn.hide()
+            self.archive_btn.show()
+            self.done_btn.hide()
+        else:
+            self.edit_btn.show()
+            self.archive_btn.hide()
 
     def _on_toggle_done(self):
         self._pending_action = ("toggle_done", self._current_todo_id)
@@ -617,6 +673,10 @@ class TodoDetailDialog(MessageBoxBase):
         self._pending_action = ("edit", self._current_todo_id)
         self.reject()
 
+    def _on_archive(self):
+        self._pending_action = ("archive", self._current_todo_id)
+        self.reject()
+
     def _on_delete(self):
         self._pending_action = ("delete", self._current_todo_id)
         self.reject()
@@ -624,3 +684,6 @@ class TodoDetailDialog(MessageBoxBase):
     def _on_subtask_toggle(self, todo_id: int):
         self._pending_action = ("subtask_toggle_done", todo_id)
         self.reject()
+
+    def _open_task_folder(self):
+        self._file_service.open_folder(self._current_todo_id)

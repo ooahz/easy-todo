@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
 from qfluentwidgets import (
     PrimaryPushButton, ToolButton, BodyLabel, CaptionLabel, FluentIcon,
-    SmoothScrollArea, PipsPager, PipsScrollButtonDisplayMode
+    SmoothScrollArea, PipsPager, PipsScrollButtonDisplayMode, ComboBox
 )
 from views.todo_card import TodoCard
 from views.subtask_card import SubtaskCard
@@ -22,20 +22,23 @@ class TodoListView(QWidget):
     delete_clicked = Signal(int)
     toggle_done = Signal(int)
     float_clicked = Signal()
-    calendar_clicked = Signal()  # 日程视图按钮点击
-    reorder_requested = Signal(int, int, bool, list)  # from_id, to_id, insert_after, current_order
-    add_subtask_clicked = Signal(int)  # parent_id
-    card_clicked = Signal(int)  # 父任务卡片点击
+    calendar_clicked = Signal()
+    reorder_requested = Signal(int, int, bool, list)
+    add_subtask_clicked = Signal(int)
+    card_clicked = Signal(int)
+    archive_clicked = Signal(int)
+    filter_changed = Signal(str)
 
-    def __init__(self, parent=None, view_name: str = ""):
+    def __init__(self, parent=None, view_name: str = "", readonly: bool = False):
         super().__init__(parent)
         self._todos: list[dict] = []
         self._all_todos: list[dict] = []
         self._cards: list = []
         self._view_name = view_name
+        self._readonly = readonly
         self._filter_date: date_type | None = None
-        self._page_size = 100  # 每页最多100个父任务
-        self._current_page = 0  # 当前页码（从0开始）
+        self._page_size = 100
+        self._current_page = 0
 
         self._setup_ui()
 
@@ -48,6 +51,17 @@ class TodoListView(QWidget):
         # ---- 顶部工具栏 ----
         self.toolbar = QHBoxLayout()
         self.toolbar.setSpacing(8)
+
+        # 过滤下拉框（仅已完成页面使用）
+        self.filter_combo = ComboBox()
+        self.filter_combo.addItems(["已完成", "已归档"])
+        self.filter_combo.setCurrentIndex(0)
+        self.filter_combo.setFixedWidth(100)
+        self.filter_combo.currentIndexChanged.connect(
+            lambda idx: self.filter_changed.emit("done" if idx == 0 else "archived")
+        )
+        self.filter_combo.setVisible(False)
+        self.toolbar.addWidget(self.filter_combo)
 
         self.toolbar.addStretch()
 
@@ -69,6 +83,9 @@ class TodoListView(QWidget):
         self.add_btn = PrimaryPushButton(FluentIcon.ADD, "新建任务")
         self.add_btn.clicked.connect(self.add_clicked.emit)
         self.toolbar.addWidget(self.add_btn)
+
+        if self._readonly:
+            self.add_btn.hide()
 
         self.main_layout.addLayout(self.toolbar)
 
@@ -143,6 +160,7 @@ class TodoListView(QWidget):
         else:
             self._todos = todos
 
+        self._update_pager()
         self._refresh_list()
 
     def _on_filter_changed(self, filter_date: date_type | None):
@@ -168,10 +186,12 @@ class TodoListView(QWidget):
             self.pager.setVisible(False)
         else:
             self.pager.setVisible(True)
-            self.pager.setPageNumber(total_pages)
-            # 确保当前页不越界
+            # 先重置内部索引，避免 setPageNumber 检查时越界
+            self.pager.setCurrentIndex(0)
+            # 调整当前页
             if self._current_page >= total_pages:
                 self._current_page = total_pages - 1
+            self.pager.setPageNumber(total_pages)
             self.pager.setCurrentIndex(self._current_page)
 
     def _on_page_changed(self, index: int):
@@ -207,7 +227,8 @@ class TodoListView(QWidget):
                         end_str = todo.get("recurrence_end_date")
                         end_date = date_type.fromisoformat(end_str) if end_str else None
                         interval = todo.get("recurrence_interval", 1)
-                        if matches_recurrence(task_date, target_date, recurrence_type, interval, end_date):
+                        recurrence_day = todo.get("recurrence_day")
+                        if matches_recurrence(task_date, target_date, recurrence_type, interval, end_date, recurrence_day):
                             parent_match = True
                     elif task_date == target_date:
                         parent_match = True
@@ -247,12 +268,13 @@ class TodoListView(QWidget):
 
         for todo_data in page_todos:
             # 父任务卡片
-            card = TodoCard(todo_data)
+            card = TodoCard(todo_data, readonly=self._readonly)
             card.edit_clicked.connect(self.edit_clicked.emit)
             card.delete_clicked.connect(self.delete_clicked.emit)
             card.toggle_done.connect(self.toggle_done.emit)
             card.add_subtask_clicked.connect(self.add_subtask_clicked.emit)
             card.card_clicked.connect(self.card_clicked.emit)
+            card.archive_clicked.connect(self.archive_clicked.emit)
             card.reorder_requested.connect(
                 lambda from_id, to_id, after, order=parent_ids: self.reorder_requested.emit(from_id, to_id, after, order)
             )
@@ -262,20 +284,20 @@ class TodoListView(QWidget):
             # 子任务卡片（整体缩进）
             children = todo_data.get("children", [])
             for child_data in children:
-                # 创建容器实现整体缩进
                 container = QWidget()
                 container_layout = QHBoxLayout(container)
-                container_layout.setContentsMargins(24, 0, 0, 0)  # 左侧缩进 24px
+                container_layout.setContentsMargins(24, 0, 0, 0)
                 container_layout.setSpacing(0)
                 
-                child_card = SubtaskCard(child_data)
+                child_card = SubtaskCard(child_data, readonly=self._readonly)
                 child_card.edit_clicked.connect(self.edit_clicked.emit)
                 child_card.delete_clicked.connect(self.delete_clicked.emit)
                 child_card.toggle_done.connect(self.toggle_done.emit)
+                child_card.archive_clicked.connect(self.archive_clicked.emit)
                 container_layout.addWidget(child_card)
                 
                 self.list_layout.addWidget(container)
-                self._cards.append(child_card)  # 仍然记录卡片用于更新
+                self._cards.append(child_card)
 
         self.list_layout.addStretch()
 

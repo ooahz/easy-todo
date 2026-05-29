@@ -29,13 +29,15 @@ class SubtaskCard(CardWidget):
     edit_clicked = Signal(int)
     delete_clicked = Signal(int)
     toggle_done = Signal(int)
+    archive_clicked = Signal(int)
 
-    def __init__(self, todo_data: dict, parent=None):
+    def __init__(self, todo_data: dict, readonly: bool = False, parent=None):
         super().__init__(parent)
         self.todo_data = todo_data
         self.todo_id = todo_data["id"]
         self._is_done = todo_data["status"] == 1
         self._is_selected = False
+        self._readonly = readonly
 
         self.setMinimumHeight(52)
         self.setCursor(Qt.PointingHandCursor)
@@ -57,6 +59,8 @@ class SubtaskCard(CardWidget):
         self.checkbox = CheckBox()
         self.checkbox.setFixedSize(18, 18)
         self.checkbox.setChecked(self._is_done)
+        if self.todo_data.get("status") == 2:
+            self.checkbox.setEnabled(False)
         self.checkbox.checkStateChanged.connect(lambda: self.toggle_done.emit(self.todo_id))
         self.row.addWidget(self.checkbox)
 
@@ -77,12 +81,25 @@ class SubtaskCard(CardWidget):
         self.edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.todo_id))
         self.row.addWidget(self.edit_btn)
 
+        self.archive_btn = TransparentToolButton(FluentIcon.FOLDER)
+        self.archive_btn.setFixedSize(26, 26)
+        self.archive_btn.setIconSize(QSize(14, 14))
+        self.archive_btn.setToolTip("归档")
+        self.archive_btn.clicked.connect(lambda: self.archive_clicked.emit(self.todo_id))
+        self.row.addWidget(self.archive_btn)
+
         self.delete_btn = TransparentToolButton(FluentIcon.DELETE)
         self.delete_btn.setFixedSize(26, 26)
         self.delete_btn.setIconSize(QSize(14, 14))
         self.delete_btn.setToolTip("删除")
         self.delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.todo_id))
         self.row.addWidget(self.delete_btn)
+
+        if self._readonly:
+            self.edit_btn.hide()
+            self.archive_btn.setVisible(self._is_done)
+        else:
+            self.archive_btn.hide()
 
         self.main_layout.addLayout(self.row)
 

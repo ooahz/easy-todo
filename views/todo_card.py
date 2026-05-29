@@ -48,13 +48,15 @@ class TodoCard(CardWidget):
     toggle_done = Signal(int)
     reorder_requested = Signal(int, int, bool)  # from_id, to_id, insert_after
     add_subtask_clicked = Signal(int)  # parent_id
+    archive_clicked = Signal(int)
 
-    def __init__(self, todo_data: dict, parent=None):
+    def __init__(self, todo_data: dict, readonly: bool = False, parent=None):
         super().__init__(parent)
         self.todo_data = todo_data
         self.todo_id = todo_data["id"]
         self._is_done = self._calc_is_done(todo_data)
         self._is_selected = False
+        self._readonly = readonly
         self._file_service = FileService()
 
         # 动态计算高度
@@ -94,6 +96,8 @@ class TodoCard(CardWidget):
         self.checkbox = CheckBox()
         self.checkbox.setFixedSize(20, 20)
         self.checkbox.setChecked(self._is_done)
+        if self.todo_data.get("status") == 2:
+            self.checkbox.setEnabled(False)
         self.checkbox.checkStateChanged.connect(lambda: self.toggle_done.emit(self.todo_id))
         self.top_row.addWidget(self.checkbox)
 
@@ -152,9 +156,22 @@ class TodoCard(CardWidget):
         if recurrence:
             from config.constants import RECURRENCE_TYPES
             interval = self.todo_data.get("recurrence_interval", 1)
+            recurrence_day = self.todo_data.get("recurrence_day")
             type_name = RECURRENCE_TYPES.get(recurrence, "")
-            if interval > 1:
-                unit = {"daily": "天", "weekly": "周", "monthly": "月", "yearly": "年"}.get(recurrence, "")
+            if recurrence == "weekly" and recurrence_day:
+                weekday_names = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日"}
+                day_name = weekday_names.get(recurrence_day, "")
+                if interval > 1:
+                    info_parts.append(f"每{interval}周周{day_name}")
+                else:
+                    info_parts.append(f"每周{day_name}")
+            elif recurrence == "monthly" and recurrence_day:
+                if interval > 1:
+                    info_parts.append(f"每{interval}月{recurrence_day}号")
+                else:
+                    info_parts.append(f"每月{recurrence_day}号")
+            elif interval > 1:
+                unit = {"daily": "天", "weekly": "周", "monthly": "月"}.get(recurrence, "")
                 info_parts.append(f"每{interval}{unit}")
             else:
                 info_parts.append(type_name)
@@ -195,11 +212,24 @@ class TodoCard(CardWidget):
         self.edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.todo_id))
         self.action_layout.addWidget(self.edit_btn)
 
+        self.archive_btn = TransparentToolButton(FluentIcon.FOLDER)
+        self.archive_btn.setFixedSize(30, 30)
+        self.archive_btn.setToolTip("归档")
+        self.archive_btn.clicked.connect(lambda: self.archive_clicked.emit(self.todo_id))
+        self.action_layout.addWidget(self.archive_btn)
+
         self.delete_btn = TransparentToolButton(FluentIcon.DELETE)
         self.delete_btn.setFixedSize(30, 30)
         self.delete_btn.setToolTip("删除")
         self.delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.todo_id))
         self.action_layout.addWidget(self.delete_btn)
+
+        if self._readonly:
+            self.add_subtask_btn.hide()
+            self.edit_btn.hide()
+            self.archive_btn.setVisible(self._is_done)
+        else:
+            self.archive_btn.hide()
 
         self.top_row.addWidget(action_widget)
         self.main_layout.addLayout(self.top_row)
