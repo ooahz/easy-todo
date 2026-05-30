@@ -100,7 +100,7 @@ class SubtaskItem(CardWidget):
     def __init__(self, data: dict, parent=None):
         super().__init__(parent)
         self.todo_id = data["id"]
-        self._is_done = data.get("status", 0) == 1
+        self._is_done = data.get("_is_done", False)
         self._setup_ui(data)
 
     def _setup_ui(self, data: dict):
@@ -332,8 +332,8 @@ class TodoDetailDialog(MessageBoxBase):
                     if sub.widget():
                         sub.widget().deleteLater()
 
-        is_done = todo.get("status", 0) in (1, 2)
-        is_archived = todo.get("status", 0) == 2
+        is_done = todo.get("_is_done", False)
+        is_archived = todo.get("_is_archived", False)
 
         # ---- 标题区 ----
         title_layout = QVBoxLayout()
@@ -588,7 +588,7 @@ class TodoDetailDialog(MessageBoxBase):
             subtask_title.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
             subtask_header.addWidget(subtask_title)
 
-            done_count = sum(1 for ch in children if ch.get("status", 0) == 1)
+            done_count = sum(1 for ch in children if ch.get("_is_done", False))
             count_label = CaptionLabel(f"{done_count}/{len(children)}")
             count_label.setStyleSheet(f"color: {c['accent']}; font-size: 11px;")
             subtask_header.addWidget(count_label)
@@ -657,6 +657,10 @@ class TodoDetailDialog(MessageBoxBase):
             self.edit_btn.hide()
             self.archive_btn.hide()
             self.done_btn.hide()
+        elif is_done and todo.get("recurrence_type"):
+            self.edit_btn.show()
+            self.archive_btn.hide()
+            self.done_btn.show()
         elif is_done:
             self.edit_btn.hide()
             self.archive_btn.show()

@@ -60,7 +60,7 @@ class SubtaskCard(CardWidget):
         super().__init__(parent)
         self.todo_data = todo_data
         self.todo_id = todo_data["id"]
-        self._is_done = todo_data["status"] == 1
+        self._is_done = todo_data.get("_is_done", False)
         self._is_selected = False
         self._readonly = readonly
 
@@ -84,7 +84,7 @@ class SubtaskCard(CardWidget):
         self.checkbox = CheckBox()
         self.checkbox.setFixedSize(18, 18)
         self.checkbox.setChecked(self._is_done)
-        if self.todo_data.get("status") == 2:
+        if self.todo_data.get("_is_archived", False):
             self.checkbox.setEnabled(False)
         self.checkbox.checkStateChanged.connect(lambda: self.toggle_done.emit(self.todo_id))
         self.row.addWidget(self.checkbox)
@@ -164,7 +164,7 @@ class SubtaskCard(CardWidget):
     def update_data(self, todo_data: dict):
         """更新卡片数据"""
         self.todo_data = todo_data
-        self._is_done = todo_data["status"] == 1
+        self._is_done = todo_data.get("_is_done", False)
         self.checkbox.blockSignals(True)
         self.checkbox.setChecked(self._is_done)
         self.checkbox.blockSignals(False)
