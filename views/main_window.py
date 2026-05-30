@@ -778,7 +778,9 @@ class MainWindow(FluentWindow):
                                             "auto_postpone")}
                     self.todo_service.update(existing_id, **update_data)
                 else:
-                    for key in ("id", "created_at", "updated_at", "sort_order", "status"):
+                    for key in ("id", "created_at", "updated_at", "sort_order", "status",
+                                "category", "children", "is_recurrence_template",
+                                "recurrence_template_id", "occurrence_date", "is_exception"):
                         item.pop(key, None)
                     self.todo_service.create(**item)
                 count += 1
