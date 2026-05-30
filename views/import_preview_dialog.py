@@ -13,7 +13,7 @@ class ImportPreviewDialog(MessageBoxBase):
 
     def __init__(self, preview_data: dict, parent=None):
         super().__init__(parent)
-        self._selected_mode = "merge"
+        self._selected_mode = "append"
 
         self.widget.setMinimumWidth(400)
 
@@ -50,11 +50,6 @@ class ImportPreviewDialog(MessageBoxBase):
         if instance_count > 0:
             stats_layout.addWidget(BodyLabel(f"🔄 重复实例：{instance_count} 个"))
 
-        dup_count = preview_data.get("duplicate_count", 0)
-        if dup_count > 0:
-            dup_label = BodyLabel(f"⚠️ 重复任务：{dup_count} 个（合并模式下将跳过）")
-            stats_layout.addWidget(dup_label)
-
         self.viewLayout.addLayout(stats_layout)
 
         mode_layout = QVBoxLayout()
@@ -66,10 +61,10 @@ class ImportPreviewDialog(MessageBoxBase):
 
         self._btn_group = QButtonGroup(self)
 
-        self._merge_radio = RadioButton("合并导入 — 保留现有数据，追加新数据")
-        self._merge_radio.setChecked(True)
-        mode_layout.addWidget(self._merge_radio)
-        self._btn_group.addButton(self._merge_radio)
+        self._append_radio = RadioButton("追加导入 — 保留现有数据，追加新数据")
+        self._append_radio.setChecked(True)
+        mode_layout.addWidget(self._append_radio)
+        self._btn_group.addButton(self._append_radio)
 
         self._replace_radio = RadioButton("替换导入 — 清空现有数据后导入")
         mode_layout.addWidget(self._replace_radio)
@@ -83,8 +78,8 @@ class ImportPreviewDialog(MessageBoxBase):
         self.cancelButton.setText("取消")
 
     def _on_mode_changed(self, btn):
-        if btn == self._merge_radio:
-            self._selected_mode = "merge"
+        if btn == self._append_radio:
+            self._selected_mode = "append"
         elif btn == self._replace_radio:
             self._selected_mode = "replace"
 

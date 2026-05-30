@@ -217,7 +217,6 @@ class ImportExportService:
             instance_count += len(instances)
             for inst in instances:
                 child_count += self._count_children(inst.get("children", []))
-        duplicate_count = self._count_duplicates(todos)
         return {
             "valid": True,
             "version": data.get("version", "2.0"),
@@ -225,7 +224,7 @@ class ImportExportService:
             "todos_count": todo_count,
             "children_count": child_count,
             "instances_count": instance_count,
-            "duplicate_count": duplicate_count,
+            "duplicate_count": 0,
         }
 
     def _count_children(self, children: list) -> int:
@@ -234,33 +233,9 @@ class ImportExportService:
             count += self._count_children(c.get("children", []))
         return count
 
-    def _count_duplicates(self, todos: list[dict]) -> int:
-        existing_keys = self._get_existing_todo_keys()
-        dup = 0
-        for t in todos:
-            key = self._todo_key(t)
-            if key in existing_keys:
-                dup += 1
-        return dup
-
-    def _get_existing_todo_keys(self) -> set[str]:
-        keys = set()
-        all_todos = self.todo_service.get_all_including_archived()
-        for t in all_todos:
-            cat_name = t.category.name if t.category else ""
-            due = t.due_date.isoformat() if t.due_date else ""
-            keys.add(f"{t.title}||{due}||{cat_name}")
-        return keys
-
-    def _todo_key(self, t: dict) -> str:
-        title = t.get("title", "")
-        due = t.get("due_date", "") or ""
-        cat = t.get("category_name", "") or ""
-        return f"{title}||{due}||{cat}"
-
     # ---- 导入 ----
 
-    def import_data(self, data, mode: str = "merge") -> dict:
+    def import_data(self, data, mode: str = "append") -> dict:
         if isinstance(data, list):
             return self._import_v1(data, mode)
         if isinstance(data, dict):
@@ -303,14 +278,8 @@ class ImportExportService:
                         "children", "is_recurrence_template",
                         "recurrence_template_id", "occurrence_date", "is_exception",
                         "recurrence_type", "recurrence_interval",
-                        "recurrence_day", "recurrence_end_date"):
+                        "recurrence_day", "recurrence_end_date", "status"):
                 item.pop(key, None)
-
-            if mode == "merge":
-                key = self._todo_key(item)
-                existing = self._get_existing_todo_keys()
-                if key in existing:
-                    continue
 
             self.todo_service.create(**item)
             count += 1
@@ -328,14 +297,8 @@ class ImportExportService:
         count = 0
         children_count = 0
         instance_count = 0
-        existing_keys = self._get_existing_todo_keys() if mode == "merge" else set()
 
         for todo_node in data.get("todos", []):
-            if mode == "merge":
-                key = self._todo_key(todo_node)
-                if key in existing_keys:
-                    continue
-
             is_template = todo_node.get("is_recurrence_template", False)
             if is_template:
                 created, ch, inst = self._import_template_node(todo_node, cat_name_map)
