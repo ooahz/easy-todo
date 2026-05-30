@@ -137,10 +137,11 @@ class TodoService:
         return todo
 
     def delete(self, todo_id: int) -> bool:
-        """删除待办事项"""
+        """删除待办事项（含子任务）"""
         todo = self.session.query(Todo).filter(Todo.id == todo_id).first()
         if not todo:
             return False
+        self.session.query(Todo).filter(Todo.pid == todo_id).delete(synchronize_session=False)
         self.session.delete(todo)
         self.session.commit()
         return True
