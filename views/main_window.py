@@ -593,9 +593,12 @@ class MainWindow(FluentWindow):
         if todo and todo.recurrence_template_id:
             dlg = RecurrenceDeleteDialog(file_count, parent=self)
             if dlg.exec() and dlg.result_mode:
-                self.todo_service.delete_instance(todo_id, mode=dlg.result_mode)
+                mode = dlg.result_mode
                 if dlg.delete_files:
-                    self.file_service.delete_task_folder(todo_id)
+                    affected_ids = self.todo_service.get_affected_instance_ids(todo_id, mode)
+                    for aid in affected_ids:
+                        self.file_service.delete_task_folder(aid)
+                self.todo_service.delete_instance(todo_id, mode=mode)
                 self._refresh_all_views()
                 InfoBar.success(title="已删除", content="任务已删除", parent=self,
                                position=InfoBarPosition.TOP, duration=2000)

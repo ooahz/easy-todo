@@ -115,7 +115,6 @@ class RecurrenceDeleteDialog(MessageBoxBase):
 
     def __init__(self, file_count: int = 0, parent=None):
         super().__init__(parent)
-        self._result_mode: str | None = None
 
         self.yesButton.setText("确认删除")
         self.cancelButton.setText("取消")
@@ -154,7 +153,6 @@ class RecurrenceDeleteDialog(MessageBoxBase):
             radio = RadioButton()
             if i == 0:
                 radio.setChecked(True)
-                self._result_mode = mode
             radio.setProperty("_mode", mode)
             self._btn_group.addButton(radio)
             self._radios.append(radio)
@@ -162,11 +160,13 @@ class RecurrenceDeleteDialog(MessageBoxBase):
             card = _OptionCard(icon, opt_title, desc, color)
             self._cards.append(card)
 
+            radio.toggled.connect(
+                lambda checked, idx=i: self._on_radio_toggled(idx, checked)
+            )
+
             row.addWidget(radio)
             row.addWidget(card, 1)
             self.viewLayout.addLayout(row)
-
-        self._btn_group.buttonClicked.connect(self._on_radio_clicked)
 
         if file_count > 0:
             self._file_checkbox = CheckBox(f"同时删除关联的 {file_count} 个文件")
@@ -177,9 +177,12 @@ class RecurrenceDeleteDialog(MessageBoxBase):
 
         self._update_card_selection()
 
-    def _on_radio_clicked(self, btn):
-        self._result_mode = btn.property("_mode")
-        self._update_card_selection()
+    def _on_radio_toggled(self, idx: int, checked: bool):
+        if checked:
+            self._cards[idx].set_selected(True)
+            for j, card in enumerate(self._cards):
+                if j != idx:
+                    card.set_selected(False)
 
     def _update_card_selection(self):
         for i, radio in enumerate(self._radios):
@@ -187,7 +190,10 @@ class RecurrenceDeleteDialog(MessageBoxBase):
 
     @property
     def result_mode(self) -> str | None:
-        return self._result_mode
+        for radio in self._radios:
+            if radio.isChecked():
+                return radio.property("_mode")
+        return None
 
     @property
     def delete_files(self) -> bool:

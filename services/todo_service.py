@@ -587,6 +587,32 @@ class TodoService:
         self.ensure_instances(template_id)
         return template
 
+    def get_affected_instance_ids(self, todo_id: int, mode: str) -> list[int]:
+        instance = self.get_by_id(todo_id)
+        if not instance:
+            return [todo_id]
+
+        template_id = instance.recurrence_template_id
+        ids = [todo_id]
+
+        if mode == "this_and_future" and template_id:
+            occ_date = instance.occurrence_date or instance.due_date
+            future = self.session.query(Todo).filter(
+                Todo.recurrence_template_id == template_id,
+                Todo.occurrence_date >= occ_date,
+                Todo.id != todo_id,
+            ).all()
+            ids.extend([t.id for t in future])
+        elif mode == "all" and template_id:
+            all_instances = self.session.query(Todo).filter(
+                Todo.recurrence_template_id == template_id,
+                Todo.id != todo_id,
+            ).all()
+            ids.extend([t.id for t in all_instances])
+            ids.append(template_id)
+
+        return ids
+
     def delete_instance(self, todo_id: int, mode: str = "this") -> bool:
         """删除重复实例: this=仅此次, this_and_future=此次及之后, all=删除模板和所有实例"""
         instance = self.get_by_id(todo_id)
