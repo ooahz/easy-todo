@@ -6,12 +6,37 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
 from qfluentwidgets import (
     PrimaryPushButton, ToolButton, BodyLabel, CaptionLabel, FluentIcon,
-    SmoothScrollArea, PipsPager, PipsScrollButtonDisplayMode, ComboBox
+    SmoothScrollArea, PipsPager, PipsScrollButtonDisplayMode, ComboBox, isDarkTheme
 )
 from views.todo_card import TodoCard
 from views.subtask_card import SubtaskCard
 from views.calendar_view import WeekView
 from config.settings import settings
+
+
+def _tooltip_style() -> str:
+    """获取 tooltip 样式"""
+    if isDarkTheme():
+        return """
+            QToolTip {
+                background-color: #3C3C3C;
+                color: #EEE;
+                border: 1px solid #555;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+        """
+    return """
+        QToolTip {
+            background-color: #FFF;
+            color: #333;
+            border: 1px solid #DDD;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+    """
 
 
 class TodoListView(QWidget):
@@ -149,6 +174,9 @@ class TodoListView(QWidget):
 
         self.empty_widget.setVisible(False)
         self.main_layout.addWidget(self.empty_widget)
+        
+        # 设置 tooltip 样式
+        self.setStyleSheet(_tooltip_style())
 
     def set_todos(self, todos: list[dict], recurring_instances: list[dict] = None):
         """设置待办列表数据（父任务列表，已包含 children）"""

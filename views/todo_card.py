@@ -39,6 +39,31 @@ def _tc():
     }
 
 
+def _tooltip_style() -> str:
+    """获取 tooltip 样式"""
+    if isDarkTheme():
+        return """
+            QToolTip {
+                background-color: #3C3C3C;
+                color: #EEE;
+                border: 1px solid #555;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+        """
+    return """
+        QToolTip {
+            background-color: #FFF;
+            color: #333;
+            border: 1px solid #DDD;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+    """
+
+
 class TodoCard(CardWidget):
     """待办事项卡片组件（仅用于父任务）"""
 
@@ -372,6 +397,7 @@ class TodoCard(CardWidget):
 
     def _apply_styles(self):
         c = _tc()
+        tooltip_style = _tooltip_style()
         self.setStyleSheet(f"""
             CardWidget {{
                 border: none;
@@ -381,6 +407,7 @@ class TodoCard(CardWidget):
             CardWidget:hover {{
                 background-color: {c['hover_bg']};
             }}
+            {tooltip_style}
         """)
 
     def update_data(self, todo_data: dict):

@@ -25,7 +25,6 @@ from config.settings import settings
 from models.database import db
 from views.main_window import MainWindow
 
-# 全局共享内存，用于单实例检测
 _shared_memory = None
 
 

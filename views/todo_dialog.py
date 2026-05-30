@@ -199,7 +199,7 @@ class TodoDialog(QDialog):
             recurrence_row.setSpacing(10)
 
             self.recurrence_combo = ComboBox()
-            self.recurrence_combo.setFixedWidth(205)
+            self.recurrence_combo.setFixedWidth(110)
             self.recurrence_combo.addItem("不重复", userData=None)
             for key, label in RECURRENCE_TYPES.items():
                 self.recurrence_combo.addItem(label, userData=key)
@@ -216,13 +216,13 @@ class TodoDialog(QDialog):
             self.recurrence_day_spin = CompactSpinBox()
             self.recurrence_day_spin.setRange(1, 7)
             self.recurrence_day_spin.setValue(1)
-            self.recurrence_day_spin.setFixedWidth(100)
+            self.recurrence_day_spin.setFixedWidth(80)
             self.recurrence_day_spin.setVisible(False)
-            self.recurrence_day_spin.setToolTip("选择日期")
             recurrence_row.addWidget(self.recurrence_day_spin)
 
             self.recurrence_end_picker = CalendarPicker()
-            self.recurrence_end_picker.setFixedWidth(140)
+            self.recurrence_end_picker.setFixedWidth(130)
+            self.recurrence_end_picker.setToolTip("选择日期")
             self.recurrence_end_picker.setVisible(False)
             try:
                 self.recurrence_end_picker.setText("结束日期")
@@ -336,10 +336,12 @@ class TodoDialog(QDialog):
 
         if is_weekly:
             self.recurrence_day_spin.setRange(1, 7)
-            self.recurrence_day_spin.setSuffix(" 周几")
+            self.recurrence_day_spin.setPrefix("周 ")
+            self.recurrence_day_spin.setSuffix("")
             self.recurrence_day_spin.setValue(1)
         elif is_monthly:
             self.recurrence_day_spin.setRange(1, 31)
+            self.recurrence_day_spin.setPrefix("")
             self.recurrence_day_spin.setSuffix(" 号")
             self.recurrence_day_spin.setValue(1)
 

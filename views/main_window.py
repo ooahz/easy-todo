@@ -12,7 +12,7 @@ from PySide6.QtGui import QAction, QIcon
 
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon, Theme,
-    setTheme, InfoBar, InfoBarPosition, MessageBox
+    setTheme, InfoBar, InfoBarPosition, MessageBox, isDarkTheme
 )
 
 from views.todo_list_view import TodoListView
@@ -678,6 +678,7 @@ class MainWindow(FluentWindow):
                 setTheme(Theme.DARK if darkdetect.isDark() else Theme.LIGHT)
             except Exception:
                 pass
+        
         # 刷新浮窗样式
         self.floating.refresh_theme()
         # 刷新卡片样式
