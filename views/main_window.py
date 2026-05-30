@@ -317,16 +317,29 @@ class MainWindow(FluentWindow):
             self._current_view_key = "all"
         elif widget == self.today_view:
             self._current_view_key = "today"
+            self._reset_today_filter()
         elif widget == self.important_view:
             self._current_view_key = "important"
         elif widget == self.done_view:
             self._current_view_key = "done"
         else:
-            # 检查是否是分类视图
             for cat_id, (view, name) in self._category_nav_items.items():
                 if widget == view:
                     self._current_view_key = f"cat_{cat_id}"
                     break
+
+    def _reset_today_filter(self):
+        """重置今日任务页面的筛选日期为今天"""
+        today = date.today()
+        self.today_view._filter_date = today
+        self.today_view.week_view.set_selected_date(today)
+        if self.today_view._all_todos:
+            self.today_view._todos = self.today_view._filter_todos_by_date(
+                self.today_view._all_todos, today
+            )
+            self.today_view._current_page = 0
+            self.today_view._update_pager()
+            self.today_view._refresh_list()
 
     def _toggle_floating(self, view_key: str = None):
         """显示浮窗"""
@@ -504,6 +517,7 @@ class MainWindow(FluentWindow):
         today_tree = self._build_todo_tree(today_todos)
         self._inject_completed_dates(today_tree, done_at_bottom=done_at_bottom)
         self.today_view._filter_date = date.today()
+        self.today_view.week_view.set_selected_date(date.today())
         self.today_view.set_todos(today_tree)
 
         important_todos = self.todo_service.get_high_priority()

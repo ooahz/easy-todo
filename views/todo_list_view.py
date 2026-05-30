@@ -369,10 +369,13 @@ class TodoListView(QWidget):
         if self._filter_date and self._view_name != "今日任务":
             self.stats_label.setText(f"筛选: {self._filter_date.month}月{self._filter_date.day}日 · 共{total_count}个任务")
         elif self._view_name == "今日任务":
-            from datetime import date
-            all_count = parent_count
-            done_count = sum(1 for t in self._todos if t.get("_is_done", False))
-            self.stats_label.setText(f"今日任务{all_count} · 已完成{done_count}")
+            from datetime import date as _date
+            if self._filter_date and self._filter_date != _date.today():
+                self.stats_label.setText(f"筛选: {self._filter_date.month}月{self._filter_date.day}日 · 共{total_count}个任务")
+            else:
+                all_count = parent_count
+                done_count = sum(1 for t in self._todos if t.get("_is_done", False))
+                self.stats_label.setText(f"今日任务{all_count} · 已完成{done_count}")
         elif self._view_name == "全部任务":
             # 全部任务页面：只统计父任务（不统计子任务）
             from datetime import date
