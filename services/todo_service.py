@@ -117,7 +117,13 @@ class TodoService:
 
         # 重复任务
         if todo.recurrence_type and todo.pid is None:
-            self.toggle_occurrence_done(todo_id, date.today())
+            is_now_done = self.toggle_occurrence_done(todo_id, date.today())
+            new_status = STATUS_DONE if is_now_done else STATUS_TODO
+            children = self.session.query(Todo).filter(Todo.pid == todo.id).all()
+            for child in children:
+                child.status = new_status
+                child.updated_at = datetime.now()
+            self.session.commit()
             self.session.refresh(todo)
             return todo
 
@@ -133,11 +139,12 @@ class TodoService:
 
         # 如果是子任务：切换后检查父任务下所有子任务是否全部完成
         if todo.pid is not None:
-            all_done = self._check_children_all_done(todo.pid)
             parent = self.get_by_id(todo.pid)
-            if parent and parent.status != all_done:
-                parent.status = STATUS_DONE if all_done else STATUS_TODO
-                parent.updated_at = datetime.now()
+            if parent and not parent.recurrence_type:
+                all_done = self._check_children_all_done(todo.pid)
+                if parent.status != (STATUS_DONE if all_done else STATUS_TODO):
+                    parent.status = STATUS_DONE if all_done else STATUS_TODO
+                    parent.updated_at = datetime.now()
         else:
             # 如果是父任务：切换时同时切换所有子任务
             children = self.session.query(Todo).filter(Todo.pid == todo.id).all()
@@ -163,7 +170,7 @@ class TodoService:
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:
-        """自动延期过期任务（排除重复任务）"""
+        """自动延期过期任务（排除重复任务），并重置重复任务子任务的隔日残留状态"""
         today = date.today()
         count = self.session.query(Todo).filter(
             Todo.pid.is_(None),
@@ -173,6 +180,27 @@ class TodoService:
             Todo.recurrence_type.is_(None),
         ).update({Todo.due_date: today, Todo.updated_at: datetime.now()},
                  synchronize_session=False)
+
+        from models.recurrence_completion import RecurrenceCompletion
+        recurring_parents = self.session.query(Todo.id).filter(
+            Todo.pid.is_(None),
+            Todo.recurrence_type.isnot(None),
+        ).all()
+        if recurring_parents:
+            today_done_ids = {r[0] for r in self.session.query(
+                RecurrenceCompletion.todo_id
+            ).filter(
+                RecurrenceCompletion.todo_id.in_([p[0] for p in recurring_parents]),
+                RecurrenceCompletion.completed_date == today,
+            ).all()}
+            not_done_ids = [p[0] for p in recurring_parents if p[0] not in today_done_ids]
+            if not_done_ids:
+                self.session.query(Todo).filter(
+                    Todo.pid.in_(not_done_ids),
+                    Todo.status == STATUS_DONE,
+                ).update({Todo.status: STATUS_TODO, Todo.updated_at: datetime.now()},
+                         synchronize_session=False)
+
         self.session.commit()
         return count
 
@@ -291,12 +319,27 @@ class TodoService:
         return query.order_by(*exprs)
 
     def get_today(self) -> list[Todo]:
-        """获取今日到期的所有任务"""
+        """获取今日到期的所有任务（含今日匹配的重复任务）"""
+        from services.recurrence_utils import matches_recurrence
         today = date.today()
-        return self.session.query(Todo).filter(
+        normal = self.session.query(Todo).filter(
             Todo.status == STATUS_TODO,
             Todo.due_date == today,
+            Todo.recurrence_type.is_(None),
         ).order_by(Todo.priority.desc(), Todo.created_at.desc()).all()
+
+        recurring = self.session.query(Todo).filter(
+            Todo.pid.is_(None),
+            Todo.recurrence_type.isnot(None),
+            Todo.due_date <= today,
+        ).all()
+        matched = [t for t in recurring if matches_recurrence(
+            t.due_date, today, t.recurrence_type, t.recurrence_interval,
+            t.recurrence_end_date, t.recurrence_day
+        )]
+
+        existing_ids = {t.id for t in normal}
+        return normal + [t for t in matched if t.id not in existing_ids]
 
     def get_high_priority(self) -> list[Todo]:
         """获取高优先级所有任务"""
@@ -331,12 +374,25 @@ class TodoService:
         ).count()
 
     def count_today(self) -> int:
+        from services.recurrence_utils import matches_recurrence
         today = date.today()
-        return self.session.query(Todo).filter(
+        normal_count = self.session.query(Todo).filter(
             Todo.pid.is_(None),
             Todo.status == STATUS_TODO,
             Todo.due_date == today,
+            Todo.recurrence_type.is_(None),
         ).count()
+
+        recurring = self.session.query(Todo).filter(
+            Todo.pid.is_(None),
+            Todo.recurrence_type.isnot(None),
+            Todo.due_date <= today,
+        ).all()
+        recurring_count = sum(1 for t in recurring if matches_recurrence(
+            t.due_date, today, t.recurrence_type, t.recurrence_interval,
+            t.recurrence_end_date, t.recurrence_day
+        ))
+        return normal_count + recurring_count
 
     def count_overdue(self) -> int:
         today = date.today()
@@ -402,6 +458,22 @@ class TodoService:
         for tid, d in rows:
             result.setdefault(tid, set()).add(d)
         return result
+
+    def get_today_completed_recurring(self) -> list[Todo]:
+        """获取今天已完成的重复任务"""
+        from models.recurrence_completion import RecurrenceCompletion
+        today = date.today()
+        todo_ids = self.session.query(RecurrenceCompletion.todo_id).filter(
+            RecurrenceCompletion.completed_date == today
+        ).all()
+        if not todo_ids:
+            return []
+        ids = [r[0] for r in todo_ids]
+        return self.session.query(Todo).filter(
+            Todo.id.in_(ids),
+            Todo.recurrence_type.isnot(None),
+            Todo.pid.is_(None),
+        ).all()
 
     def close(self):
         """关闭会话"""

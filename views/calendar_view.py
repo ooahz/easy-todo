@@ -263,7 +263,9 @@ class WeekView(QWidget):
         week_end = week_start + timedelta(weeks=5) - timedelta(days=1)
 
         for todo in self._todos:
-            if todo.get("status") == 1:
+            if not todo.get("recurrence_type") and todo.get("status") == 1:
+                continue
+            if todo.get("_is_archived", False):
                 continue
 
             due_date_str = todo.get("due_date")
@@ -290,7 +292,7 @@ class WeekView(QWidget):
                     pass
 
             for child in todo.get("children", []):
-                if child.get("status") == 1:
+                if child.get("_is_done", False):
                     continue
                 child_due = child.get("due_date")
                 if child_due:
@@ -658,6 +660,8 @@ class CalendarDialog(QDialog):
                             virtual["_is_virtual"] = target_date != task_date
                             completed_dates = todo.get("_completed_dates", set())
                             virtual["_occurrence_done"] = target_date in completed_dates
+                            virtual["_is_done"] = virtual["_occurrence_done"]
+                            virtual["status"] = 1 if virtual["_occurrence_done"] else 0
                             tasks.append(virtual)
                     else:
                         if task_date == target_date:
@@ -772,7 +776,7 @@ class CalendarDialog(QDialog):
     def _get_task_style(self, task: dict) -> str:
         """获取任务标签样式"""
         dark = isDarkTheme()
-        is_done = task.get("status") == 1 or task.get("_occurrence_done", False)
+        is_done = task.get("_is_done", False)
         color_tag = task.get("color_tag")
 
         if is_done:

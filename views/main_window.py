@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import winreg
+from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -55,7 +56,8 @@ class MainWindow(FluentWindow):
         # 启动时处理自动延期
         self.todo_service.process_auto_postpone()
 
-        # 跨天时自动检查延期（每天零点触发）
+        # 跨天检测：零点定时器 + 窗口激活时日期变化检测（应对休眠跨天）
+        self._last_date = date.today()
         self._postpone_timer = QTimer(self)
         self._postpone_timer.setSingleShot(True)
         self._postpone_timer.timeout.connect(self._auto_postpone_tick)
@@ -309,18 +311,23 @@ class MainWindow(FluentWindow):
             cat_name = self._category_nav_items.get(cat_id, (None, "任务列表"))[1]
             self.floating.title_label.setText(cat_name)
             todos = self.todo_service.get_by_category(cat_id)
-            self.floating.set_todos(self._build_todo_tree(todos))
+            tree = self._build_todo_tree(todos)
+            self._inject_completed_dates(tree)
+            self.floating.set_todos(tree)
             return
 
         title_map = {"all": "全部任务", "today": "今日任务", "important": "重要任务", "done": "已完成"}
         self.floating.title_label.setText(title_map.get(view_key, "任务列表"))
 
-        if view_key == "today":
+        if view_key == "done":
+            done_todos = self.todo_service.get_all(status=STATUS_DONE)
+            recurring_done = self.todo_service.get_today_completed_recurring()
+            existing_ids = {t.id for t in done_todos}
+            todos = done_todos + [t for t in recurring_done if t.id not in existing_ids]
+        elif view_key == "today":
             todos = self.todo_service.get_today()
         elif view_key == "important":
             todos = self.todo_service.get_high_priority()
-        elif view_key == "done":
-            todos = self.todo_service.get_all(status=STATUS_DONE)
         else:
             if settings.show_done_tasks:
                 todos = self.todo_service.get_all_including_done(
@@ -332,7 +339,10 @@ class MainWindow(FluentWindow):
                     status=STATUS_TODO, sort_rules=settings.sort_rules
                 )
 
-        self.floating.set_todos(self._build_todo_tree(todos))
+        tree = self._build_todo_tree(todos)
+        done_at_bottom = settings.done_at_bottom if view_key == "all" else False
+        self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
+        self.floating.set_todos(tree)
 
     def _apply_initial_theme(self):
         theme = settings.theme
@@ -364,11 +374,23 @@ class MainWindow(FluentWindow):
 
     def _auto_postpone_tick(self):
         """定时检查自动延期"""
-        count = self.todo_service.process_auto_postpone()
-        if count > 0:
-            self._load_todos()
+        self._last_date = date.today()
+        self.todo_service.process_auto_postpone()
+        self._load_todos()
         # 重新调度到下一个零点
         self._schedule_postpone_timer()
+
+    def changeEvent(self, event):
+        """窗口激活时检测日期变化，应对系统休眠跨天"""
+        super().changeEvent(event)
+        if event.type() == event.Type.ActivationChange and self.isActiveWindow():
+            today = date.today()
+            if today != self._last_date:
+                self._last_date = today
+                self._postpone_timer.stop()
+                self.todo_service.process_auto_postpone()
+                self._load_todos()
+                self._schedule_postpone_timer()
 
     def _build_todo_tree(self, todos: list) -> list[dict]:
         """在内存中构建任务树形结构"""
@@ -388,17 +410,44 @@ class MainWindow(FluentWindow):
 
         return parents
 
-    def _inject_completed_dates(self, tree: list[dict]):
-        """为重复任务注入已完成日期集合"""
+    def _inject_completed_dates(self, tree: list[dict], done_at_bottom: bool = False):
+        """为重复任务注入完成状态：直接修改 dict 的 status，使所有视图代码自动生效"""
         recurring_ids = [t["id"] for t in tree if t.get("recurrence_type")]
+        completed_map = {}
         if recurring_ids:
             completed_map = self.todo_service.get_all_completed_dates(recurring_ids)
-            for t in tree:
-                if t.get("recurrence_type"):
-                    t["_completed_dates"] = completed_map.get(t["id"], set())
+
+        today = date.today()
+        for t in tree:
+            if t.get("recurrence_type"):
+                t["_completed_dates"] = completed_map.get(t["id"], set())
+                t["due_date"] = today.isoformat()
+                if today in t["_completed_dates"]:
+                    t["status"] = 1
+                    for ch in t.get("children", []):
+                        ch["status"] = 1
+            t["_is_done"] = t.get("status", 0) == 1
+            t["_is_archived"] = t.get("status", 0) == 2
+            for ch in t.get("children", []):
+                ch["_is_done"] = ch.get("status", 0) == 1
+                ch["_is_archived"] = ch.get("status", 0) == 2
+
+        if done_at_bottom:
+            tree.sort(key=lambda t: t.get("status", 0))
 
     def _load_todos(self):
-        """加载待办数据"""
+        """加载待办数据（先展示骨架，再异步加载真实数据）"""
+        self.todo_list_view.show_loading()
+        self.today_view.show_loading()
+        self.important_view.show_loading()
+        self.done_view.show_loading()
+        for cat_id, (view, _) in self._category_nav_items.items():
+            view.show_loading()
+
+        QTimer.singleShot(0, self._do_load_todos)
+
+    def _do_load_todos(self):
+        """实际加载数据"""
         sort_rules = settings.sort_rules
         done_at_bottom = settings.done_at_bottom
 
@@ -412,7 +461,7 @@ class MainWindow(FluentWindow):
                 status=STATUS_TODO, sort_rules=sort_rules
             )
         tree = self._build_todo_tree(todos)
-        self._inject_completed_dates(tree)
+        self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
         self.todo_list_view.set_todos(tree)
 
         today_todos = self.todo_service.get_today()
@@ -428,10 +477,17 @@ class MainWindow(FluentWindow):
         self._done_filter = getattr(self, '_done_filter', 'done')
         if self._done_filter == 'archived':
             archived_todos = self.todo_service.get_all(status=STATUS_ARCHIVED)
-            self.done_view.set_todos(self._build_todo_tree(archived_todos))
+            archived_tree = self._build_todo_tree(archived_todos)
+            self._inject_completed_dates(archived_tree)
+            self.done_view.set_todos(archived_tree)
         else:
             done_todos = self.todo_service.get_all(status=STATUS_DONE)
-            self.done_view.set_todos(self._build_todo_tree(done_todos))
+            recurring_done = self.todo_service.get_today_completed_recurring()
+            existing_ids = {t.id for t in done_todos}
+            all_done = done_todos + [t for t in recurring_done if t.id not in existing_ids]
+            done_tree = self._build_todo_tree(all_done)
+            self._inject_completed_dates(done_tree)
+            self.done_view.set_todos(done_tree)
 
         for cat_id, (view, _) in self._category_nav_items.items():
             cat_todos = self.todo_service.get_by_category(cat_id)
@@ -506,16 +562,24 @@ class MainWindow(FluentWindow):
         self._done_filter = filter_key
         if filter_key == 'archived':
             archived_todos = self.todo_service.get_all(status=STATUS_ARCHIVED)
-            self.done_view.set_todos(self._build_todo_tree(archived_todos))
+            archived_tree = self._build_todo_tree(archived_todos)
+            self._inject_completed_dates(archived_tree)
+            self.done_view.set_todos(archived_tree)
         else:
             done_todos = self.todo_service.get_all(status=STATUS_DONE)
-            self.done_view.set_todos(self._build_todo_tree(done_todos))
+            recurring_done = self.todo_service.get_today_completed_recurring()
+            existing_ids = {t.id for t in done_todos}
+            all_done = done_todos + [t for t in recurring_done if t.id not in existing_ids]
+            done_tree = self._build_todo_tree(all_done)
+            self._inject_completed_dates(done_tree)
+            self.done_view.set_todos(done_tree)
 
     def _on_card_clicked(self, todo_id: int):
         """父任务卡片点击 - 弹出详情对话框"""
         todo = self.todo_service.get_by_id(todo_id)
         if todo:
             todo_tree = self._build_todo_tree([todo])
+            self._inject_completed_dates(todo_tree)
             if todo_tree:
                 dialog = TodoDetailDialog(todo_tree[0], parent=self)
                 dialog.exec()

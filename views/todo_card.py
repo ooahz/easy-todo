@@ -79,7 +79,7 @@ class TodoCard(CardWidget):
         super().__init__(parent)
         self.todo_data = todo_data
         self.todo_id = todo_data["id"]
-        self._is_done = self._calc_is_done(todo_data)
+        self._is_done = todo_data.get("_is_done", False)
         self._is_selected = False
         self._readonly = readonly
         self._file_service = FileService()
@@ -92,13 +92,6 @@ class TodoCard(CardWidget):
 
         self._setup_ui()
         self._apply_styles()
-
-    def _calc_is_done(self, todo_data: dict) -> bool:
-        if todo_data["status"] == 1:
-            return True
-        if todo_data.get("recurrence_type"):
-            return date.today() in todo_data.get("_completed_dates", set())
-        return False
 
     def _setup_ui(self):
         """构建卡片 UI"""
@@ -121,7 +114,7 @@ class TodoCard(CardWidget):
         self.checkbox = CheckBox()
         self.checkbox.setFixedSize(20, 20)
         self.checkbox.setChecked(self._is_done)
-        if self.todo_data.get("status") == 2:
+        if self.todo_data.get("_is_archived", False):
             self.checkbox.setEnabled(False)
         self.checkbox.checkStateChanged.connect(lambda: self.toggle_done.emit(self.todo_id))
         self.top_row.addWidget(self.checkbox)
@@ -413,7 +406,7 @@ class TodoCard(CardWidget):
     def update_data(self, todo_data: dict):
         """更新卡片数据"""
         self.todo_data = todo_data
-        self._is_done = self._calc_is_done(todo_data)
+        self._is_done = todo_data.get("_is_done", False)
         self.checkbox.blockSignals(True)
         self.checkbox.setChecked(self._is_done)
         self.checkbox.blockSignals(False)

@@ -405,10 +405,10 @@ class FloatingWidget(QWidget):
         else:
             border_left = f"border-left: 3px solid {color_tag};" if color_tag else "border-left: 3px solid transparent;"
 
-        status = todo.get("status", 0)
+        is_done = todo.get("_is_done", False)
         due = todo.get("due_date")
         is_overdue = False
-        if due and status != 1:
+        if due and not is_done:
             try:
                 from datetime import date as pydate
                 if pydate.fromisoformat(due) < pydate.today():
@@ -416,7 +416,7 @@ class FloatingWidget(QWidget):
             except:
                 pass
 
-        if status == 1:
+        if is_done:
             text_style = f"color: {c['done_text']}; text-decoration: line-through;"
         elif is_overdue:
             text_style = f"color: {settings.warning_color};"

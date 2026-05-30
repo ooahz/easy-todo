@@ -10,6 +10,7 @@ from qfluentwidgets import (
 )
 from views.todo_card import TodoCard
 from views.subtask_card import SubtaskCard
+from views.skeleton_widget import SkeletonCard, SkeletonSubtaskCard
 from views.calendar_view import WeekView
 from config.settings import settings
 
@@ -59,6 +60,7 @@ class TodoListView(QWidget):
         self._todos: list[dict] = []
         self._all_todos: list[dict] = []
         self._cards: list = []
+        self._skeleton_cards: list = []
         self._view_name = view_name
         self._readonly = readonly
         self._filter_date: date_type | None = None
@@ -273,6 +275,8 @@ class TodoListView(QWidget):
 
     def _refresh_list(self):
         """刷新列表显示 - 树形渲染：父任务 + 缩进子任务"""
+        self._hide_skeleton()
+
         for card in self._cards:
             card.deleteLater()
         self._cards.clear()
@@ -339,11 +343,11 @@ class TodoListView(QWidget):
             # 全部任务页面：只统计父任务（不统计子任务）
             from datetime import date
             all_count = parent_count
-            done_count = sum(1 for t in self._todos if t.get("status") == 1)
+            done_count = sum(1 for t in self._todos if t.get("_is_done", False))
             overdue_count = 0
             today = date.today()
             for t in self._todos:
-                if t.get("status") == 0:  # 只统计未完成的
+                if not t.get("_is_done", False) and not t.get("_is_archived", False):
                     due = t.get("due_date")
                     if due:
                         try:
@@ -379,6 +383,45 @@ class TodoListView(QWidget):
         if len(self._cards) == 0:
             self.scroll_area.setVisible(False)
             self.empty_widget.setVisible(True)
+
+    def show_loading(self):
+        """展示骨架加载态"""
+        for card in self._cards:
+            card.deleteLater()
+        self._cards.clear()
+        while self.list_layout.count():
+            item = self.list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._show_skeleton()
+
+    def _show_skeleton(self):
+        """显示骨架占位"""
+        self._hide_skeleton()
+        self.empty_widget.setVisible(False)
+        self.scroll_area.setVisible(True)
+
+        for i in range(5):
+            card = SkeletonCard()
+            self.list_layout.addWidget(card)
+            self._skeleton_cards.append(card)
+            if i % 2 == 0:
+                container = QWidget()
+                container_layout = QHBoxLayout(container)
+                container_layout.setContentsMargins(24, 0, 0, 0)
+                container_layout.setSpacing(0)
+                sub = SkeletonSubtaskCard()
+                container_layout.addWidget(sub)
+                self.list_layout.addWidget(container)
+                self._skeleton_cards.append(sub)
+        self.list_layout.addStretch()
+
+    def _hide_skeleton(self):
+        """移除骨架占位"""
+        for card in self._skeleton_cards:
+            card.stop()
+            card.deleteLater()
+        self._skeleton_cards.clear()
 
     def set_show_week_view(self, show: bool):
         """设置是否显示周日程视图"""
