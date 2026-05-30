@@ -13,7 +13,8 @@ from PySide6.QtGui import QAction, QIcon
 
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon, Theme,
-    setTheme, InfoBar, InfoBarPosition, MessageBox, isDarkTheme
+    setTheme, InfoBar, InfoBarPosition, MessageBox, MessageBoxBase,
+    SubtitleLabel, BodyLabel, isDarkTheme
 )
 
 from views.todo_list_view import TodoListView
@@ -27,6 +28,35 @@ from services.category_service import CategoryService
 from services.file_service import FileService
 from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED, APP_NAME
 from config.settings import settings
+
+
+class ConfirmDialog(MessageBoxBase):
+    """带阴影和圆角的确认弹窗"""
+
+    def __init__(self, title: str, content: str, confirm_text: str = "确认",
+                 cancel_text: str = "取消", parent=None):
+        super().__init__(parent)
+        self._confirmed = False
+
+        self.widget.setMinimumWidth(360)
+
+        title_label = SubtitleLabel(title)
+        self.viewLayout.addWidget(title_label)
+
+        content_label = BodyLabel(content)
+        content_label.setWordWrap(True)
+        self.viewLayout.addWidget(content_label)
+
+        self.yesButton.setText(confirm_text)
+        self.cancelButton.setText(cancel_text)
+        self.yesButton.clicked.connect(self._on_confirm)
+
+    def _on_confirm(self):
+        self._confirmed = True
+
+    @property
+    def confirmed(self):
+        return self._confirmed
 
 
 class MainWindow(FluentWindow):
@@ -581,10 +611,9 @@ class MainWindow(FluentWindow):
             InfoBar.info(title="提示", content="没有可归档的已完成任务", parent=self,
                         position=InfoBarPosition.TOP, duration=2000)
             return
-        msg = MessageBox("确认归档", f"确定要归档全部 {done_count} 个已完成任务吗？归档后可在「已完成」页面筛选查看。", self)
-        msg.yesButton.setText("全部归档")
-        msg.cancelButton.setText("取消")
-        if msg.exec():
+        dlg = ConfirmDialog("确认归档", f"确定要归档全部 {done_count} 个已完成任务吗？\n归档后可在「已完成」页面筛选查看。",
+                            confirm_text="全部归档", cancel_text="取消", parent=self)
+        if dlg.exec():
             count = self.todo_service.archive_all_done()
             self._refresh_all_views()
             InfoBar.success(title="已归档", content=f"已归档 {count} 个任务", parent=self,

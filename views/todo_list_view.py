@@ -91,16 +91,15 @@ class TodoListView(QWidget):
         self.filter_combo.setVisible(False)
         self.toolbar.addWidget(self.filter_combo)
 
-        self.archive_all_btn = ToolButton(FluentIcon.SAVE_AS)
+        self.toolbar.addStretch()
+
+        self.archive_all_btn = ToolButton(FluentIcon.FOLDER)
         self.archive_all_btn.setFixedSize(36, 36)
         self.archive_all_btn.setToolTip("一键归档")
         self.archive_all_btn.clicked.connect(self.archive_all_clicked.emit)
         self.archive_all_btn.setVisible(False)
         self.toolbar.addWidget(self.archive_all_btn)
 
-        self.toolbar.addStretch()
-
-        # 日程视图按钮
         self.calendar_btn = ToolButton(FluentIcon.CALENDAR)
         self.calendar_btn.setFixedSize(36, 36)
         self.calendar_btn.setToolTip("日程视图")
