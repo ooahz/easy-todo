@@ -410,6 +410,16 @@ class TodoService:
         self.session.commit()
         return count
 
+    def archive_all_done(self) -> int:
+        """归档所有已完成的任务"""
+        count = self.session.query(Todo).filter(
+            Todo.status == STATUS_DONE,
+            Todo.is_recurrence_template == False,
+        ).update({Todo.status: STATUS_ARCHIVED, Todo.updated_at: datetime.now()},
+                 synchronize_session=False)
+        self.session.commit()
+        return count
+
     def reorder(self, todo_ids: list[int]):
         """重新排序父任务"""
         for order, todo_id in enumerate(todo_ids):

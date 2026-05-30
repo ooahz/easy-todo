@@ -254,7 +254,9 @@ class MainWindow(FluentWindow):
             view.calendar_clicked.connect(self._show_calendar_view)
 
         self.done_view.filter_combo.setVisible(True)
+        self.done_view.archive_all_btn.setVisible(True)
         self.done_view.filter_changed.connect(self._on_done_filter_changed)
+        self.done_view.archive_all_clicked.connect(self._archive_all_done)
 
         # 浮窗点击完成待办
         self.floating.todo_toggled.connect(self._toggle_todo_done)
@@ -324,7 +326,15 @@ class MainWindow(FluentWindow):
             done_todos = self.todo_service.get_all(status=STATUS_DONE)
             todos = done_todos
         elif view_key == "today":
-            todos = self.todo_service.get_today()
+            if settings.show_done_tasks:
+                todos = self.todo_service.get_all_including_done(
+                    sort_rules=settings.sort_rules,
+                    done_at_bottom=settings.done_at_bottom
+                )
+            else:
+                todos = self.todo_service.get_all(
+                    status=STATUS_TODO, sort_rules=settings.sort_rules
+                )
         elif view_key == "important":
             todos = self.todo_service.get_high_priority()
         else:
@@ -339,8 +349,10 @@ class MainWindow(FluentWindow):
                 )
 
         tree = self._build_todo_tree(todos)
-        done_at_bottom = settings.done_at_bottom if view_key == "all" else False
+        done_at_bottom = settings.done_at_bottom if view_key in ("all", "today") else False
         self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
+        if view_key == "today":
+            tree = TodoListView._filter_todos_by_date(tree, date.today())
         self.floating.set_todos(tree)
 
     def _apply_initial_theme(self):
@@ -450,9 +462,18 @@ class MainWindow(FluentWindow):
         self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
         self.todo_list_view.set_todos(tree)
 
-        today_todos = self.todo_service.get_today()
+        if settings.show_done_tasks:
+            today_todos = self.todo_service.get_all_including_done(
+                sort_rules=sort_rules,
+                done_at_bottom=done_at_bottom
+            )
+        else:
+            today_todos = self.todo_service.get_all(
+                status=STATUS_TODO, sort_rules=sort_rules
+            )
         today_tree = self._build_todo_tree(today_todos)
-        self._inject_completed_dates(today_tree)
+        self._inject_completed_dates(today_tree, done_at_bottom=done_at_bottom)
+        self.today_view._filter_date = date.today()
         self.today_view.set_todos(today_tree)
 
         important_todos = self.todo_service.get_high_priority()
@@ -554,8 +575,24 @@ class MainWindow(FluentWindow):
             InfoBar.success(title="已归档", content="任务已归档", parent=self,
                            position=InfoBarPosition.TOP, duration=2000)
 
+    def _archive_all_done(self):
+        done_count = self.todo_service.count_by_status(STATUS_DONE)
+        if done_count == 0:
+            InfoBar.info(title="提示", content="没有可归档的已完成任务", parent=self,
+                        position=InfoBarPosition.TOP, duration=2000)
+            return
+        msg = MessageBox("确认归档", f"确定要归档全部 {done_count} 个已完成任务吗？归档后可在「已完成」页面筛选查看。", self)
+        msg.yesButton.setText("全部归档")
+        msg.cancelButton.setText("取消")
+        if msg.exec():
+            count = self.todo_service.archive_all_done()
+            self._refresh_all_views()
+            InfoBar.success(title="已归档", content=f"已归档 {count} 个任务", parent=self,
+                           position=InfoBarPosition.TOP, duration=2000)
+
     def _on_done_filter_changed(self, filter_key: str):
         self._done_filter = filter_key
+        self.done_view.archive_all_btn.setVisible(filter_key == 'done')
         if filter_key == 'archived':
             archived_todos = self.todo_service.get_all(status=STATUS_ARCHIVED)
             archived_tree = self._build_todo_tree(archived_todos)

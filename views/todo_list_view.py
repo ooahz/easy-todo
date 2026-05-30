@@ -53,6 +53,7 @@ class TodoListView(QWidget):
     add_subtask_clicked = Signal(int)
     card_clicked = Signal(int)
     archive_clicked = Signal(int)
+    archive_all_clicked = Signal()
     filter_changed = Signal(str)
 
     def __init__(self, parent=None, view_name: str = "", readonly: bool = False):
@@ -89,6 +90,13 @@ class TodoListView(QWidget):
         )
         self.filter_combo.setVisible(False)
         self.toolbar.addWidget(self.filter_combo)
+
+        self.archive_all_btn = ToolButton(FluentIcon.SAVE_AS)
+        self.archive_all_btn.setFixedSize(36, 36)
+        self.archive_all_btn.setToolTip("一键归档")
+        self.archive_all_btn.clicked.connect(self.archive_all_clicked.emit)
+        self.archive_all_btn.setVisible(False)
+        self.toolbar.addWidget(self.archive_all_btn)
 
         self.toolbar.addStretch()
 
@@ -359,8 +367,13 @@ class TodoListView(QWidget):
         child_count = sum(len(t.get("children", [])) for t in self._todos)
         total_count = parent_count + child_count
         
-        if self._filter_date:
+        if self._filter_date and self._view_name != "今日任务":
             self.stats_label.setText(f"筛选: {self._filter_date.month}月{self._filter_date.day}日 · 共{total_count}个任务")
+        elif self._view_name == "今日任务":
+            from datetime import date
+            all_count = parent_count
+            done_count = sum(1 for t in self._todos if t.get("_is_done", False))
+            self.stats_label.setText(f"今日任务{all_count} · 已完成{done_count}")
         elif self._view_name == "全部任务":
             # 全部任务页面：只统计父任务（不统计子任务）
             from datetime import date
