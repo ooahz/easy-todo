@@ -137,8 +137,9 @@ class TodoService:
         todo.updated_at = datetime.now()
 
         new_recurrence_type = todo.recurrence_type
+        is_instance = bool(todo.recurrence_template_id) and bool(todo.recurrence_type)
 
-        if not was_template and new_recurrence_type and todo.pid is None:
+        if not is_instance and not was_template and new_recurrence_type and todo.pid is None:
             todo.is_recurrence_template = True
             self.session.commit()
             self.session.refresh(todo)
@@ -201,6 +202,12 @@ class TodoService:
         todo.status = new_status
         todo.updated_at = datetime.now()
 
+        if new_status == STATUS_DONE and todo.recurrence_template_id is not None and not todo.is_recurrence_template:
+            todo.recurrence_type = None
+            todo.recurrence_interval = 1
+            todo.recurrence_day = None
+            todo.recurrence_end_date = None
+
         if todo.pid is not None:
             parent = self.get_by_id(todo.pid)
             if parent and not parent.is_recurrence_template:
@@ -240,7 +247,7 @@ class TodoService:
             Todo.auto_postpone == True,
             Todo.due_date < today,
             Todo.is_recurrence_template == False,
-            Todo.recurrence_template_id.is_(None),
+            Todo.recurrence_type.is_(None),
         ).update({Todo.due_date: today, Todo.updated_at: datetime.now()},
                  synchronize_session=False)
         self.session.commit()
@@ -404,7 +411,7 @@ class TodoService:
             Todo.status == STATUS_TODO,
             Todo.due_date < today,
             Todo.is_recurrence_template == False,
-            Todo.recurrence_template_id.is_(None),
+            Todo.recurrence_type.is_(None),
         ).order_by(Todo.due_date.asc()).all()
 
     # ---- 统计 ----
@@ -433,7 +440,7 @@ class TodoService:
             Todo.status == STATUS_TODO,
             Todo.due_date < today,
             Todo.is_recurrence_template == False,
-            Todo.recurrence_template_id.is_(None),
+            Todo.recurrence_type.is_(None),
         ).count()
 
     # ---- 清理 ----
@@ -665,11 +672,71 @@ class TodoService:
 
         return False
 
+    def split_and_update_from_instance(self, instance_id: int, **kwargs) -> Optional[Todo]:
+        """拆分重复系列：从当前实例起，用新属性创建新模板并生成后续实例"""
+        instance = self.get_by_id(instance_id)
+        if not instance or not instance.recurrence_template_id:
+            return None
+
+        old_template = self.get_by_id(instance.recurrence_template_id)
+        if not old_template:
+            return None
+
+        occ_date = instance.occurrence_date or instance.due_date
+
+        old_template.recurrence_end_date = occ_date - timedelta(days=1)
+        old_template.updated_at = datetime.now()
+
+        future_instances = self.session.query(Todo).filter(
+            Todo.recurrence_template_id == old_template.id,
+            Todo.occurrence_date >= occ_date,
+        ).all()
+        for inst in future_instances:
+            self.session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
+            self.session.delete(inst)
+
+        new_template = Todo(
+            title=kwargs.get("title", old_template.title),
+            description=kwargs.get("description", old_template.description),
+            priority=kwargs.get("priority", old_template.priority),
+            status=STATUS_TODO,
+            color_tag=kwargs.get("color_tag", old_template.color_tag),
+            due_date=occ_date,
+            auto_postpone=False,
+            sort_order=old_template.sort_order,
+            category_id=kwargs.get("category_id", old_template.category_id),
+            recurrence_type=kwargs.get("recurrence_type", old_template.recurrence_type),
+            recurrence_interval=kwargs.get("recurrence_interval", old_template.recurrence_interval),
+            recurrence_day=kwargs.get("recurrence_day", old_template.recurrence_day),
+            recurrence_end_date=kwargs.get("recurrence_end_date", old_template.recurrence_end_date),
+            is_recurrence_template=True,
+        )
+        self.session.add(new_template)
+        self.session.flush()
+
+        for child in (old_template.children or []):
+            bp = Todo(
+                title=child.title,
+                description=child.description,
+                priority=child.priority,
+                status=STATUS_TODO,
+                color_tag=child.color_tag,
+                sort_order=child.sort_order,
+                category_id=child.category_id,
+                pid=new_template.id,
+            )
+            self.session.add(bp)
+
+        self.session.commit()
+        self.ensure_instances(new_template.id)
+        return new_template
+
     def cleanup_old_instances(self, days_before: int = 30):
-        """清理过期的已完成实例"""
+        """清理过期的已完成实例（仅清理仍为重复实例的，已转为普通任务的不清理）"""
         cutoff = date.today() - timedelta(days=days_before)
         old_instances = self.session.query(Todo).filter(
             Todo.recurrence_template_id.isnot(None),
+            Todo.recurrence_type.isnot(None),
             Todo.occurrence_date < cutoff,
             Todo.status == STATUS_DONE,
         ).all()

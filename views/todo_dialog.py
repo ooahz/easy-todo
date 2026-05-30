@@ -26,12 +26,15 @@ class TodoDialog(QDialog):
 
     todo_saved = Signal(dict)
 
-    def __init__(self, todo_data: dict = None, parent=None, pid: int = None):
+    def __init__(self, todo_data: dict = None, parent=None, pid: int = None,
+                 edit_mode: str = None, template_data: dict = None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
 
         self.todo_data = todo_data
         self._is_edit = todo_data is not None
+        self._edit_mode = edit_mode
+        self._template_data = template_data
         # 父任务ID：新建时传入，编辑时从数据读取
         self._pid = pid if pid is not None else (todo_data.get("pid") if todo_data else None)
         self._selected_color = None
@@ -398,7 +401,7 @@ class TodoDialog(QDialog):
             return
         count = self._file_service.get_file_count(todo_id)
         template_id = self.todo_data.get("recurrence_template_id")
-        if template_id:
+        if template_id and self.todo_data.get("recurrence_type"):
             count += self._file_service.get_file_count(template_id)
         if count > 0:
             self.drop_area.setText(f"📎 已关联 {count} 个文件")
@@ -407,7 +410,7 @@ class TodoDialog(QDialog):
         if self.todo_data and self.todo_data.get("id"):
             self._file_service.open_folder(self.todo_data["id"])
             template_id = self.todo_data.get("recurrence_template_id")
-            if template_id:
+            if template_id and self.todo_data.get("recurrence_type"):
                 self._file_service.open_folder(template_id)
 
     def _save_files(self, todo_id: int):
@@ -463,8 +466,37 @@ class TodoDialog(QDialog):
                     pass
 
             # 重复设置
-            is_instance = bool(data.get("recurrence_template_id"))
-            if is_instance:
+            is_instance = bool(data.get("recurrence_template_id")) and bool(data.get("recurrence_type"))
+            if is_instance and self._edit_mode == "this_and_future":
+                self.due_container.setVisible(False)
+                self.auto_postpone_cb.setVisible(False)
+                self.recurrence_instance_label.setVisible(False)
+                if self._template_data:
+                    tpl = self._template_data
+                    r_type = tpl.get("recurrence_type")
+                    if r_type:
+                        for i in range(self.recurrence_combo.count()):
+                            if self.recurrence_combo.itemData(i) == r_type:
+                                self.recurrence_combo.setCurrentIndex(i)
+                                break
+                        self.recurrence_interval_spin.setValue(tpl.get("recurrence_interval", 1))
+                        r_day = tpl.get("recurrence_day")
+                        if r_day:
+                            self.recurrence_day_spin.setValue(r_day)
+                        end_str = tpl.get("recurrence_end_date")
+                        if end_str:
+                            try:
+                                from PySide6.QtCore import QDate
+                                if isinstance(end_str, str):
+                                    pyd = date.fromisoformat(end_str)
+                                    self.recurrence_end_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
+                                else:
+                                    self.recurrence_end_picker.setDate(QDate(end_str.year, end_str.month, end_str.day))
+                            except Exception:
+                                pass
+            elif is_instance:
+                self.due_container.setVisible(False)
+                self.auto_postpone_cb.setVisible(False)
                 self.recurrence_combo.setVisible(False)
                 self.recurrence_interval_spin.setVisible(False)
                 self.recurrence_day_spin.setVisible(False)
@@ -530,9 +562,29 @@ class TodoDialog(QDialog):
             data["auto_postpone"] = self.auto_postpone_cb.isChecked() if hasattr(self, 'auto_postpone_cb') else False
             data["category_id"] = self.category_combo.currentData() if hasattr(self, 'category_combo') else None
 
-            # 重复设置（实例编辑时不发送重复字段）
-            is_instance = self._is_edit and self.todo_data and self.todo_data.get("recurrence_template_id")
-            if not is_instance:
+            # 重复设置（实例编辑时根据 edit_mode 处理）
+            is_instance = self._is_edit and self.todo_data and self.todo_data.get("recurrence_template_id") and self.todo_data.get("recurrence_type")
+            if is_instance and self._edit_mode == "this_and_future":
+                data["edit_mode"] = "this_and_future"
+                data["recurrence_type"] = self.recurrence_combo.currentData() if hasattr(self, 'recurrence_combo') else None
+                data["recurrence_interval"] = self.recurrence_interval_spin.value() if hasattr(self, 'recurrence_interval_spin') else 1
+                recurrence_type = data.get("recurrence_type")
+                if recurrence_type in ("weekly", "monthly") and hasattr(self, 'recurrence_day_spin'):
+                    data["recurrence_day"] = self.recurrence_day_spin.value()
+                else:
+                    data["recurrence_day"] = None
+                recurrence_end = None
+                if hasattr(self, 'recurrence_end_picker') and data.get("recurrence_type"):
+                    try:
+                        qdate = self.recurrence_end_picker.date
+                        if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                            recurrence_end = date(qdate.year(), qdate.month(), qdate.day())
+                    except Exception:
+                        pass
+                data["recurrence_end_date"] = recurrence_end
+            elif is_instance:
+                data["edit_mode"] = "this"
+            elif not is_instance:
                 data["recurrence_type"] = self.recurrence_combo.currentData() if hasattr(self, 'recurrence_combo') else None
                 data["recurrence_interval"] = self.recurrence_interval_spin.value() if hasattr(self, 'recurrence_interval_spin') else 1
                 recurrence_type = data.get("recurrence_type")

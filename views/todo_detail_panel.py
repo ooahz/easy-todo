@@ -608,7 +608,7 @@ class TodoDetailDialog(MessageBoxBase):
         # ---- 附件区 ----
         files = self._file_service.get_files(self._current_todo_id)
         template_id = todo.get("recurrence_template_id")
-        if template_id:
+        if template_id and todo.get("recurrence_type"):
             template_files = self._file_service.get_files(template_id)
             existing_paths = {f["path"] for f in files}
             for tf in template_files:
@@ -697,5 +697,5 @@ class TodoDetailDialog(MessageBoxBase):
     def _open_task_folder(self):
         self._file_service.open_folder(self._current_todo_id)
         template_id = self._todo_data.get("recurrence_template_id")
-        if template_id:
+        if template_id and self._todo_data.get("recurrence_type"):
             self._file_service.open_folder(template_id)

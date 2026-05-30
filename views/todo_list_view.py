@@ -242,11 +242,10 @@ class TodoListView(QWidget):
         from datetime import date
         today = date.today()
         best: dict[int, dict] = {}
-        result = []
+
         for todo in todos:
             tmpl_id = todo.get("recurrence_template_id")
-            if not tmpl_id:
-                result.append(todo)
+            if not tmpl_id or not todo.get("recurrence_type"):
                 continue
             prev = best.get(tmpl_id)
 
@@ -265,7 +264,18 @@ class TodoListView(QWidget):
 
             if prev is None or _score(todo) < _score(prev):
                 best[tmpl_id] = todo
-        result.extend(best.values())
+
+        result = []
+        seen = set()
+        for todo in todos:
+            tmpl_id = todo.get("recurrence_template_id")
+            if not tmpl_id or not todo.get("recurrence_type"):
+                result.append(todo)
+                continue
+            if tmpl_id in seen:
+                continue
+            seen.add(tmpl_id)
+            result.append(best[tmpl_id])
         return result
 
     def _filter_todos_by_date(self, todos: list[dict], target_date: date_type) -> list[dict]:

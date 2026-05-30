@@ -23,6 +23,7 @@ from views.settings_dialog import SettingsPage
 from views.floating_widget import FloatingWidget
 from views.todo_detail_panel import TodoDetailDialog
 from views.recurrence_delete_dialog import RecurrenceDeleteDialog
+from views.recurrence_edit_dialog import RecurrenceEditDialog
 from views.delete_todo_dialog import DeleteTodoDialog
 from services.todo_service import TodoService
 from services.category_service import CategoryService
@@ -552,24 +553,41 @@ class MainWindow(FluentWindow):
 
     def _open_todo_dialog(self, todo_id: int = None):
         todo_data = None
+        edit_mode = None
+        template_data = None
         if todo_id:
             todo = self.todo_service.get_by_id(todo_id)
             if todo:
                 todo_data = todo.to_dict()
+                if todo.recurrence_template_id and todo.recurrence_type:
+                    dlg = RecurrenceEditDialog(parent=self)
+                    if not dlg.exec():
+                        return
+                    edit_mode = dlg.result_mode
+                    if edit_mode == "this_and_future":
+                        template = self.todo_service.get_by_id(todo.recurrence_template_id)
+                        if template:
+                            template_data = template.to_dict()
 
-        dialog = TodoDialog(todo_data=todo_data, parent=self)
+        dialog = TodoDialog(todo_data=todo_data, parent=self,
+                            edit_mode=edit_mode, template_data=template_data)
         dialog.todo_saved.connect(self._on_todo_saved)
         dialog.exec()
 
     def _on_todo_saved(self, data: dict):
         # 提取临时文件列表
         temp_files = data.pop("temp_files", [])
+        edit_mode = data.pop("edit_mode", None)
 
         if "id" in data:
-            existing = self.todo_service.get_by_id(data["id"])
-            if existing and existing.recurrence_template_id:
+            todo_id = data.pop("id")
+            if edit_mode == "this_and_future":
+                todo = self.todo_service.split_and_update_from_instance(todo_id, **data)
+            elif edit_mode == "this":
                 data["is_exception"] = True
-            todo = self.todo_service.update(data["id"], **data)
+                todo = self.todo_service.update(todo_id, **data)
+            else:
+                todo = self.todo_service.update(todo_id, **data)
         else:
             todo = self.todo_service.create(**data)
 
@@ -590,7 +608,7 @@ class MainWindow(FluentWindow):
         todo = self.todo_service.get_by_id(todo_id)
         file_count = self.file_service.get_file_count(todo_id)
 
-        if todo and todo.recurrence_template_id:
+        if todo and todo.recurrence_template_id and todo.recurrence_type:
             dlg = RecurrenceDeleteDialog(file_count, parent=self)
             if dlg.exec() and dlg.result_mode:
                 mode = dlg.result_mode
