@@ -23,6 +23,7 @@ from views.settings_dialog import SettingsPage
 from views.floating_widget import FloatingWidget
 from views.todo_detail_panel import TodoDetailDialog
 from views.recurrence_delete_dialog import RecurrenceDeleteDialog
+from views.delete_todo_dialog import DeleteTodoDialog
 from services.todo_service import TodoService
 from services.category_service import CategoryService
 from services.file_service import FileService
@@ -588,19 +589,22 @@ class MainWindow(FluentWindow):
     def _delete_todo(self, todo_id: int):
         todo = self.todo_service.get_by_id(todo_id)
         if todo and todo.recurrence_template_id:
+            file_count = self.file_service.get_file_count(todo_id)
             dlg = RecurrenceDeleteDialog(self)
             if dlg.exec() and dlg.result_mode:
                 self.todo_service.delete_instance(todo_id, mode=dlg.result_mode)
+                self.file_service.delete_task_folder(todo_id)
                 self._refresh_all_views()
                 InfoBar.success(title="已删除", content="任务已删除", parent=self,
                                position=InfoBarPosition.TOP, duration=2000)
             return
 
-        msg = MessageBox("确认删除", "确定要删除这个任务吗？此操作不可撤销。", self)
-        msg.yesButton.setText("删除")
-        msg.cancelButton.setText("取消")
-        if msg.exec():
+        file_count = self.file_service.get_file_count(todo_id)
+        dlg = DeleteTodoDialog(todo_id, file_count, parent=self)
+        if dlg.exec():
             if self.todo_service.delete(todo_id):
+                if dlg.delete_files:
+                    self.file_service.delete_task_folder(todo_id)
                 self._refresh_all_views()
                 InfoBar.success(title="已删除", content="任务已删除", parent=self,
                                position=InfoBarPosition.TOP, duration=2000)
