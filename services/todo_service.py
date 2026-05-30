@@ -76,6 +76,39 @@ class TodoService:
 
         return todo
 
+    def create_raw(self, **kwargs) -> Todo:
+        """直接创建待办事项（用于导入），不触发自动生成实例等逻辑"""
+        if 'due_date' in kwargs and kwargs['due_date'] is not None and hasattr(kwargs['due_date'], 'year') and not isinstance(kwargs['due_date'], date):
+            from datetime import date as pydate
+            qd = kwargs['due_date']
+            kwargs['due_date'] = pydate(qd.year(), qd.month(), qd.day())
+
+        if 'recurrence_end_date' in kwargs and kwargs['recurrence_end_date'] is not None and hasattr(kwargs['recurrence_end_date'], 'year') and not isinstance(kwargs['recurrence_end_date'], date):
+            from datetime import date as pydate
+            qd = kwargs['recurrence_end_date']
+            kwargs['recurrence_end_date'] = pydate(qd.year(), qd.month(), qd.day())
+
+        if 'occurrence_date' in kwargs and kwargs['occurrence_date'] is not None and hasattr(kwargs['occurrence_date'], 'year') and not isinstance(kwargs['occurrence_date'], date):
+            from datetime import date as pydate
+            qd = kwargs['occurrence_date']
+            kwargs['occurrence_date'] = pydate(qd.year(), qd.month(), qd.day())
+
+        if 'sort_order' not in kwargs:
+            pid = kwargs.get('pid')
+            max_order = self.session.query(Todo).filter(
+                Todo.pid == pid
+            ).count()
+            kwargs['sort_order'] = max_order
+
+        if 'status' not in kwargs:
+            kwargs['status'] = STATUS_TODO
+
+        todo = Todo(**kwargs)
+        self.session.add(todo)
+        self.session.commit()
+        self.session.refresh(todo)
+        return todo
+
     def update(self, todo_id: int, **kwargs) -> Optional[Todo]:
         """更新待办事项"""
         todo = self.session.query(Todo).filter(Todo.id == todo_id).first()
@@ -242,6 +275,10 @@ class TodoService:
 
         todos = query.all()
         return todos
+
+    def get_all_including_archived(self) -> list[Todo]:
+        """获取所有任务（含已归档和重复模板），用于导出"""
+        return self.session.query(Todo).all()
 
     def get_all_including_done(self, sort_by: str = "created_at",
                                 sort_order: str = "desc",

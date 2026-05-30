@@ -77,3 +77,24 @@ class Todo(Base):
             "category": self.category.to_dict() if self.category else None,
             "children": [],  # 由调用方填充
         }
+
+    def to_export_dict(self) -> dict:
+        """导出专用序列化，排除 ID 和内部引用字段，使用 category_name"""
+        return {
+            "title": self.title,
+            "description": self.description or "",
+            "priority": self.priority,
+            "status": self.status,
+            "color_tag": self.color_tag,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "auto_postpone": self.auto_postpone,
+            "sort_order": self.sort_order,
+            "category_name": self.category.name if self.category else None,
+            "recurrence_type": self.recurrence_type,
+            "recurrence_interval": self.recurrence_interval,
+            "recurrence_day": self.recurrence_day,
+            "recurrence_end_date": self.recurrence_end_date.isoformat() if self.recurrence_end_date else None,
+            "is_recurrence_template": self.is_recurrence_template,
+            "occurrence_date": self.occurrence_date.isoformat() if self.occurrence_date else None,
+            "is_exception": self.is_exception,
+        }

@@ -730,11 +730,13 @@ class MainWindow(FluentWindow):
         if not path:
             return
         try:
-            todos = self.todo_service.get_all_including_done()
-            data = [t.to_dict() for t in todos]
+            from services.import_export_service import ImportExportService
+            service = ImportExportService(self.todo_service, self.category_service)
+            data = service.export_data()
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            InfoBar.success(title="导出成功", content=f"已导出 {len(data)} 个任务", parent=self,
+            todo_count = len(data.get("todos", []))
+            InfoBar.success(title="导出成功", content=f"已导出 {todo_count} 个任务", parent=self,
                            position=InfoBarPosition.TOP, duration=2000)
         except Exception as e:
             InfoBar.error(title="导出失败", content=str(e), parent=self,
@@ -751,56 +753,29 @@ class MainWindow(FluentWindow):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            if not isinstance(data, list):
-                InfoBar.error(title="导入失败", content="文件格式不正确", parent=self,
-                             position=InfoBarPosition.TOP, duration=3000)
+            from services.import_export_service import ImportExportService
+            service = ImportExportService(self.todo_service, self.category_service)
+            preview = service.preview(data)
+
+            from views.import_preview_dialog import ImportPreviewDialog
+            dlg = ImportPreviewDialog(preview, parent=self)
+            if not preview.get("valid", False):
+                dlg.exec()
+                return
+            if not dlg.exec():
                 return
 
-            count = 0
-            category_name_map: dict[str, int] = {}
-            for cat in self.category_service.get_all():
-                category_name_map[cat.name] = cat.id
-
-            for item in data:
-                title = item.get("title", "").strip()
-                if not title:
-                    continue
-                # 日期转换
-                due = item.get("due_date")
-                if isinstance(due, str) and due:
-                    try:
-                        from datetime import date as _date
-                        item["due_date"] = _date.fromisoformat(due)
-                    except Exception:
-                        item["due_date"] = None
-                # 处理分类：按名称匹配，不存在则自动创建
-                cat_info = item.pop("category", None)
-                if cat_info and isinstance(cat_info, dict):
-                    cat_name = cat_info.get("name", "")
-                    if cat_name:
-                        if cat_name not in category_name_map:
-                            new_cat = self.category_service.create(cat_name)
-                            category_name_map[cat_name] = new_cat.id
-                        item["category_id"] = category_name_map[cat_name]
-                # 检查是否已存在（按 id）
-                existing_id = item.get("id")
-                if existing_id and self.todo_service.get_by_id(existing_id):
-                    update_data = {k: v for k, v in item.items()
-                                   if k in ("title", "description", "priority",
-                                            "status", "color_tag", "due_date",
-                                            "auto_postpone", "category_id")}
-                    self.todo_service.update(existing_id, **update_data)
-                else:
-                    for key in ("id", "created_at", "updated_at", "sort_order", "status",
-                                "children", "is_recurrence_template",
-                                "recurrence_template_id", "occurrence_date", "is_exception"):
-                        item.pop(key, None)
-                    self.todo_service.create(**item)
-                count += 1
-
+            mode = dlg.selected_mode
+            result = service.import_data(data, mode=mode)
             self._refresh_all_views()
-            InfoBar.success(title="导入成功", content=f"已导入 {count} 个任务", parent=self,
-                           position=InfoBarPosition.TOP, duration=2000)
+
+            total = result.get("imported", 0)
+            cats = result.get("categories", 0)
+            parts = [f"{total} 个任务"]
+            if cats > 0:
+                parts.append(f"{cats} 个分类")
+            InfoBar.success(title="导入成功", content="已导入 " + "，".join(parts),
+                           parent=self, position=InfoBarPosition.TOP, duration=2000)
         except Exception as e:
             InfoBar.error(title="导入失败", content=str(e), parent=self,
                          position=InfoBarPosition.TOP, duration=3000)
