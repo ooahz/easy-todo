@@ -397,12 +397,18 @@ class TodoDialog(QDialog):
         if not todo_id or not hasattr(self, 'drop_area'):
             return
         count = self._file_service.get_file_count(todo_id)
+        template_id = self.todo_data.get("recurrence_template_id")
+        if template_id:
+            count += self._file_service.get_file_count(template_id)
         if count > 0:
             self.drop_area.setText(f"📎 已关联 {count} 个文件")
 
     def _on_open_folder(self):
         if self.todo_data and self.todo_data.get("id"):
             self._file_service.open_folder(self.todo_data["id"])
+            template_id = self.todo_data.get("recurrence_template_id")
+            if template_id:
+                self._file_service.open_folder(template_id)
 
     def _save_files(self, todo_id: int):
         saved_files = []

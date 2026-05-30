@@ -13,7 +13,8 @@ from PySide6.QtGui import QAction, QIcon
 
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon, Theme,
-    setTheme, InfoBar, InfoBarPosition, MessageBox, isDarkTheme
+    setTheme, InfoBar, InfoBarPosition, MessageBox, MessageBoxBase,
+    SubtitleLabel, BodyLabel, isDarkTheme
 )
 
 from views.todo_list_view import TodoListView
@@ -22,11 +23,41 @@ from views.settings_dialog import SettingsPage
 from views.floating_widget import FloatingWidget
 from views.todo_detail_panel import TodoDetailDialog
 from views.recurrence_delete_dialog import RecurrenceDeleteDialog
+from views.delete_todo_dialog import DeleteTodoDialog
 from services.todo_service import TodoService
 from services.category_service import CategoryService
 from services.file_service import FileService
 from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED, APP_NAME
 from config.settings import settings
+
+
+class ConfirmDialog(MessageBoxBase):
+    """带阴影和圆角的确认弹窗"""
+
+    def __init__(self, title: str, content: str, confirm_text: str = "确认",
+                 cancel_text: str = "取消", parent=None):
+        super().__init__(parent)
+        self._confirmed = False
+
+        self.widget.setMinimumWidth(360)
+
+        title_label = SubtitleLabel(title)
+        self.viewLayout.addWidget(title_label)
+
+        content_label = BodyLabel(content)
+        content_label.setWordWrap(True)
+        self.viewLayout.addWidget(content_label)
+
+        self.yesButton.setText(confirm_text)
+        self.cancelButton.setText(cancel_text)
+        self.yesButton.clicked.connect(self._on_confirm)
+
+    def _on_confirm(self):
+        self._confirmed = True
+
+    @property
+    def confirmed(self):
+        return self._confirmed
 
 
 class MainWindow(FluentWindow):
@@ -254,7 +285,9 @@ class MainWindow(FluentWindow):
             view.calendar_clicked.connect(self._show_calendar_view)
 
         self.done_view.filter_combo.setVisible(True)
+        self.done_view.archive_all_btn.setVisible(True)
         self.done_view.filter_changed.connect(self._on_done_filter_changed)
+        self.done_view.archive_all_clicked.connect(self._archive_all_done)
 
         # 浮窗点击完成待办
         self.floating.todo_toggled.connect(self._toggle_todo_done)
@@ -285,16 +318,29 @@ class MainWindow(FluentWindow):
             self._current_view_key = "all"
         elif widget == self.today_view:
             self._current_view_key = "today"
+            self._reset_today_filter()
         elif widget == self.important_view:
             self._current_view_key = "important"
         elif widget == self.done_view:
             self._current_view_key = "done"
         else:
-            # 检查是否是分类视图
             for cat_id, (view, name) in self._category_nav_items.items():
                 if widget == view:
                     self._current_view_key = f"cat_{cat_id}"
                     break
+
+    def _reset_today_filter(self):
+        """重置今日任务页面的筛选日期为今天"""
+        today = date.today()
+        self.today_view._filter_date = today
+        self.today_view.week_view.set_selected_date(today)
+        if self.today_view._all_todos:
+            self.today_view._todos = self.today_view._filter_todos_by_date(
+                self.today_view._all_todos, today
+            )
+            self.today_view._current_page = 0
+            self.today_view._update_pager()
+            self.today_view._refresh_list()
 
     def _toggle_floating(self, view_key: str = None):
         """显示浮窗"""
@@ -324,7 +370,15 @@ class MainWindow(FluentWindow):
             done_todos = self.todo_service.get_all(status=STATUS_DONE)
             todos = done_todos
         elif view_key == "today":
-            todos = self.todo_service.get_today()
+            if settings.show_done_tasks:
+                todos = self.todo_service.get_all_including_done(
+                    sort_rules=settings.sort_rules,
+                    done_at_bottom=settings.done_at_bottom
+                )
+            else:
+                todos = self.todo_service.get_all(
+                    status=STATUS_TODO, sort_rules=settings.sort_rules
+                )
         elif view_key == "important":
             todos = self.todo_service.get_high_priority()
         else:
@@ -339,8 +393,10 @@ class MainWindow(FluentWindow):
                 )
 
         tree = self._build_todo_tree(todos)
-        done_at_bottom = settings.done_at_bottom if view_key == "all" else False
+        done_at_bottom = settings.done_at_bottom if view_key in ("all", "today") else False
         self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
+        if view_key == "today":
+            tree = TodoListView._filter_todos_by_date(tree, date.today())
         self.floating.set_todos(tree)
 
     def _apply_initial_theme(self):
@@ -450,9 +506,19 @@ class MainWindow(FluentWindow):
         self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
         self.todo_list_view.set_todos(tree)
 
-        today_todos = self.todo_service.get_today()
+        if settings.show_done_tasks:
+            today_todos = self.todo_service.get_all_including_done(
+                sort_rules=sort_rules,
+                done_at_bottom=done_at_bottom
+            )
+        else:
+            today_todos = self.todo_service.get_all(
+                status=STATUS_TODO, sort_rules=sort_rules
+            )
         today_tree = self._build_todo_tree(today_todos)
-        self._inject_completed_dates(today_tree)
+        self._inject_completed_dates(today_tree, done_at_bottom=done_at_bottom)
+        self.today_view._filter_date = date.today()
+        self.today_view.week_view.set_selected_date(date.today())
         self.today_view.set_todos(today_tree)
 
         important_todos = self.todo_service.get_high_priority()
@@ -522,20 +588,27 @@ class MainWindow(FluentWindow):
 
     def _delete_todo(self, todo_id: int):
         todo = self.todo_service.get_by_id(todo_id)
+        file_count = self.file_service.get_file_count(todo_id)
+
         if todo and todo.recurrence_template_id:
-            dlg = RecurrenceDeleteDialog(self)
+            dlg = RecurrenceDeleteDialog(file_count, parent=self)
             if dlg.exec() and dlg.result_mode:
-                self.todo_service.delete_instance(todo_id, mode=dlg.result_mode)
+                mode = dlg.result_mode
+                if dlg.delete_files:
+                    affected_ids = self.todo_service.get_affected_instance_ids(todo_id, mode)
+                    for aid in affected_ids:
+                        self.file_service.delete_task_folder(aid)
+                self.todo_service.delete_instance(todo_id, mode=mode)
                 self._refresh_all_views()
                 InfoBar.success(title="已删除", content="任务已删除", parent=self,
                                position=InfoBarPosition.TOP, duration=2000)
             return
 
-        msg = MessageBox("确认删除", "确定要删除这个任务吗？此操作不可撤销。", self)
-        msg.yesButton.setText("删除")
-        msg.cancelButton.setText("取消")
-        if msg.exec():
+        dlg = DeleteTodoDialog(todo_id, file_count, parent=self)
+        if dlg.exec():
             if self.todo_service.delete(todo_id):
+                if dlg.delete_files:
+                    self.file_service.delete_task_folder(todo_id)
                 self._refresh_all_views()
                 InfoBar.success(title="已删除", content="任务已删除", parent=self,
                                position=InfoBarPosition.TOP, duration=2000)
@@ -554,8 +627,23 @@ class MainWindow(FluentWindow):
             InfoBar.success(title="已归档", content="任务已归档", parent=self,
                            position=InfoBarPosition.TOP, duration=2000)
 
+    def _archive_all_done(self):
+        done_count = self.todo_service.count_by_status(STATUS_DONE)
+        if done_count == 0:
+            InfoBar.info(title="提示", content="没有可归档的已完成任务", parent=self,
+                        position=InfoBarPosition.TOP, duration=2000)
+            return
+        dlg = ConfirmDialog("确认归档", f"确定要归档全部 {done_count} 个已完成任务吗？\n归档后可在「已完成」页面筛选查看。",
+                            confirm_text="全部归档", cancel_text="取消", parent=self)
+        if dlg.exec():
+            count = self.todo_service.archive_all_done()
+            self._refresh_all_views()
+            InfoBar.success(title="已归档", content=f"已归档 {count} 个任务", parent=self,
+                           position=InfoBarPosition.TOP, duration=2000)
+
     def _on_done_filter_changed(self, filter_key: str):
         self._done_filter = filter_key
+        self.done_view.archive_all_btn.setVisible(filter_key == 'done')
         if filter_key == 'archived':
             archived_todos = self.todo_service.get_all(status=STATUS_ARCHIVED)
             archived_tree = self._build_todo_tree(archived_todos)
@@ -664,11 +752,13 @@ class MainWindow(FluentWindow):
         if not path:
             return
         try:
-            todos = self.todo_service.get_all_including_done()
-            data = [t.to_dict() for t in todos]
+            from services.import_export_service import ImportExportService
+            service = ImportExportService(self.todo_service, self.category_service)
+            data = service.export_data()
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            InfoBar.success(title="导出成功", content=f"已导出 {len(data)} 个任务", parent=self,
+            todo_count = len(data.get("todos", []))
+            InfoBar.success(title="导出成功", content=f"已导出 {todo_count} 个任务", parent=self,
                            position=InfoBarPosition.TOP, duration=2000)
         except Exception as e:
             InfoBar.error(title="导出失败", content=str(e), parent=self,
@@ -685,41 +775,29 @@ class MainWindow(FluentWindow):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            if not isinstance(data, list):
-                InfoBar.error(title="导入失败", content="文件格式不正确", parent=self,
-                             position=InfoBarPosition.TOP, duration=3000)
+            from services.import_export_service import ImportExportService
+            service = ImportExportService(self.todo_service, self.category_service)
+            preview = service.preview(data)
+
+            from views.import_preview_dialog import ImportPreviewDialog
+            dlg = ImportPreviewDialog(preview, parent=self)
+            if not preview.get("valid", False):
+                dlg.exec()
+                return
+            if not dlg.exec():
                 return
 
-            count = 0
-            for item in data:
-                title = item.get("title", "").strip()
-                if not title:
-                    continue
-                # 日期转换
-                due = item.get("due_date")
-                if isinstance(due, str) and due:
-                    try:
-                        from datetime import date as _date
-                        item["due_date"] = _date.fromisoformat(due)
-                    except Exception:
-                        item["due_date"] = None
-                # 检查是否已存在（按 id）
-                existing_id = item.get("id")
-                if existing_id and self.todo_service.get_by_id(existing_id):
-                    update_data = {k: v for k, v in item.items()
-                                   if k in ("title", "description", "priority",
-                                            "status", "color_tag", "due_date",
-                                            "auto_postpone")}
-                    self.todo_service.update(existing_id, **update_data)
-                else:
-                    for key in ("id", "created_at", "updated_at", "sort_order", "status"):
-                        item.pop(key, None)
-                    self.todo_service.create(**item)
-                count += 1
-
+            mode = dlg.selected_mode
+            result = service.import_data(data, mode=mode)
             self._refresh_all_views()
-            InfoBar.success(title="导入成功", content=f"已导入 {count} 个任务", parent=self,
-                           position=InfoBarPosition.TOP, duration=2000)
+
+            total = result.get("imported", 0)
+            cats = result.get("categories", 0)
+            parts = [f"{total} 个任务"]
+            if cats > 0:
+                parts.append(f"{cats} 个分类")
+            InfoBar.success(title="导入成功", content="已导入 " + "，".join(parts),
+                           parent=self, position=InfoBarPosition.TOP, duration=2000)
         except Exception as e:
             InfoBar.error(title="导入失败", content=str(e), parent=self,
                          position=InfoBarPosition.TOP, duration=3000)

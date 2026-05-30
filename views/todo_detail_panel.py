@@ -606,7 +606,16 @@ class TodoDetailDialog(MessageBoxBase):
             self.content_layout.addSpacing(12)
 
         # ---- 附件区 ----
-        file_count = self._file_service.get_file_count(self._current_todo_id)
+        files = self._file_service.get_files(self._current_todo_id)
+        template_id = todo.get("recurrence_template_id")
+        if template_id:
+            template_files = self._file_service.get_files(template_id)
+            existing_paths = {f["path"] for f in files}
+            for tf in template_files:
+                if tf["path"] not in existing_paths:
+                    tf["_from_template"] = True
+                    files.append(tf)
+        file_count = len(files)
         if file_count > 0:
             file_header = QHBoxLayout()
             file_header.setSpacing(6)
@@ -623,9 +632,9 @@ class TodoDetailDialog(MessageBoxBase):
             self.content_layout.addLayout(file_header)
             self.content_layout.addSpacing(6)
 
-            files = self._file_service.get_files(self._current_todo_id)
             for f_info in files[:5]:
-                item = FileItem(f_info, self._current_todo_id)
+                fid = template_id if f_info.get("_from_template") else self._current_todo_id
+                item = FileItem(f_info, fid)
                 self.content_layout.addWidget(item)
                 self.content_layout.addSpacing(4)
 
@@ -687,3 +696,6 @@ class TodoDetailDialog(MessageBoxBase):
 
     def _open_task_folder(self):
         self._file_service.open_folder(self._current_todo_id)
+        template_id = self._todo_data.get("recurrence_template_id")
+        if template_id:
+            self._file_service.open_folder(template_id)

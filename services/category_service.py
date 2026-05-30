@@ -93,6 +93,12 @@ class CategoryService:
             Category.id == category_id
         ).first()
 
+    def get_by_name(self, name: str) -> Optional[Category]:
+        """根据名称获取分类"""
+        return self.session.query(Category).filter(
+            Category.name == name
+        ).first()
+
     def reorder(self, category_ids: list[int]) -> bool:
         """重新排序分类"""
         for index, category_id in enumerate(category_ids):

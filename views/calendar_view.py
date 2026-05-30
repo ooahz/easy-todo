@@ -305,6 +305,12 @@ class WeekView(QWidget):
         self._update_week_display()
         self.filter_changed.emit(None)
 
+    def set_selected_date(self, target_date: date):
+        """从外部设置选中日期"""
+        self._selected_date = target_date
+        self._week_offset = 0
+        self._update_week_display()
+
 
 class CalendarDialog(QDialog):
     """日程视图弹窗"""
