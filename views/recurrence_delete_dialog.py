@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QButtonGroup, QFrame
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QButtonGroup
 
 from qfluentwidgets import (
     MessageBoxBase, SubtitleLabel, BodyLabel, CaptionLabel,
     RadioButton, CheckBox, IconWidget, FluentIcon, isDarkTheme,
+    CardWidget,
 )
 
 
@@ -36,10 +37,8 @@ def _colors():
     }
 
 
-class _OptionCard(QFrame):
+class _OptionCard(CardWidget):
     """可选择的选项卡片"""
-
-    clicked = None
 
     def __init__(self, icon: FluentIcon, title: str, desc: str,
                  color: str, parent=None):
@@ -94,17 +93,21 @@ class _OptionCard(QFrame):
     def _apply_style(self):
         c = _colors()
         if self._selected:
-            self.setStyleSheet(
-                f"background: {c['option_selected_bg']};"
-                f"border: 1px solid {c['option_selected_border']};"
-                f"border-radius: 8px;"
-            )
+            self.setStyleSheet(f"""
+                _OptionCard {{
+                    background-color: {c['option_selected_bg']};
+                    border: 1px solid {c['option_selected_border']};
+                    border-radius: 8px;
+                }}
+            """)
         else:
-            self.setStyleSheet(
-                f"background: {c['option_bg']};"
-                f"border: 1px solid {c['border']};"
-                f"border-radius: 8px;"
-            )
+            self.setStyleSheet(f"""
+                _OptionCard {{
+                    background-color: {c['option_bg']};
+                    border: 1px solid {c['border']};
+                    border-radius: 8px;
+                }}
+            """)
 
 
 class RecurrenceDeleteDialog(MessageBoxBase):
@@ -114,7 +117,7 @@ class RecurrenceDeleteDialog(MessageBoxBase):
         super().__init__(parent)
         self._result_mode: str | None = None
 
-        self.yesButton.hide()
+        self.yesButton.setText("确认删除")
         self.cancelButton.setText("取消")
 
         self.widget.setMinimumWidth(420)
