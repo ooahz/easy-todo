@@ -757,6 +757,10 @@ class MainWindow(FluentWindow):
                 return
 
             count = 0
+            category_name_map: dict[str, int] = {}
+            for cat in self.category_service.get_all():
+                category_name_map[cat.name] = cat.id
+
             for item in data:
                 title = item.get("title", "").strip()
                 if not title:
@@ -769,17 +773,26 @@ class MainWindow(FluentWindow):
                         item["due_date"] = _date.fromisoformat(due)
                     except Exception:
                         item["due_date"] = None
+                # 处理分类：按名称匹配，不存在则自动创建
+                cat_info = item.pop("category", None)
+                if cat_info and isinstance(cat_info, dict):
+                    cat_name = cat_info.get("name", "")
+                    if cat_name:
+                        if cat_name not in category_name_map:
+                            new_cat = self.category_service.create(cat_name)
+                            category_name_map[cat_name] = new_cat.id
+                        item["category_id"] = category_name_map[cat_name]
                 # 检查是否已存在（按 id）
                 existing_id = item.get("id")
                 if existing_id and self.todo_service.get_by_id(existing_id):
                     update_data = {k: v for k, v in item.items()
                                    if k in ("title", "description", "priority",
                                             "status", "color_tag", "due_date",
-                                            "auto_postpone")}
+                                            "auto_postpone", "category_id")}
                     self.todo_service.update(existing_id, **update_data)
                 else:
                     for key in ("id", "created_at", "updated_at", "sort_order", "status",
-                                "category", "children", "is_recurrence_template",
+                                "children", "is_recurrence_template",
                                 "recurrence_template_id", "occurrence_date", "is_exception"):
                         item.pop(key, None)
                     self.todo_service.create(**item)
