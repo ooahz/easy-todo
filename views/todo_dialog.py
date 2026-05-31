@@ -1,7 +1,7 @@
 """新建/编辑待办对话框"""
 from __future__ import annotations
 import os
-from datetime import date
+from datetime import date, timedelta
 
 from PySide6.QtCore import Signal, Qt, QDate, QSize
 from PySide6.QtWidgets import (
@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     LineEdit, TextEdit, ComboBox, CalendarPicker,
     PrimaryPushButton, PushButton, SubtitleLabel, CheckBox,
-    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel, SpinBox, TransparentToolButton, CompactSpinBox
+    FluentIcon, isDarkTheme, setCustomStyleSheet, BodyLabel, SpinBox, TransparentToolButton, CompactSpinBox,
+    InfoBar, InfoBarPosition
 )
 
 from config.constants import PRIORITY_MAP, TODO_COLORS, RECURRENCE_TYPES
@@ -225,7 +226,7 @@ class TodoDialog(QDialog):
 
             self.recurrence_end_picker = CalendarPicker()
             self.recurrence_end_picker.setFixedWidth(130)
-            self.recurrence_end_picker.setToolTip("选择日期")
+            self.recurrence_end_picker.setToolTip("结束日期（不早于今日，不超过一年）")
             self.recurrence_end_picker.setVisible(False)
             try:
                 self.recurrence_end_picker.setText("结束日期")
@@ -582,6 +583,17 @@ class TodoDialog(QDialog):
                     except Exception:
                         pass
                 data["recurrence_end_date"] = recurrence_end
+                if recurrence_end is not None:
+                    today = date.today()
+                    max_end = today + timedelta(days=365)
+                    if recurrence_end < today:
+                        InfoBar.error(title="日期无效", content="结束日期不能早于今日", parent=self,
+                                     position=InfoBarPosition.TOP, duration=3000)
+                        return
+                    if recurrence_end > max_end:
+                        InfoBar.error(title="日期无效", content="结束日期不能超过一年", parent=self,
+                                     position=InfoBarPosition.TOP, duration=3000)
+                        return
             elif is_instance:
                 data["edit_mode"] = "this"
             elif not is_instance:
@@ -604,6 +616,17 @@ class TodoDialog(QDialog):
                     except Exception:
                         pass
                 data["recurrence_end_date"] = recurrence_end
+                if recurrence_end is not None:
+                    today = date.today()
+                    max_end = today + timedelta(days=365)
+                    if recurrence_end < today:
+                        InfoBar.error(title="日期无效", content="结束日期不能早于今日", parent=self,
+                                     position=InfoBarPosition.TOP, duration=3000)
+                        return
+                    if recurrence_end > max_end:
+                        InfoBar.error(title="日期无效", content="结束日期不能超过一年", parent=self,
+                                     position=InfoBarPosition.TOP, duration=3000)
+                        return
         else:
             data["pid"] = self._pid
 

@@ -55,7 +55,9 @@ class Database:
         self._migrate_add_recurrence_day()
         self._migrate_add_category_is_system()
         self._migrate_add_recurrence_template()
+        self._migrate_add_completed_at()
         self._init_default_categories()
+        self._migrate_add_indexes()
 
     def _migrate_add_category_id(self):
         """迁移：为 todos 表添加 category_id 列"""
@@ -142,6 +144,20 @@ class Database:
                 conn.execute(text("ALTER TABLE todos ADD COLUMN is_exception BOOLEAN DEFAULT 0"))
             conn.commit()
 
+    def _migrate_add_completed_at(self):
+        """迁移：为 todos 表添加 completed_at 列，并用 updated_at 回填历史已完成数据"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        if "completed_at" not in columns:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN completed_at DATETIME"))
+                conn.execute(text(
+                    "UPDATE todos SET completed_at = updated_at WHERE status = 1 AND completed_at IS NULL"
+                ))
+                conn.commit()
+
     def _init_default_categories(self):
         """清理旧的系统分类（系统视图由导航栏硬编码，不存入数据库）"""
         from models.category import Category
@@ -168,6 +184,22 @@ class Database:
             session.rollback()
         finally:
             session.close()
+
+    def _migrate_add_indexes(self):
+        """迁移：为 todos 表补建索引"""
+        from sqlalchemy import text
+
+        indexes = [
+            ("idx_todos_pid", "CREATE INDEX IF NOT EXISTS idx_todos_pid ON todos(pid)"),
+            ("idx_todos_category_id", "CREATE INDEX IF NOT EXISTS idx_todos_category_id ON todos(category_id)"),
+            ("idx_todos_due_date", "CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date)"),
+            ("idx_todos_recurrence_template_id", "CREATE INDEX IF NOT EXISTS idx_todos_recurrence_template_id ON todos(recurrence_template_id)"),
+            ("idx_todos_status_template", "CREATE INDEX IF NOT EXISTS idx_todos_status_template ON todos(status, is_recurrence_template)"),
+        ]
+        with self.engine.connect() as conn:
+            for _, ddl in indexes:
+                conn.execute(text(ddl))
+            conn.commit()
 
     def get_session(self):
         """获取数据库会话"""

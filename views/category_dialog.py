@@ -13,9 +13,10 @@ from qfluentwidgets import (
 from services.category_service import CategoryService
 
 SYSTEM_VIEWS = [
-    ("all", "全部任务", FluentIcon.HOME),
+    ("recent", "最近待办", FluentIcon.QUICK_NOTE),
     ("today", "今日任务", FluentIcon.CALENDAR),
-    ("important", "重要任务", FluentIcon.HEART),
+    ("important", "重要任务", FluentIcon.CALORIES),
+    ("all", "全部任务", FluentIcon.APPLICATION),
     ("done", "已完成", FluentIcon.COMPLETED),
 ]
 

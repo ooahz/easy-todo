@@ -17,18 +17,18 @@ EXPORT_FIELDS_TODO = {
     "due_date", "auto_postpone", "sort_order", "category_name",
     "recurrence_type", "recurrence_interval", "recurrence_day",
     "recurrence_end_date", "is_recurrence_template",
-    "occurrence_date", "is_exception",
+    "occurrence_date", "is_exception", "completed_at",
 }
 
 EXPORT_FIELDS_CHILD = {
     "title", "description", "priority", "status", "color_tag",
-    "sort_order", "category_name",
+    "sort_order", "category_name", "completed_at",
 }
 
 EXPORT_FIELDS_INSTANCE = {
     "title", "description", "priority", "status", "color_tag",
     "due_date", "sort_order", "category_name",
-    "occurrence_date", "is_exception",
+    "occurrence_date", "is_exception", "completed_at",
 }
 
 
@@ -278,7 +278,8 @@ class ImportExportService:
                         "children", "is_recurrence_template",
                         "recurrence_template_id", "occurrence_date", "is_exception",
                         "recurrence_type", "recurrence_interval",
-                        "recurrence_day", "recurrence_end_date", "status"):
+                        "recurrence_day", "recurrence_end_date", "status",
+                        "completed_at"):
                 item.pop(key, None)
 
             self.todo_service.create(**item)
@@ -378,7 +379,7 @@ class ImportExportService:
             "title", "description", "priority", "status", "color_tag",
             "auto_postpone", "sort_order",
             "recurrence_type", "recurrence_interval",
-            "recurrence_day",
+            "recurrence_day", "completed_at",
         ]
         for field in simple_fields:
             if field in node:
@@ -421,6 +422,7 @@ class ImportExportService:
             "recurrence_template_id": template_id,
             "is_exception": node.get("is_exception", False),
             "is_recurrence_template": False,
+            "completed_at": node.get("completed_at"),
         }
 
         status = node.get("status")

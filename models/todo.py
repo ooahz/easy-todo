@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Text, Date, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Date, DateTime, Boolean, ForeignKey, Index
 from sqlalchemy.orm import relationship
 
 from models.database import Base
@@ -10,6 +10,13 @@ from models.database import Base
 
 class Todo(Base):
     __tablename__ = "todos"
+    __table_args__ = (
+        Index("idx_todos_pid", "pid"),
+        Index("idx_todos_category_id", "category_id"),
+        Index("idx_todos_due_date", "due_date"),
+        Index("idx_todos_recurrence_template_id", "recurrence_template_id"),
+        Index("idx_todos_status_template", "status", "is_recurrence_template"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     pid = Column(Integer, ForeignKey("todos.id", ondelete="CASCADE"), nullable=True)  # 父任务ID，NULL 表示顶级任务
@@ -30,6 +37,7 @@ class Todo(Base):
     is_exception = Column(Boolean, default=False)  # 是否为例外实例（已被单独编辑）
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
 
@@ -50,13 +58,21 @@ class Todo(Base):
         foreign_keys="Todo.recurrence_template_id",
     )
 
-    def to_dict(self):
-        """序列化为字典"""
+    def to_dict(self, truncate_desc: bool = False):
+        """序列化为字典
+        
+        :param truncate_desc: 为 True 时截断描述到前 100 字符，子任务不序列化描述
+        """
+        desc = self.description or ""
+        if truncate_desc:
+            if len(desc) > 100:
+                desc = desc[:100] + "…"
+
         return {
             "id": self.id,
             "pid": self.pid,
             "title": self.title,
-            "description": self.description or "",
+            "description": desc if not truncate_desc or self.pid is None else "",
             "priority": self.priority,
             "status": self.status,
             "color_tag": self.color_tag,
@@ -72,10 +88,11 @@ class Todo(Base):
             "is_exception": self.is_exception,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "sort_order": self.sort_order,
             "category_id": self.category_id,
             "category": self.category.to_dict() if self.category else None,
-            "children": [],  # 由调用方填充
+            "children": [],
         }
 
     def to_export_dict(self) -> dict:
@@ -97,4 +114,5 @@ class Todo(Base):
             "is_recurrence_template": self.is_recurrence_template,
             "occurrence_date": self.occurrence_date.isoformat() if self.occurrence_date else None,
             "is_exception": self.is_exception,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

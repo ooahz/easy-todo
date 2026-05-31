@@ -35,12 +35,13 @@ class Settings:
         "floating_show_subtasks": True,  # 浮窗是否显示子任务
         "data_path": "",  # 数据保存路径，空则使用默认路径
         "description_mode": "default",  # default / markdown
-        "system_view_order": ["all", "today", "important", "done"],
+        "system_view_order": ["recent", "today", "important", "all", "done"],
     }
 
     def __init__(self):
         self._data = dict(self.DEFAULT)
         self._path = Path.home() / f".{APP_ID}" / "settings.json"
+        self._save_timer = None
         self._load()
 
     def _load(self):
@@ -49,6 +50,8 @@ class Settings:
                 with open(self._path, "r", encoding="utf-8") as f:
                     saved = json.load(f)
                     self._data = {**self.DEFAULT, **saved}
+                    if "recent" not in self._data.get("system_view_order", []):
+                        self._data["system_view_order"] = list(self.DEFAULT["system_view_order"])
         except Exception:
             pass
 
@@ -59,6 +62,20 @@ class Settings:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    def save_debounced(self):
+        if self._save_timer is None:
+            from PySide6.QtCore import QTimer
+            self._save_timer = QTimer()
+            self._save_timer.setSingleShot(True)
+            self._save_timer.setInterval(500)
+            self._save_timer.timeout.connect(self.save)
+        self._save_timer.start()
+
+    def flush(self):
+        if self._save_timer is not None and self._save_timer.isActive():
+            self._save_timer.stop()
+        self.save()
 
     # ---- 属性访问 ----
     @property
@@ -90,14 +107,13 @@ class Settings:
 
     @property
     def window_size(self) -> tuple:
-        print("window_size", self._data.get("window_width", 1100),)
         return (self._data.get("window_width", 1100),
                 self._data.get("window_height", 700))
 
     @window_size.setter
     def window_size(self, value: tuple):
         self._data["window_width"], self._data["window_height"] = value
-        self.save()
+        self.save_debounced()
 
     @property
     def window_pos(self) -> tuple | None:
@@ -114,7 +130,7 @@ class Settings:
         else:
             self._data["window_x"] = None
             self._data["window_y"] = None
-        self.save()
+        self.save_debounced()
 
     @property
     def sort_by(self) -> str:
@@ -222,7 +238,7 @@ class Settings:
     @floating_geometry.setter
     def floating_geometry(self, value: dict | None):
         self._data["floating_geometry"] = value
-        self.save()
+        self.save_debounced()
 
     @property
     def floating_view(self) -> str:

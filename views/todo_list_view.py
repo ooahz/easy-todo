@@ -55,6 +55,7 @@ class TodoListView(QWidget):
     archive_clicked = Signal(int)
     archive_all_clicked = Signal()
     filter_changed = Signal(str)
+    page_changed = Signal(int, int)  # (page, page_size)
 
     def __init__(self, parent=None, view_name: str = "", readonly: bool = False):
         super().__init__(parent)
@@ -67,6 +68,8 @@ class TodoListView(QWidget):
         self._filter_date: date_type | None = None
         self._page_size = 100
         self._current_page = 0
+        self._total_count = 0
+        self._groups: list[dict] | None = None
 
         self._setup_ui()
 
@@ -93,6 +96,12 @@ class TodoListView(QWidget):
 
         self.toolbar.addStretch()
 
+        self.float_btn = ToolButton(FluentIcon.ZOOM)
+        self.float_btn.setFixedSize(36, 36)
+        self.float_btn.setToolTip("浮窗")
+        self.float_btn.clicked.connect(self.float_clicked.emit)
+        self.toolbar.addWidget(self.float_btn)
+
         self.archive_all_btn = ToolButton(FluentIcon.FOLDER)
         self.archive_all_btn.setFixedSize(36, 36)
         self.archive_all_btn.setToolTip("一键归档")
@@ -105,13 +114,6 @@ class TodoListView(QWidget):
         self.calendar_btn.setToolTip("日程视图")
         self.calendar_btn.clicked.connect(self.calendar_clicked.emit)
         self.toolbar.addWidget(self.calendar_btn)
-
-        # 浮窗按钮
-        self.float_btn = ToolButton(FluentIcon.ZOOM)
-        self.float_btn.setFixedSize(36, 36)
-        self.float_btn.setToolTip("浮窗")
-        self.float_btn.clicked.connect(self.float_clicked.emit)
-        self.toolbar.addWidget(self.float_btn)
 
         # 新建按钮
         self.add_btn = PrimaryPushButton(FluentIcon.ADD, "新建任务")
@@ -187,15 +189,26 @@ class TodoListView(QWidget):
         # 设置 tooltip 样式
         self.setStyleSheet(_tooltip_style())
 
-    def set_todos(self, todos: list[dict], recurring_instances: list[dict] = None):
-        """设置待办列表数据（父任务列表，已包含 children）"""
+    def set_todos(self, todos: list[dict], recurring_instances: list[dict] = None,
+                  total_count: int = -1):
+        """设置待办列表数据（父任务列表，已包含 children）
+
+        total_count: 数据库端总数，用于分页器。-1 表示使用客户端数据长度。
+        """
         self._all_todos = todos
         self.week_view.set_todos(todos)
 
         if self._filter_date:
             self._todos = self._filter_todos_by_date(todos, self._filter_date)
+            self._total_count = len(self._todos)
+            self._groups = None
         else:
             self._todos = self._dedup_recurrence(todos)
+            self._total_count = total_count if total_count >= 0 else len(self._todos)
+            if self._view_name == "最近待办":
+                self._groups = self._categorize_for_recent(self._todos)
+            else:
+                self._groups = None
 
         self._update_pager()
         self._refresh_list()
@@ -206,8 +219,15 @@ class TodoListView(QWidget):
 
         if filter_date:
             self._todos = self._filter_todos_by_date(self._all_todos, filter_date)
+            self._total_count = len(self._todos)
+            self._groups = None
         else:
             self._todos = self._dedup_recurrence(self._all_todos)
+            self._total_count = len(self._todos)
+            if self._view_name == "最近待办":
+                self._groups = self._categorize_for_recent(self._todos)
+            else:
+                self._groups = None
 
         # 重置到第一页
         self._current_page = 0
@@ -216,7 +236,7 @@ class TodoListView(QWidget):
 
     def _update_pager(self):
         """更新分页器状态"""
-        total = len(self._todos)
+        total = self._total_count
         total_pages = (total + self._page_size - 1) // self._page_size if total > 0 else 1
         
         if total_pages <= 1:
@@ -232,9 +252,9 @@ class TodoListView(QWidget):
             self.pager.setCurrentIndex(self._current_page)
 
     def _on_page_changed(self, index: int):
-        """分页器页码变化"""
+        """分页器页码变化，通知外部重新加载数据"""
         self._current_page = index
-        self._refresh_list()
+        self.page_changed.emit(index, self._page_size)
 
     @staticmethod
     def _dedup_recurrence(todos: list[dict]) -> list[dict]:
@@ -277,6 +297,37 @@ class TodoListView(QWidget):
             seen.add(tmpl_id)
             result.append(best[tmpl_id])
         return result
+
+    @staticmethod
+    def _categorize_for_recent(todos: list[dict]) -> list[dict]:
+        from datetime import date as _date
+        today = _date.today()
+        groups = [
+            {"key": "overdue", "title": "超期未完成", "color": "#D13438", "todos": []},
+            {"key": "today", "title": "今日任务", "color": "#0078D4", "todos": []},
+            {"key": "upcoming", "title": "后续任务", "color": "#107C10", "todos": []},
+            {"key": "completed", "title": "已完成", "color": "#8764B8", "todos": []},
+        ]
+        for todo in todos:
+            is_done = todo.get("_is_done", False) or todo.get("status", 0) == 1
+            if is_done:
+                groups[3]["todos"].append(todo)
+                continue
+            due = todo.get("due_date")
+            if due:
+                try:
+                    due_date = _date.fromisoformat(due)
+                    if due_date < today:
+                        groups[0]["todos"].append(todo)
+                    elif due_date == today:
+                        groups[1]["todos"].append(todo)
+                    else:
+                        groups[2]["todos"].append(todo)
+                except (ValueError, TypeError):
+                    groups[2]["todos"].append(todo)
+            else:
+                groups[2]["todos"].append(todo)
+        return groups
 
     def _filter_todos_by_date(self, todos: list[dict], target_date: date_type) -> list[dict]:
         """根据截止日期过滤任务"""
@@ -325,10 +376,14 @@ class TodoListView(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        # 分页：计算当前页的数据
-        start = self._current_page * self._page_size
-        end = start + self._page_size
-        page_todos = self._todos[start:end]
+        if self._groups is not None:
+            self._refresh_grouped_list()
+            return
+
+        # 数据已在数据库端分页，直接渲染当前页数据
+        page_todos = self._todos
+
+        self.stats_label.setVisible(True)
 
         has_todos = len(page_todos) > 0
         self.scroll_area.setVisible(has_todos)
@@ -372,7 +427,7 @@ class TodoListView(QWidget):
 
         self.list_layout.addStretch()
 
-        parent_count = len(self._todos)
+        parent_count = self._total_count
         child_count = sum(len(t.get("children", [])) for t in self._todos)
         total_count = parent_count + child_count
         
@@ -405,6 +460,78 @@ class TodoListView(QWidget):
             self.stats_label.setText(f"全部任务{all_count} · 已完成{done_count} · 已超期{overdue_count}")
         else:
             self.stats_label.setText(f"共{total_count}个任务")
+
+    def _refresh_grouped_list(self):
+        """刷新分组列表显示（最近待办视图）"""
+        all_todos = []
+        for group in self._groups:
+            all_todos.extend(group["todos"])
+
+        has_todos = len(all_todos) > 0
+        self.scroll_area.setVisible(has_todos)
+        self.empty_widget.setVisible(not has_todos)
+
+        parent_ids = [t["id"] for t in all_todos]
+
+        for group in self._groups:
+            if not group["todos"]:
+                continue
+
+            header = QWidget()
+            h_layout = QHBoxLayout(header)
+            h_layout.setContentsMargins(0, 10, 0, 2)
+            h_layout.setSpacing(6)
+
+            dot = QLabel()
+            dot.setFixedSize(8, 8)
+            dot.setStyleSheet(f"background-color: {group['color']}; border-radius: 4px;")
+            h_layout.addWidget(dot)
+
+            title = BodyLabel(group["title"])
+            title.setStyleSheet("font-weight: bold; font-size: 13px;")
+            h_layout.addWidget(title)
+
+            count = CaptionLabel(str(len(group["todos"])))
+            count.setStyleSheet("color: #888;")
+            h_layout.addWidget(count)
+
+            h_layout.addStretch()
+            self.list_layout.addWidget(header)
+
+            for todo_data in group["todos"]:
+                card = TodoCard(todo_data, readonly=self._readonly)
+                card.edit_clicked.connect(self.edit_clicked.emit)
+                card.delete_clicked.connect(self.delete_clicked.emit)
+                card.toggle_done.connect(self.toggle_done.emit)
+                card.add_subtask_clicked.connect(self.add_subtask_clicked.emit)
+                card.card_clicked.connect(self.card_clicked.emit)
+                card.archive_clicked.connect(self.archive_clicked.emit)
+                card.reorder_requested.connect(
+                    lambda from_id, to_id, after, order=parent_ids: self.reorder_requested.emit(from_id, to_id, after, order)
+                )
+                self.list_layout.addWidget(card)
+                self._cards.append(card)
+
+                children = todo_data.get("children", [])
+                for child_data in children:
+                    container = QWidget()
+                    container_layout = QHBoxLayout(container)
+                    container_layout.setContentsMargins(24, 0, 0, 0)
+                    container_layout.setSpacing(0)
+
+                    child_card = SubtaskCard(child_data, readonly=self._readonly)
+                    child_card.edit_clicked.connect(self.edit_clicked.emit)
+                    child_card.delete_clicked.connect(self.delete_clicked.emit)
+                    child_card.toggle_done.connect(self.toggle_done.emit)
+                    child_card.archive_clicked.connect(self.archive_clicked.emit)
+                    container_layout.addWidget(child_card)
+
+                    self.list_layout.addWidget(container)
+                    self._cards.append(child_card)
+
+        self.list_layout.addStretch()
+
+        self.stats_label.setVisible(False)
 
     def update_single_todo(self, todo_data: dict):
         """更新单个卡片（父任务或子任务）"""
