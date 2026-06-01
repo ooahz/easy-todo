@@ -35,6 +35,9 @@ class Settings:
         "floating_show_subtasks": True,  # 浮窗是否显示子任务
         "data_path": "",  # 数据保存路径，空则使用默认路径
         "description_mode": "default",  # default / markdown
+        "dialog_mode": "default",  # default / widescreen
+        "detail_dialog_width": 480,
+        "detail_dialog_height": 520,
         "system_view_order": ["recent", "today", "important", "all", "done"],
     }
 
@@ -277,6 +280,26 @@ class Settings:
     def description_mode(self, value: str):
         self._data["description_mode"] = value
         self.save()
+
+    @property
+    def dialog_mode(self) -> str:
+        """对话框模式：default / widescreen"""
+        return self._data.get("dialog_mode", "default")
+
+    @dialog_mode.setter
+    def dialog_mode(self, value: str):
+        self._data["dialog_mode"] = value
+        self.save()
+
+    @property
+    def detail_dialog_size(self) -> tuple:
+        return (self._data.get("detail_dialog_width", 480),
+                self._data.get("detail_dialog_height", 520))
+
+    @detail_dialog_size.setter
+    def detail_dialog_size(self, value: tuple):
+        self._data["detail_dialog_width"], self._data["detail_dialog_height"] = value
+        self.save_debounced()
 
     @property
     def system_view_order(self) -> list:

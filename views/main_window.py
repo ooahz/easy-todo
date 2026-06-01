@@ -108,7 +108,7 @@ class MainWindow(FluentWindow):
         if pos:
             self.move(*pos)
 
-        self.setMinimumSize(700, 400)
+        self.setMinimumSize(800, 500)
 
         screen = QApplication.primaryScreen().geometry()
         x = (screen.width() - self.width()) // 2

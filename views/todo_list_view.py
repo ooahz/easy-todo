@@ -488,11 +488,13 @@ class TodoListView(QWidget):
             h_layout.addWidget(dot)
 
             title = BodyLabel(group["title"])
-            title.setStyleSheet("font-weight: bold; font-size: 13px;")
+            title_color = "#EEE" if isDarkTheme() else "#333"
+            title.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {title_color};")
             h_layout.addWidget(title)
 
             count = CaptionLabel(str(len(group["todos"])))
-            count.setStyleSheet("color: #888;")
+            count_color = "#AAA" if isDarkTheme() else "#888"
+            count.setStyleSheet(f"color: {count_color};")
             h_layout.addWidget(count)
 
             h_layout.addStretch()

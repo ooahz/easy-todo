@@ -1,11 +1,11 @@
-"""任务详情对话框 - 模态弹窗展示任务详情"""
+"""任务详情对话框 - 支持单栏/分栏双模式"""
 from __future__ import annotations
 from datetime import date, datetime
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
-    QSizePolicy, QScrollArea, QDialog, QTextBrowser
+    QSizePolicy, QScrollArea, QTextBrowser
 )
 
 from qfluentwidgets import (
@@ -16,11 +16,11 @@ from qfluentwidgets import (
 )
 
 from config.constants import PRIORITY_MAP, STATUS_MAP
+from config.settings import settings
 from services.file_service import FileService
 
 
 def _tc():
-    """根据主题返回颜色字典"""
     if isDarkTheme():
         return {
             "bg": "#1F1F1F",
@@ -40,6 +40,10 @@ def _tc():
             "priority_low": "#60CDFF",
             "overdue": "#FF6B6B",
             "done_green": "#6BCB77",
+            "code_bg": "#3A3A3A",
+            "code_border": "#555",
+            "link_color": "#60CDFF",
+            "blockquote_color": "#AAA",
         }
     return {
         "bg": "#FAFAFA",
@@ -59,12 +63,95 @@ def _tc():
         "priority_low": "#0078D4",
         "overdue": "#D13438",
         "done_green": "#107C10",
+        "code_bg": "#F5F5F5",
+        "code_border": "#DDD",
+        "link_color": "#0078D4",
+        "blockquote_color": "#666",
     }
 
 
-class InfoRow(QWidget):
-    """信息行组件 - 图标 + 标签 + 值"""
+def _markdown_css(c: dict) -> str:
+    return f"""
+        body {{
+            font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+            font-size: 14px;
+            line-height: 1.7;
+            color: {c['body']};
+            background-color: transparent;
+            padding: 0;
+            margin: 0;
+        }}
+        h1, h2, h3, h4, h5, h6 {{
+            margin: 12px 0 6px;
+            font-weight: bold;
+            color: {c['title']};
+        }}
+        h1 {{ font-size: 22px; }}
+        h2 {{ font-size: 18px; }}
+        h3 {{ font-size: 16px; }}
+        h4 {{ font-size: 14px; }}
+        p {{ margin: 6px 0; }}
+        code {{
+            background-color: {c['code_bg']};
+            border: 1px solid {c['code_border']};
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-family: "Cascadia Code", "Consolas", monospace;
+            font-size: 13px;
+        }}
+        pre {{
+            background-color: {c['code_bg']};
+            border: 1px solid {c['code_border']};
+            border-radius: 6px;
+            padding: 10px 12px;
+            overflow-x: auto;
+        }}
+        pre code {{
+            border: none;
+            padding: 0;
+            background: transparent;
+        }}
+        blockquote {{
+            border-left: 3px solid {c['link_color']};
+            margin: 8px 0;
+            padding: 4px 12px;
+            color: {c['blockquote_color']};
+            background-color: {c['tag_bg']};
+            border-radius: 0 4px 4px 0;
+        }}
+        a {{
+            color: {c['link_color']};
+            text-decoration: none;
+        }}
+        ul, ol {{
+            margin: 6px 0;
+            padding-left: 22px;
+        }}
+        li {{ margin: 3px 0; }}
+        hr {{
+            border: none;
+            border-top: 1px solid {c['code_border']};
+            margin: 12px 0;
+        }}
+        table {{
+            border-collapse: collapse;
+            margin: 8px 0;
+        }}
+        th, td {{
+            border: 1px solid {c['code_border']};
+            padding: 6px 10px;
+        }}
+        th {{
+            background-color: {c['code_bg']};
+        }}
+        img {{
+            max-width: 100%;
+            border-radius: 4px;
+        }}
+    """
 
+
+class InfoRow(QWidget):
     def __init__(self, icon: FluentIcon, label: str, value: str,
                  value_color: str = None, parent=None):
         super().__init__(parent)
@@ -93,8 +180,6 @@ class InfoRow(QWidget):
 
 
 class SubtaskItem(CardWidget):
-    """详情中的子任务项"""
-
     toggle_done = Signal(int)
 
     def __init__(self, data: dict, parent=None):
@@ -137,8 +222,6 @@ class SubtaskItem(CardWidget):
 
 
 class FileItem(CardWidget):
-    """详情中的文件项 - 点击打开文件"""
-
     def __init__(self, file_info: dict, todo_id: int, parent=None):
         super().__init__(parent)
         self._todo_id = todo_id
@@ -198,8 +281,6 @@ class FileItem(CardWidget):
 
 
 class TodoDetailDialog(MessageBoxBase):
-    """任务详情对话框"""
-
     edit_clicked = Signal(int)
     delete_clicked = Signal(int)
     toggle_done = Signal(int)
@@ -212,169 +293,124 @@ class TodoDetailDialog(MessageBoxBase):
         self._file_service = FileService()
         self._current_todo_id = todo_data["id"]
         self._pending_action = None
+        self._is_widescreen = (settings.dialog_mode == "widescreen")
 
-        self.widget.setMinimumWidth(480)
-        self.widget.setMaximumWidth(560)
+        if self._is_widescreen:
+            self.widget.setMinimumWidth(720)
+            self.widget.setMaximumWidth(880)
+            self.widget.setMinimumHeight(350)
+        else:
+            self.widget.setMinimumWidth(480)
+            self.widget.setMaximumWidth(560)
 
         self._setup_content()
         self._rebuild_content()
 
     def closeEvent(self, event):
-        """关闭时释放数据库连接"""
         if hasattr(self, '_file_service') and self._file_service:
             self._file_service.close()
         super().closeEvent(event)
 
     def _setup_content(self):
-        """构建对话框内容 - 使用 viewLayout 而非覆盖 vBoxLayout"""
         c = _tc()
 
-        # 隐藏默认按钮，用自定义操作栏替代
         self.yesButton.hide()
         self.cancelButton.hide()
-        self.buttonGroup.setFixedHeight(64)
 
-        # 调整 buttonLayout 边距
-        self.buttonLayout.setContentsMargins(20, 12, 20, 16)
-        self.buttonLayout.setSpacing(8)
+        if self._is_widescreen:
+            self.buttonGroup.setFixedHeight(52)
+            self.buttonLayout.setContentsMargins(24, 6, 24, 10)
+            self.buttonLayout.setSpacing(6)
+        else:
+            self.buttonGroup.setFixedHeight(64)
+            self.buttonLayout.setContentsMargins(20, 12, 20, 16)
+            self.buttonLayout.setSpacing(8)
 
-        # 清空 buttonLayout，添加自定义按钮
         while self.buttonLayout.count():
             item = self.buttonLayout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        self.done_btn = PrimaryPushButton(FluentIcon.COMPLETED, "标记完成")
-        self.done_btn.setFixedHeight(32)
-        self.done_btn.clicked.connect(self._on_toggle_done)
-        self.buttonLayout.addWidget(self.done_btn, 1)
+        if self._is_widescreen:
+            self.archive_btn = ToolButton(FluentIcon.FOLDER)
+            self.archive_btn.setFixedSize(30, 30)
+            self.archive_btn.setToolTip("归档")
+            self.archive_btn.clicked.connect(self._on_archive)
+            self.buttonLayout.addWidget(self.archive_btn)
 
-        self.archive_btn = ToolButton(FluentIcon.FOLDER)
-        self.archive_btn.setFixedSize(28, 28)
-        self.archive_btn.setToolTip("归档")
-        self.archive_btn.clicked.connect(self._on_archive)
-        self.buttonLayout.addWidget(self.archive_btn)
+            self.edit_btn = ToolButton(FluentIcon.EDIT)
+            self.edit_btn.setFixedSize(30, 30)
+            self.edit_btn.setToolTip("编辑")
+            self.edit_btn.clicked.connect(self._on_edit)
+            self.buttonLayout.addWidget(self.edit_btn)
 
-        self.edit_btn = ToolButton(FluentIcon.EDIT)
-        self.edit_btn.setFixedSize(28, 28)
-        self.edit_btn.setToolTip("编辑")
-        self.edit_btn.clicked.connect(self._on_edit)
-        self.buttonLayout.addWidget(self.edit_btn)
+            self.delete_btn = ToolButton(FluentIcon.DELETE)
+            self.delete_btn.setFixedSize(30, 30)
+            self.delete_btn.setToolTip("删除")
+            self.delete_btn.clicked.connect(self._on_delete)
+            self.buttonLayout.addWidget(self.delete_btn)
 
-        self.delete_btn = ToolButton(FluentIcon.DELETE)
-        self.delete_btn.setFixedSize(28, 28)
-        self.delete_btn.setToolTip("删除")
-        self.delete_btn.clicked.connect(self._on_delete)
-        self.buttonLayout.addWidget(self.delete_btn)
+            self.buttonLayout.addStretch(1)
 
-        # ---- 顶部栏 ----
+            self.done_btn = PrimaryPushButton(FluentIcon.COMPLETED, "标记完成")
+            self.done_btn.setFixedHeight(30)
+            self.done_btn.clicked.connect(self._on_toggle_done)
+            self.buttonLayout.addWidget(self.done_btn)
+        else:
+            self.done_btn = PrimaryPushButton(FluentIcon.COMPLETED, "标记完成")
+            self.done_btn.setFixedHeight(32)
+            self.done_btn.clicked.connect(self._on_toggle_done)
+            self.buttonLayout.addWidget(self.done_btn, 1)
+
+            self.archive_btn = ToolButton(FluentIcon.FOLDER)
+            self.archive_btn.setFixedSize(28, 28)
+            self.archive_btn.setToolTip("归档")
+            self.archive_btn.clicked.connect(self._on_archive)
+            self.buttonLayout.addWidget(self.archive_btn)
+
+            self.edit_btn = ToolButton(FluentIcon.EDIT)
+            self.edit_btn.setFixedSize(28, 28)
+            self.edit_btn.setToolTip("编辑")
+            self.edit_btn.clicked.connect(self._on_edit)
+            self.buttonLayout.addWidget(self.edit_btn)
+
+            self.delete_btn = ToolButton(FluentIcon.DELETE)
+            self.delete_btn.setFixedSize(28, 28)
+            self.delete_btn.setToolTip("删除")
+            self.delete_btn.clicked.connect(self._on_delete)
+            self.buttonLayout.addWidget(self.delete_btn)
+
+        # ---- 顶部标题栏 ----
         top_bar = QHBoxLayout()
-        top_bar.setSpacing(8)
+        top_bar.setSpacing(10)
 
-        self.panel_title = SubtitleLabel("任务详情")
-        self.panel_title.setStyleSheet(f"color: {c['title']}; font-weight: bold;")
-        top_bar.addWidget(self.panel_title, 1)
-
-        self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
-        self.close_btn.setFixedSize(28, 28)
-        self.close_btn.clicked.connect(self.reject)
-        top_bar.addWidget(self.close_btn)
-
-        self.viewLayout.addLayout(top_bar)
-
-        # 分隔线
-        divider1 = QFrame()
-        divider1.setFixedHeight(1)
-        divider1.setStyleSheet(f"background-color: {c['divider']};")
-        self.viewLayout.addWidget(divider1)
-
-        # ---- 滚动内容区 ----
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setMinimumHeight(300)
-        self.scroll.setMaximumHeight(500)
-        self.scroll.setStyleSheet(f"""
-            QScrollArea {{
-                border: none;
-                background-color: transparent;
-            }}
-        """)
-
-        self.content_widget = QWidget()
-        self.content_widget.setObjectName("detailContent")
-        self.content_widget.setStyleSheet("background-color: transparent;")
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(0, 8, 0, 0)
-        self.content_layout.setSpacing(0)
-
-        self.scroll.setWidget(self.content_widget)
-        self.viewLayout.addWidget(self.scroll, 1)
-
-        # 调整 viewLayout 边距
-        self.viewLayout.setContentsMargins(20, 16, 20, 8)
-        self.viewLayout.setSpacing(8)
-
-    def _rebuild_content(self):
-        """重建详情内容"""
-        c = _tc()
-        todo = self._todo_data
-        if not todo:
-            return
-
-        # 清空旧内容
-        while self.content_layout.count():
-            item = self.content_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                while item.layout().count():
-                    sub = item.layout().takeAt(0)
-                    if sub.widget():
-                        sub.widget().deleteLater()
-
-        is_done = todo.get("_is_done", False)
-        is_archived = todo.get("_is_archived", False)
-
-        # ---- 标题区 ----
-        title_layout = QVBoxLayout()
-        title_layout.setSpacing(8)
-        title_layout.setContentsMargins(0, 0, 0, 0)
-
-        # 颜色标签 + 标题
-        title_row = QHBoxLayout()
-        title_row.setSpacing(10)
-
-        color_tag = todo.get("color_tag")
+        color_tag = self._todo_data.get("color_tag")
         if color_tag:
             color_dot = QFrame()
-            color_dot.setFixedSize(12, 12)
-            color_dot.setStyleSheet(f"""
-                background-color: {color_tag};
-                border-radius: 6px;
-            """)
-            title_row.addWidget(color_dot)
+            color_dot.setFixedSize(10, 10)
+            color_dot.setStyleSheet(f"background-color: {color_tag}; border-radius: 5px;")
+            top_bar.addWidget(color_dot)
 
-        self.title_label = TitleLabel(todo.get("title", ""))
+        is_done = self._todo_data.get("_is_done", False)
+        self.title_label = TitleLabel(self._todo_data.get("title", ""))
         self.title_label.setWordWrap(True)
         self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         if is_done:
             self.title_label.setStyleSheet(f"""
                 color: {c['muted']};
                 text-decoration: line-through;
-                font-size: 20px;
+                font-size: 18px;
                 font-weight: bold;
             """)
         else:
             self.title_label.setStyleSheet(f"""
                 color: {c['title']};
-                font-size: 20px;
+                font-size: 18px;
                 font-weight: bold;
             """)
-        title_row.addWidget(self.title_label, 1)
-        title_layout.addLayout(title_row)
+        top_bar.addWidget(self.title_label, 1)
 
-        # 状态标签
-        status = todo.get("status", 0)
+        status = self._todo_data.get("status", 0)
         status_text = STATUS_MAP.get(status, "未知")
         status_tag = QLabel(f"  {status_text}  ")
         if is_done:
@@ -393,12 +429,156 @@ class TodoDetailDialog(MessageBoxBase):
                 font-size: 11px;
                 padding: 2px 8px;
             """)
+        top_bar.addWidget(status_tag)
+
+        self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
+        self.close_btn.setFixedSize(28, 28)
+        self.close_btn.clicked.connect(self.reject)
+        top_bar.addWidget(self.close_btn)
+
+        self.viewLayout.addLayout(top_bar)
+
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background-color: {c['divider']};")
+        self.viewLayout.addWidget(divider)
+
+        if self._is_widescreen:
+            self._setup_widescreen_body()
+        else:
+            self._setup_default_body()
+
+        if self._is_widescreen:
+            self.viewLayout.setContentsMargins(24, 16, 24, 4)
+        else:
+            self.viewLayout.setContentsMargins(20, 16, 20, 8)
+        self.viewLayout.setSpacing(8)
+
+    def _setup_default_body(self):
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setMinimumHeight(300)
+        self.scroll.setMaximumHeight(500)
+        self.scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+        """)
+
+        self.content_widget = QWidget()
+        self.content_widget.setObjectName("detailContent")
+        self.content_widget.setStyleSheet("background-color: transparent;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 8, 0, 0)
+        self.content_layout.setSpacing(0)
+
+        self.scroll.setWidget(self.content_widget)
+        self.viewLayout.addWidget(self.scroll, 1)
+
+    def _setup_widescreen_body(self):
+        self.body_layout = QHBoxLayout()
+        self.body_layout.setSpacing(16)
+        self.body_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.left_panel = QWidget()
+        self.left_panel.setObjectName("leftPanel")
+        self.left_layout = QVBoxLayout(self.left_panel)
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_layout.setSpacing(0)
+
+        self.right_panel = QWidget()
+        self.right_panel.setObjectName("rightPanel")
+        self.right_panel.setFixedWidth(240)
+        self.right_layout = QVBoxLayout(self.right_panel)
+        self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_layout.setSpacing(8)
+        self.right_layout.addStretch()
+
+        self.body_layout.addWidget(self.left_panel, 1)
+        self.body_layout.addWidget(self.right_panel)
+
+        self.viewLayout.addLayout(self.body_layout, 1)
+
+    def _rebuild_content(self):
+        c = _tc()
+        todo = self._todo_data
+        if not todo:
+            return
+
+        is_done = todo.get("_is_done", False)
+        is_archived = todo.get("_is_archived", False)
+
+        if self._is_widescreen:
+            self._clear_layout(self.left_layout)
+            self._clear_layout(self.right_layout)
+            self._build_widescreen_content(c, todo, is_done)
+        else:
+            self._clear_layout(self.content_layout)
+            self._build_default_content(c, todo, is_done)
+
+        if is_done and not is_archived:
+            self.done_btn.setText("标记待办")
+            self.done_btn.setIcon(FluentIcon.CANCEL)
+        else:
+            self.done_btn.setText("标记完成")
+            self.done_btn.setIcon(FluentIcon.COMPLETED)
+
+        if is_archived:
+            self.edit_btn.hide()
+            self.archive_btn.hide()
+            self.done_btn.hide()
+        elif is_done:
+            self.edit_btn.hide()
+            self.archive_btn.show()
+            self.done_btn.hide()
+        else:
+            self.edit_btn.show()
+            self.archive_btn.hide()
+
+    # ---- 单栏模式内容 ----
+
+    def _build_default_content(self, c: dict, todo: dict, is_done: bool):
+        layout = self.content_layout
+
+        # 标题区
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(8)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+
+        color_tag = todo.get("color_tag")
+        if color_tag:
+            color_dot = QFrame()
+            color_dot.setFixedSize(12, 12)
+            color_dot.setStyleSheet(f"background-color: {color_tag}; border-radius: 6px;")
+            title_row.addWidget(color_dot)
+
+        title_label = TitleLabel(todo.get("title", ""))
+        title_label.setWordWrap(True)
+        title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        if is_done:
+            title_label.setStyleSheet(f"color: {c['muted']}; text-decoration: line-through; font-size: 20px; font-weight: bold;")
+        else:
+            title_label.setStyleSheet(f"color: {c['title']}; font-size: 20px; font-weight: bold;")
+        title_row.addWidget(title_label, 1)
+        title_layout.addLayout(title_row)
+
+        status = todo.get("status", 0)
+        status_text = STATUS_MAP.get(status, "未知")
+        status_tag = QLabel(f"  {status_text}  ")
+        if is_done:
+            status_tag.setStyleSheet(f"background-color: rgba(16, 124, 16, 0.12); color: {c['done_green']}; border-radius: 10px; font-size: 11px; padding: 2px 8px;")
+        else:
+            status_tag.setStyleSheet(f"background-color: {c['tag_bg']}; color: {c['accent']}; border-radius: 10px; font-size: 11px; padding: 2px 8px;")
         title_layout.addWidget(status_tag)
 
-        self.content_layout.addLayout(title_layout)
-        self.content_layout.addSpacing(16)
+        layout.addLayout(title_layout)
+        layout.addSpacing(16)
 
-        # ---- 描述区 ----
+        # 描述区
         desc = todo.get("description", "")
         if desc:
             desc_card = QFrame()
@@ -420,6 +600,7 @@ class TodoDetailDialog(MessageBoxBase):
 
             desc_body = QTextBrowser()
             desc_body.setOpenExternalLinks(True)
+            desc_body.document().setDefaultStyleSheet(_markdown_css(c))
             desc_body.setMarkdown(desc)
             desc_body.setReadOnly(True)
             desc_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -429,16 +610,15 @@ class TodoDetailDialog(MessageBoxBase):
                     border: none;
                     color: {c['body']};
                     font-size: 13px;
-                    line-height: 1.5;
                     padding: 0;
                 }}
             """)
             desc_layout.addWidget(desc_body)
 
-            self.content_layout.addWidget(desc_card)
-            self.content_layout.addSpacing(12)
+            layout.addWidget(desc_card)
+            layout.addSpacing(12)
 
-        # ---- 信息区 ----
+        # 信息区
         info_card = QFrame()
         info_card.setObjectName("infoCard")
         info_card.setStyleSheet(f"""
@@ -452,7 +632,180 @@ class TodoDetailDialog(MessageBoxBase):
         info_layout.setContentsMargins(14, 8, 14, 8)
         info_layout.setSpacing(0)
 
-        # 优先级
+        self._build_info_rows(c, todo, is_done, info_layout)
+
+        layout.addWidget(info_card)
+        layout.addSpacing(12)
+
+        # 子任务区
+        children = todo.get("children", [])
+        if children:
+            self._build_subtask_section(c, children, layout)
+            layout.addSpacing(12)
+
+        # 附件区
+        files = self._get_files(todo)
+        file_count = len(files)
+        if file_count > 0:
+            self._build_file_section(c, files, file_count, layout)
+
+        layout.addStretch()
+
+    # ---- 分栏模式内容 ----
+
+    def _build_widescreen_content(self, c: dict, todo: dict, is_done: bool):
+        # 左侧：描述预览
+        desc = todo.get("description", "")
+        if desc:
+            desc_browser = QTextBrowser()
+            desc_browser.setOpenExternalLinks(True)
+            desc_browser.document().setDefaultStyleSheet(_markdown_css(c))
+            desc_browser.setMarkdown(desc)
+            desc_browser.setReadOnly(True)
+            desc_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            desc_browser.setMinimumHeight(200)
+            desc_browser.setStyleSheet(f"""
+                QTextBrowser {{
+                    background-color: {c['card_bg']};
+                    border: 1px solid {c['divider']};
+                    border-radius: 8px;
+                    padding: 16px 20px;
+                    color: {c['body']};
+                }}
+            """)
+            self.left_layout.addWidget(desc_browser)
+        else:
+            empty_hint = QLabel("暂无描述")
+            empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_hint.setStyleSheet(f"""
+                color: {c['muted']};
+                font-size: 14px;
+                background-color: {c['card_bg']};
+                border: 1px solid {c['divider']};
+                border-radius: 8px;
+                padding: 40px 20px;
+            """)
+            self.left_layout.addWidget(empty_hint, 1)
+
+        # 右侧：元信息
+        info_card = QFrame()
+        info_card.setObjectName("infoCard")
+        info_card.setStyleSheet(f"""
+            QFrame#infoCard {{
+                background-color: {c['card_bg']};
+                border: 1px solid {c['divider']};
+                border-radius: 8px;
+            }}
+        """)
+        info_layout = QVBoxLayout(info_card)
+        info_layout.setContentsMargins(12, 8, 12, 8)
+        info_layout.setSpacing(0)
+
+        info_header = CaptionLabel("任务信息")
+        info_header.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold; margin-bottom: 4px;")
+        info_layout.addWidget(info_header)
+
+        self._build_info_rows(c, todo, is_done, info_layout)
+
+        self.right_layout.addWidget(info_card)
+
+        # 子任务卡片
+        children = todo.get("children", [])
+        if children:
+            subtask_card = QFrame()
+            subtask_card.setObjectName("subtaskCard")
+            subtask_card.setStyleSheet(f"""
+                QFrame#subtaskCard {{
+                    background-color: {c['card_bg']};
+                    border: 1px solid {c['divider']};
+                    border-radius: 8px;
+                }}
+            """)
+            subtask_layout = QVBoxLayout(subtask_card)
+            subtask_layout.setContentsMargins(12, 8, 12, 8)
+            subtask_layout.setSpacing(4)
+
+            subtask_header = QHBoxLayout()
+            subtask_header.setSpacing(6)
+            subtask_title = CaptionLabel("子任务")
+            subtask_title.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
+            subtask_header.addWidget(subtask_title)
+            done_count = sum(1 for ch in children if ch.get("_is_done", False))
+            count_label = CaptionLabel(f"{done_count}/{len(children)}")
+            count_label.setStyleSheet(f"color: {c['accent']}; font-size: 11px;")
+            subtask_header.addWidget(count_label)
+
+            progress_pct = int(done_count / len(children) * 100) if children else 0
+            progress_bar = QFrame()
+            progress_bar.setFixedHeight(3)
+            progress_bar.setStyleSheet(f"background-color: {c['divider']}; border-radius: 1px;")
+            progress_fill = QFrame(progress_bar)
+            progress_fill.setFixedHeight(3)
+            fill_width = max(1, int(200 * progress_pct / 100))
+            progress_fill.setFixedWidth(fill_width)
+            progress_fill.setStyleSheet(f"background-color: {c['accent']}; border-radius: 1px;")
+            subtask_header.addWidget(progress_bar, 1)
+
+            subtask_layout.addLayout(subtask_header)
+
+            for child in children:
+                item = SubtaskItem(child)
+                item.toggle_done.connect(self.subtask_toggle_done.emit)
+                subtask_layout.addWidget(item)
+
+            self.right_layout.addWidget(subtask_card)
+
+        # 附件卡片
+        files = self._get_files(todo)
+        file_count = len(files)
+        if file_count > 0:
+            file_card = QFrame()
+            file_card.setObjectName("fileCard")
+            file_card.setStyleSheet(f"""
+                QFrame#fileCard {{
+                    background-color: {c['card_bg']};
+                    border: 1px solid {c['divider']};
+                    border-radius: 8px;
+                }}
+            """)
+            file_layout = QVBoxLayout(file_card)
+            file_layout.setContentsMargins(12, 8, 12, 8)
+            file_layout.setSpacing(4)
+
+            file_header = QHBoxLayout()
+            file_header.setSpacing(6)
+            file_title = CaptionLabel("附件")
+            file_title.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
+            file_header.addWidget(file_title)
+            file_count_label = CaptionLabel(f"{file_count}")
+            file_count_label.setStyleSheet(f"color: {c['accent']}; font-size: 11px;")
+            file_header.addWidget(file_count_label)
+            file_header.addStretch()
+            file_layout.addLayout(file_header)
+
+            for f_info in files[:5]:
+                fid = todo.get("recurrence_template_id") if f_info.get("_from_template") else self._current_todo_id
+                item = FileItem(f_info, fid)
+                file_layout.addWidget(item)
+
+            if file_count > 5:
+                more_btn = PushButton(f"查看全部 ({file_count})")
+                more_btn.setFixedHeight(26)
+                more_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+                more_btn.clicked.connect(lambda: self._open_task_folder())
+                file_layout.addWidget(more_btn)
+            elif file_count > 0:
+                view_all_btn = PushButton("打开文件夹")
+                view_all_btn.setFixedHeight(26)
+                view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+                view_all_btn.clicked.connect(lambda: self._open_task_folder())
+                file_layout.addWidget(view_all_btn)
+
+            self.right_layout.addWidget(file_card)
+
+    # ---- 共用构建方法 ----
+
+    def _build_info_rows(self, c: dict, todo: dict, is_done: bool, layout: QVBoxLayout):
         priority = todo.get("priority", 0)
         if priority > 0:
             priority_text = PRIORITY_MAP.get(priority, "无")
@@ -464,23 +817,15 @@ class TodoDetailDialog(MessageBoxBase):
             elif priority == 1:
                 priority_color = c['priority_low']
             row = InfoRow(FluentIcon.HEART, "优先级", priority_text, priority_color)
-            info_layout.addWidget(row)
-            line = QFrame()
-            line.setFixedHeight(1)
-            line.setStyleSheet(f"background-color: {c['divider']};")
-            info_layout.addWidget(line)
+            layout.addWidget(row)
+            self._add_divider(layout, c)
 
-        # 分类
         category = todo.get("category")
         if category:
             row = InfoRow(FluentIcon.TAG, "分类", category.get("name", ""))
-            info_layout.addWidget(row)
-            line = QFrame()
-            line.setFixedHeight(1)
-            line.setStyleSheet(f"background-color: {c['divider']};")
-            info_layout.addWidget(line)
+            layout.addWidget(row)
+            self._add_divider(layout, c)
 
-        # 截止日期
         due = todo.get("due_date")
         if due:
             try:
@@ -499,23 +844,15 @@ class TodoDetailDialog(MessageBoxBase):
                 due_text = due
                 due_color = None
             row = InfoRow(FluentIcon.CALENDAR, "截止日期", due_text, due_color)
-            info_layout.addWidget(row)
-            line = QFrame()
-            line.setFixedHeight(1)
-            line.setStyleSheet(f"background-color: {c['divider']};")
-            info_layout.addWidget(line)
+            layout.addWidget(row)
+            self._add_divider(layout, c)
 
-        # 自动延期
         auto_postpone = todo.get("auto_postpone", False)
         if auto_postpone:
             row = InfoRow(FluentIcon.SYNC, "自动延期", "开启")
-            info_layout.addWidget(row)
-            line = QFrame()
-            line.setFixedHeight(1)
-            line.setStyleSheet(f"background-color: {c['divider']};")
-            info_layout.addWidget(line)
+            layout.addWidget(row)
+            self._add_divider(layout, c)
 
-        # 重复任务
         recurrence_type = todo.get("recurrence_type")
         if recurrence_type:
             from config.constants import RECURRENCE_TYPES
@@ -543,13 +880,9 @@ class TodoDetailDialog(MessageBoxBase):
             if end_str:
                 text += f"（至 {end_str}）"
             row = InfoRow(FluentIcon.UPDATE, "重复", text)
-            info_layout.addWidget(row)
-            line = QFrame()
-            line.setFixedHeight(1)
-            line.setStyleSheet(f"background-color: {c['divider']};")
-            info_layout.addWidget(line)
+            layout.addWidget(row)
+            self._add_divider(layout, c)
 
-        # 创建时间
         created = todo.get("created_at")
         if created:
             try:
@@ -558,13 +891,9 @@ class TodoDetailDialog(MessageBoxBase):
             except (ValueError, TypeError):
                 created_text = created
             row = InfoRow(FluentIcon.HISTORY, "创建时间", created_text)
-            info_layout.addWidget(row)
-            line = QFrame()
-            line.setFixedHeight(1)
-            line.setStyleSheet(f"background-color: {c['divider']};")
-            info_layout.addWidget(line)
+            layout.addWidget(row)
+            self._add_divider(layout, c)
 
-        # 更新时间
         updated = todo.get("updated_at")
         if updated:
             try:
@@ -573,39 +902,68 @@ class TodoDetailDialog(MessageBoxBase):
             except (ValueError, TypeError):
                 updated_text = updated
             row = InfoRow(FluentIcon.INFO, "更新时间", updated_text)
-            info_layout.addWidget(row)
+            layout.addWidget(row)
 
-        self.content_layout.addWidget(info_card)
-        self.content_layout.addSpacing(12)
+    def _build_subtask_section(self, c: dict, children: list, layout: QVBoxLayout):
+        subtask_header = QHBoxLayout()
+        subtask_header.setSpacing(6)
 
-        # ---- 子任务区 ----
-        children = todo.get("children", [])
-        if children:
-            subtask_header = QHBoxLayout()
-            subtask_header.setSpacing(6)
+        subtask_title = CaptionLabel("子任务")
+        subtask_title.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
+        subtask_header.addWidget(subtask_title)
 
-            subtask_title = CaptionLabel("子任务")
-            subtask_title.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
-            subtask_header.addWidget(subtask_title)
+        done_count = sum(1 for ch in children if ch.get("_is_done", False))
+        count_label = CaptionLabel(f"{done_count}/{len(children)}")
+        count_label.setStyleSheet(f"color: {c['accent']}; font-size: 11px;")
+        subtask_header.addWidget(count_label)
+        subtask_header.addStretch()
 
-            done_count = sum(1 for ch in children if ch.get("_is_done", False))
-            count_label = CaptionLabel(f"{done_count}/{len(children)}")
-            count_label.setStyleSheet(f"color: {c['accent']}; font-size: 11px;")
-            subtask_header.addWidget(count_label)
-            subtask_header.addStretch()
+        layout.addLayout(subtask_header)
+        layout.addSpacing(6)
 
-            self.content_layout.addLayout(subtask_header)
-            self.content_layout.addSpacing(6)
+        for child in children:
+            item = SubtaskItem(child)
+            item.toggle_done.connect(self.subtask_toggle_done.emit)
+            layout.addWidget(item)
+            layout.addSpacing(4)
 
-            for child in children:
-                item = SubtaskItem(child)
-                item.toggle_done.connect(self.subtask_toggle_done.emit)
-                self.content_layout.addWidget(item)
-                self.content_layout.addSpacing(4)
+    def _build_file_section(self, c: dict, files: list, file_count: int, layout: QVBoxLayout):
+        file_header = QHBoxLayout()
+        file_header.setSpacing(6)
 
-            self.content_layout.addSpacing(12)
+        file_title = CaptionLabel("附件")
+        file_title.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
+        file_header.addWidget(file_title)
 
-        # ---- 附件区 ----
+        file_count_label = CaptionLabel(f"{file_count}")
+        file_count_label.setStyleSheet(f"color: {c['accent']}; font-size: 11px;")
+        file_header.addWidget(file_count_label)
+        file_header.addStretch()
+
+        layout.addLayout(file_header)
+        layout.addSpacing(6)
+
+        template_id = self._todo_data.get("recurrence_template_id")
+        for f_info in files[:5]:
+            fid = template_id if f_info.get("_from_template") else self._current_todo_id
+            item = FileItem(f_info, fid)
+            layout.addWidget(item)
+            layout.addSpacing(4)
+
+        if file_count > 5:
+            more_btn = PushButton("查看全部")
+            more_btn.setFixedHeight(28)
+            more_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+            more_btn.clicked.connect(lambda: self._open_task_folder())
+            layout.addWidget(more_btn)
+        elif file_count > 0:
+            view_all_btn = PushButton("查看全部")
+            view_all_btn.setFixedHeight(28)
+            view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+            view_all_btn.clicked.connect(lambda: self._open_task_folder())
+            layout.addWidget(view_all_btn)
+
+    def _get_files(self, todo: dict) -> list:
         files = self._file_service.get_files(self._current_todo_id)
         template_id = todo.get("recurrence_template_id")
         if template_id and todo.get("recurrence_type"):
@@ -615,64 +973,21 @@ class TodoDetailDialog(MessageBoxBase):
                 if tf["path"] not in existing_paths:
                     tf["_from_template"] = True
                     files.append(tf)
-        file_count = len(files)
-        if file_count > 0:
-            file_header = QHBoxLayout()
-            file_header.setSpacing(6)
+        return files
 
-            file_title = CaptionLabel("附件")
-            file_title.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
-            file_header.addWidget(file_title)
+    def _add_divider(self, layout: QVBoxLayout, c: dict):
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background-color: {c['divider']};")
+        layout.addWidget(line)
 
-            file_count_label = CaptionLabel(f"{file_count}")
-            file_count_label.setStyleSheet(f"color: {c['accent']}; font-size: 11px;")
-            file_header.addWidget(file_count_label)
-            file_header.addStretch()
-
-            self.content_layout.addLayout(file_header)
-            self.content_layout.addSpacing(6)
-
-            for f_info in files[:5]:
-                fid = template_id if f_info.get("_from_template") else self._current_todo_id
-                item = FileItem(f_info, fid)
-                self.content_layout.addWidget(item)
-                self.content_layout.addSpacing(4)
-
-            if file_count > 5:
-                more_btn = PushButton("查看全部")
-                more_btn.setFixedHeight(28)
-                more_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
-                more_btn.clicked.connect(lambda: self._open_task_folder())
-                self.content_layout.addWidget(more_btn)
-            elif file_count > 0:
-                view_all_btn = PushButton("查看全部")
-                view_all_btn.setFixedHeight(28)
-                view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
-                view_all_btn.clicked.connect(lambda: self._open_task_folder())
-                self.content_layout.addWidget(view_all_btn)
-
-        # 底部弹性空间
-        self.content_layout.addStretch()
-
-        # 更新底部按钮状态
-        if is_done and not is_archived:
-            self.done_btn.setText("标记待办")
-            self.done_btn.setIcon(FluentIcon.CANCEL)
-        else:
-            self.done_btn.setText("标记完成")
-            self.done_btn.setIcon(FluentIcon.COMPLETED)
-
-        if is_archived:
-            self.edit_btn.hide()
-            self.archive_btn.hide()
-            self.done_btn.hide()
-        elif is_done:
-            self.edit_btn.hide()
-            self.archive_btn.show()
-            self.done_btn.hide()
-        else:
-            self.edit_btn.show()
-            self.archive_btn.hide()
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                self._clear_layout(item.layout())
 
     def _on_toggle_done(self):
         self._pending_action = ("toggle_done", self._current_todo_id)

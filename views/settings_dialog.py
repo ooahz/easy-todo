@@ -33,6 +33,7 @@ class SettingsPage(QWidget):
     floating_top_changed = Signal(bool)
     categories_changed = Signal()
     description_mode_changed = Signal(str)
+    dialog_mode_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -79,7 +80,11 @@ class SettingsPage(QWidget):
             self._create_show_done_cb(),
             self._create_done_at_bottom_cb(),
             self._create_show_week_view_cb(),
-            self._make_combo_row("描述模式", self._create_description_mode_combo()),
+        ]))
+
+        self.list_layout.addWidget(self._make_card("编辑器", [
+            self._make_combo_row("输入模式", self._create_description_mode_combo()),
+            self._make_combo_row("布局模式", self._create_dialog_mode_combo()),
         ]))
 
         self.list_layout.addWidget(self._make_card("排序规则", [
@@ -314,6 +319,14 @@ class SettingsPage(QWidget):
         self.desc_mode_combo.setCurrentIndex(idx)
         self.desc_mode_combo.currentIndexChanged.connect(self._on_description_mode_changed)
         return self.desc_mode_combo
+
+    def _create_dialog_mode_combo(self) -> ComboBox:
+        self.dialog_mode_combo = ComboBox()
+        self.dialog_mode_combo.addItems(["单栏", "分栏"])
+        idx = 0 if settings.dialog_mode == "default" else 1
+        self.dialog_mode_combo.setCurrentIndex(idx)
+        self.dialog_mode_combo.currentIndexChanged.connect(self._on_dialog_mode_changed)
+        return self.dialog_mode_combo
 
     def _create_done_at_bottom_cb(self) -> CheckBox:
         self.done_at_bottom_cb = CheckBox("已完成任务置底")
@@ -586,3 +599,8 @@ class SettingsPage(QWidget):
         mode = "default" if index == 0 else "markdown"
         settings.description_mode = mode
         self.description_mode_changed.emit(mode)
+
+    def _on_dialog_mode_changed(self, index: int):
+        mode = "default" if index == 0 else "widescreen"
+        settings.dialog_mode = mode
+        self.dialog_mode_changed.emit(mode)
