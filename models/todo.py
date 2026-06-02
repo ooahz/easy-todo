@@ -29,7 +29,8 @@ class Todo(Base):
     auto_postpone = Column(Boolean, default=False)  # 自动延期
     recurrence_type = Column(String(20), default=None, nullable=True)  # daily/weekly/monthly
     recurrence_interval = Column(Integer, default=1)  # 间隔数
-    recurrence_day = Column(Integer, default=None, nullable=True)  # 周几(1-7)或几号(1-31)
+    recurrence_day = Column(String(50), default=None, nullable=True)  # 周几(1-7,逗号分隔)或几号(1-31)
+    recurrence_start_date = Column(Date, nullable=True)  # 重复开始日期
     recurrence_end_date = Column(Date, nullable=True)  # 重复结束日期
     is_recurrence_template = Column(Boolean, default=False)  # 是否为重复模板
     recurrence_template_id = Column(Integer, ForeignKey("todos.id", ondelete="SET NULL"), nullable=True)  # 所属模板ID
@@ -81,6 +82,7 @@ class Todo(Base):
             "recurrence_type": self.recurrence_type,
             "recurrence_interval": self.recurrence_interval,
             "recurrence_day": self.recurrence_day,
+            "recurrence_start_date": self.recurrence_start_date.isoformat() if self.recurrence_start_date else None,
             "recurrence_end_date": self.recurrence_end_date.isoformat() if self.recurrence_end_date else None,
             "is_recurrence_template": self.is_recurrence_template,
             "recurrence_template_id": self.recurrence_template_id,
@@ -96,7 +98,6 @@ class Todo(Base):
         }
 
     def to_export_dict(self) -> dict:
-        """导出专用序列化，排除 ID 和内部引用字段，使用 category_name"""
         return {
             "title": self.title,
             "description": self.description or "",
@@ -110,6 +111,7 @@ class Todo(Base):
             "recurrence_type": self.recurrence_type,
             "recurrence_interval": self.recurrence_interval,
             "recurrence_day": self.recurrence_day,
+            "recurrence_start_date": self.recurrence_start_date.isoformat() if self.recurrence_start_date else None,
             "recurrence_end_date": self.recurrence_end_date.isoformat() if self.recurrence_end_date else None,
             "is_recurrence_template": self.is_recurrence_template,
             "occurrence_date": self.occurrence_date.isoformat() if self.occurrence_date else None,

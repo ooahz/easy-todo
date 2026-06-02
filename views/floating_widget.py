@@ -1,10 +1,11 @@
 """浮窗组件 - 显示当前页面任务列表"""
 from __future__ import annotations
-from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSize
+from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup, QParallelAnimationGroup, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGraphicsOpacityEffect,
+    QApplication, QGraphicsScale,
 )
-from PySide6.QtGui import QMouseEvent, QCursor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QMouseEvent, QCursor, QIcon, QPainter, QPixmap, QVector3D
 
 from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit, FluentIcon, TransparentToolButton
 
@@ -122,6 +123,14 @@ class FloatingWidget(QWidget):
 
         self.scroll.setWidget(self.list_widget)
         bg_layout.addWidget(self.scroll, 1)
+
+        # 固定状态遮罩层
+        self._pin_mask = QWidget(self.scroll)
+        self._pin_mask.setObjectName("pinMask")
+        self._pin_mask.setVisible(False)
+        self._pin_mask.setStyleSheet("#pinMask { background-color: transparent; }")
+        # 安装事件过滤器：阻止点击，放行滚轮
+        self._pin_mask.installEventFilter(self)
 
         # 遮罩层（新建任务时阻止点击列表）
         self.mask_layer = QLabel(self.bg_frame)
@@ -279,12 +288,41 @@ class FloatingWidget(QWidget):
         if was_visible:
             self.show()
 
+    def eventFilter(self, obj, event):
+        """固定遮罩事件过滤"""
+        if obj is self._pin_mask:
+            if event.type() == event.Type.MouseButtonPress:
+                return True  # 阻止点击
+            if event.type() in (event.Type.MouseButtonRelease, event.Type.MouseButtonDblClick):
+                return True  # 阻止点击
+            if event.type() == event.Type.Wheel:
+                # 将滚轮事件转发给 scroll 的视口
+                QApplication.sendEvent(self.scroll.viewport(), event)
+                return True
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event):
+        """窗口大小变化时更新固定遮罩尺寸"""
+        super().resizeEvent(event)
+        if self._pin_mask.isVisible():
+            self._pin_mask.setGeometry(self.scroll.viewport().rect())
+
+    def _update_pin_mask(self):
+        """更新固定遮罩的显示状态和位置"""
+        if self._pinned:
+            self._pin_mask.setGeometry(self.scroll.viewport().rect())
+            self._pin_mask.raise_()
+            self._pin_mask.setVisible(True)
+        else:
+            self._pin_mask.setVisible(False)
+
     def set_pinned(self, pinned: bool):
         """设置固定状态"""
         self._pinned = pinned
         self.pin_btn.setIcon(FluentIcon.UNPIN if pinned else FluentIcon.PIN)
         self.pin_btn.setIconSize(QSize(12, 12))
         self.pin_btn.setToolTip("取消固定" if pinned else "固定浮窗")
+        self._update_pin_mask()
 
     def _toggle_pin(self):
         """切换固定状态"""
@@ -572,3 +610,4 @@ class FloatingWidget(QWidget):
         self._apply_theme()
         if self._todos:
             self._refresh_list()
+        self._update_pin_mask()

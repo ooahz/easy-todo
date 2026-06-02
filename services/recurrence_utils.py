@@ -4,12 +4,19 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, timedelta
 
+from config.constants import parse_recurrence_day
+
 
 def matches_recurrence(due_date: date, target_date: date,
                        recurrence_type: str, interval: int,
                        end_date: date | None,
-                       recurrence_day: int | None = None) -> bool:
-    """判断 target_date 是否在以 due_date 为起点的重复序列上"""
+                       recurrence_day=None) -> bool:
+    """判断 target_date 是否在以 due_date 为起点的重复序列上
+
+    recurrence_day: int | str | None
+        - 周重复: 逗号分隔的字符串如 "1,3,5" 或单个 int
+        - 月重复: 单个数字（字符串或 int）
+    """
     if target_date < due_date:
         return False
     if end_date and target_date > end_date:
@@ -20,9 +27,10 @@ def matches_recurrence(due_date: date, target_date: date,
     if recurrence_type == "daily":
         return (target_date - due_date).days % interval == 0
     elif recurrence_type == "weekly":
-        if recurrence_day is not None:
+        days = parse_recurrence_day(recurrence_day)
+        if days:
             target_weekday = target_date.weekday() + 1
-            if target_weekday != recurrence_day:
+            if target_weekday not in days:
                 return False
             days_diff = (target_date - due_date).days
             if days_diff <= 0:
@@ -31,12 +39,14 @@ def matches_recurrence(due_date: date, target_date: date,
             return weeks_diff % interval == 0
         return (target_date - due_date).days % (interval * 7) == 0
     elif recurrence_type == "monthly":
+        day_list = parse_recurrence_day(recurrence_day)
+        day_to_use = day_list[0] if day_list else None
         month_diff = (target_date.year - due_date.year) * 12 + (target_date.month - due_date.month)
         if month_diff <= 0 or month_diff % interval != 0:
             return False
-        if recurrence_day is not None:
+        if day_to_use is not None:
             max_day = monthrange(target_date.year, target_date.month)[1]
-            expected_day = min(recurrence_day, max_day)
+            expected_day = min(day_to_use, max_day)
             return target_date.day == expected_day
         max_day = monthrange(target_date.year, target_date.month)[1]
         expected_day = min(due_date.day, max_day)
@@ -47,8 +57,13 @@ def matches_recurrence(due_date: date, target_date: date,
 def generate_occurrences(due_date: date, start: date, end: date,
                          recurrence_type: str, interval: int,
                          end_date: date | None,
-                         recurrence_day: int | None = None) -> list[date]:
-    """生成 [start, end] 范围内的所有重复日期"""
+                         recurrence_day=None) -> list[date]:
+    """生成 [start, end] 范围内的所有重复日期
+
+    recurrence_day: int | str | None
+        - 周重复: 逗号分隔的字符串如 "1,3,5" 或单个 int，支持多选
+        - 月重复: 单个数字（字符串或 int）
+    """
     if end_date and start > end_date:
         return []
     actual_end = min(end, end_date) if end_date else end
@@ -67,20 +82,24 @@ def generate_occurrences(due_date: date, start: date, end: date,
             cursor += timedelta(days=interval)
 
     elif recurrence_type == "weekly":
-        if recurrence_day is not None:
-            target_weekday = recurrence_day - 1
-            if due_date >= start:
-                cursor = due_date
-            else:
-                cursor = start
-            days_ahead = (target_weekday - cursor.weekday()) % 7
-            cursor = cursor + timedelta(days=days_ahead)
-            if cursor < due_date:
-                cursor += timedelta(days=7)
-            while cursor <= actual_end:
-                if cursor >= start:
-                    results.append(cursor)
-                cursor += timedelta(days=interval * 7)
+        days = parse_recurrence_day(recurrence_day)
+        if days:
+            # 为每个选中的星期几生成日期
+            for day_num in sorted(days):
+                target_weekday = day_num - 1
+                if due_date >= start:
+                    cursor = due_date
+                else:
+                    cursor = start
+                days_ahead = (target_weekday - cursor.weekday()) % 7
+                cursor = cursor + timedelta(days=days_ahead)
+                if cursor < due_date:
+                    cursor += timedelta(days=7)
+                while cursor <= actual_end:
+                    if cursor >= start:
+                        results.append(cursor)
+                    cursor += timedelta(days=interval * 7)
+            results.sort()
         else:
             step = interval * 7
             if due_date >= start:
@@ -94,7 +113,8 @@ def generate_occurrences(due_date: date, start: date, end: date,
                 cursor += timedelta(days=step)
 
     elif recurrence_type == "monthly":
-        day_to_use = recurrence_day if recurrence_day is not None else due_date.day
+        day_list = parse_recurrence_day(recurrence_day)
+        day_to_use = day_list[0] if day_list else due_date.day
         if due_date >= start:
             y, m = due_date.year, due_date.month
         else:

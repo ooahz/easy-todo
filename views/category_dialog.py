@@ -1,5 +1,6 @@
 """分类管理对话框"""
 from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QPainter, QColor, QPainterPath
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QListWidgetItem, QLabel
 )
@@ -24,7 +25,7 @@ SYSTEM_VIEW_MAP = {key: (name, icon) for key, name, icon in SYSTEM_VIEWS}
 
 
 class SystemViewItem(QWidget):
-    """系统视图项（不可编辑/删除，支持排序）"""
+    """系统视图项"""
 
     move_up_clicked = Signal(str)
     move_down_clicked = Signal(str)
@@ -136,7 +137,8 @@ class CategoryDialog(QDialog):
         self._editing_id = None
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        self.setFixedSize(400, 420)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(400, 500)
         self._setup_ui()
         self._load_categories()
 
@@ -158,6 +160,19 @@ class CategoryDialog(QDialog):
     def mouseReleaseEvent(self, event):
         """鼠标释放清除位置"""
         self._drag_pos = None
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        dark = isDarkTheme()
+        bg_color = QColor(43, 43, 43) if dark else QColor(249, 249, 249)
+        border_color = QColor(60, 60, 60) if dark else QColor(210, 210, 210)
+        path = QPainterPath()
+        path.addRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 10, 10)
+        painter.fillPath(path, bg_color)
+        painter.setPen(border_color)
+        painter.drawPath(path)
+        super().paintEvent(event)
 
     def closeEvent(self, event):
         """关闭时释放数据库连接"""
@@ -225,7 +240,7 @@ class CategoryDialog(QDialog):
         if isDarkTheme():
             self.setStyleSheet("""
                 QDialog {
-                    background-color: rgb(43, 43, 43);
+                    background-color: transparent;
                 }
                 BodyLabel { color: #DDD; }
                 LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
@@ -240,7 +255,7 @@ class CategoryDialog(QDialog):
         else:
             self.setStyleSheet("""
                 QDialog {
-                    background-color: rgb(249, 249, 249);
+                    background-color: transparent;
                 }
                 BodyLabel { color: #333; }
                 LineEdit { background-color: #FFF; color: #333; }

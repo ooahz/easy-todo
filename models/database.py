@@ -1,7 +1,7 @@
 """数据库连接与会话管理"""
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from config.constants import APP_ID
@@ -36,6 +36,25 @@ class Database:
             echo=False,
             pool_pre_ping=True,
         )
+
+        # 启用 WAL 模式，避免写操作独占锁阻塞读操作
+        @event.listens_for(self.engine, "connect")
+        def _set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+            except Exception:
+                pass  # 某些环境不支持 WAL（如网络驱动器），回退到默认模式
+            try:
+                cursor.execute("PRAGMA busy_timeout=5000")
+            except Exception:
+                pass
+            try:
+                cursor.execute("PRAGMA synchronous=NORMAL")
+            except Exception:
+                pass
+            cursor.close()
+
         self.SessionLocal = sessionmaker(
             bind=self.engine,
             expire_on_commit=False,
@@ -56,6 +75,7 @@ class Database:
         self._migrate_add_category_is_system()
         self._migrate_add_recurrence_template()
         self._migrate_add_completed_at()
+        self._migrate_add_recurrence_start_date()
         self._init_default_categories()
         self._migrate_add_indexes()
 
@@ -156,6 +176,17 @@ class Database:
                 conn.execute(text(
                     "UPDATE todos SET completed_at = updated_at WHERE status = 1 AND completed_at IS NULL"
                 ))
+                conn.commit()
+
+    def _migrate_add_recurrence_start_date(self):
+        """迁移：为 todos 表添加 recurrence_start_date 列"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        if "recurrence_start_date" not in columns:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN recurrence_start_date DATE"))
                 conn.commit()
 
     def _init_default_categories(self):

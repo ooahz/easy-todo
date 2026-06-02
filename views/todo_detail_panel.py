@@ -236,9 +236,15 @@ class FileItem(CardWidget):
         icon_w.setStyleSheet(f"color: {c['icon']};")
         layout.addWidget(icon_w)
 
-        name = BodyLabel(file_info.get("name", ""))
+        file_name = file_info.get("name", "")
+        display_name = file_name
+        if len(file_name) > 28:
+            display_name = file_name[:12] + "..." + file_name[-13:]
+        name = BodyLabel(display_name)
         name.setStyleSheet(f"color: {c['accent']}; font-size: 12px;")
         name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        if display_name != file_name:
+            name.setToolTip(file_name)
         layout.addWidget(name, 1)
 
         size_kb = file_info.get("size", 0) / 1024
@@ -384,52 +390,62 @@ class TodoDetailDialog(MessageBoxBase):
         top_bar = QHBoxLayout()
         top_bar.setSpacing(10)
 
-        color_tag = self._todo_data.get("color_tag")
-        if color_tag:
-            color_dot = QFrame()
-            color_dot.setFixedSize(10, 10)
-            color_dot.setStyleSheet(f"background-color: {color_tag}; border-radius: 5px;")
-            top_bar.addWidget(color_dot)
-
         is_done = self._todo_data.get("_is_done", False)
-        self.title_label = TitleLabel(self._todo_data.get("title", ""))
-        self.title_label.setWordWrap(True)
-        self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        if is_done:
-            self.title_label.setStyleSheet(f"""
-                color: {c['muted']};
-                text-decoration: line-through;
-                font-size: 18px;
-                font-weight: bold;
-            """)
+
+        if self._is_widescreen:
+            color_tag = self._todo_data.get("color_tag")
+            if color_tag:
+                color_dot = QFrame()
+                color_dot.setFixedSize(10, 10)
+                color_dot.setStyleSheet(f"background-color: {color_tag}; border-radius: 5px;")
+                top_bar.addWidget(color_dot)
+
+            self.title_label = TitleLabel(self._todo_data.get("title", ""))
+            self.title_label.setWordWrap(True)
+            if is_done:
+                self.title_label.setStyleSheet(f"""
+                    color: {c['muted']};
+                    text-decoration: line-through;
+                    font-size: 18px;
+                    font-weight: bold;
+                """)
+            else:
+                self.title_label.setStyleSheet(f"""
+                    color: {c['title']};
+                    font-size: 18px;
+                    font-weight: bold;
+                """)
+
+            status = self._todo_data.get("status", 0)
+            status_text = STATUS_MAP.get(status, "未知")
+            status_tag = QLabel(f"  {status_text}  ")
+            if is_done:
+                status_tag.setStyleSheet(f"""
+                    background-color: rgba(16, 124, 16, 0.12);
+                    color: {c['done_green']};
+                    border-radius: 10px;
+                    font-size: 11px;
+                    padding: 2px 8px;
+                """)
+            else:
+                status_tag.setStyleSheet(f"""
+                    background-color: {c['tag_bg']};
+                    color: {c['accent']};
+                    border-radius: 10px;
+                    font-size: 11px;
+                    padding: 2px 8px;
+                """)
+            top_bar.addWidget(status_tag)
         else:
+            self.title_label = TitleLabel("任务详情")
             self.title_label.setStyleSheet(f"""
                 color: {c['title']};
                 font-size: 18px;
                 font-weight: bold;
             """)
-        top_bar.addWidget(self.title_label, 1)
 
-        status = self._todo_data.get("status", 0)
-        status_text = STATUS_MAP.get(status, "未知")
-        status_tag = QLabel(f"  {status_text}  ")
-        if is_done:
-            status_tag.setStyleSheet(f"""
-                background-color: rgba(16, 124, 16, 0.12);
-                color: {c['done_green']};
-                border-radius: 10px;
-                font-size: 11px;
-                padding: 2px 8px;
-            """)
-        else:
-            status_tag.setStyleSheet(f"""
-                background-color: {c['tag_bg']};
-                color: {c['accent']};
-                border-radius: 10px;
-                font-size: 11px;
-                padding: 2px 8px;
-            """)
-        top_bar.addWidget(status_tag)
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        top_bar.addWidget(self.title_label, 1)
 
         self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
         self.close_btn.setFixedSize(28, 28)
@@ -616,7 +632,9 @@ class TodoDetailDialog(MessageBoxBase):
             desc_layout.addWidget(desc_body)
 
             layout.addWidget(desc_card)
-            layout.addSpacing(12)
+
+        # 弹性空间，将信息区推到底部
+        layout.addStretch(1)
 
         # 信息区
         info_card = QFrame()
@@ -648,8 +666,6 @@ class TodoDetailDialog(MessageBoxBase):
         file_count = len(files)
         if file_count > 0:
             self._build_file_section(c, files, file_count, layout)
-
-        layout.addStretch()
 
     # ---- 分栏模式内容 ----
 
@@ -791,13 +807,13 @@ class TodoDetailDialog(MessageBoxBase):
             if file_count > 5:
                 more_btn = PushButton(f"查看全部 ({file_count})")
                 more_btn.setFixedHeight(26)
-                more_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+                more_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']}; background-color: {c['card_bg']}; border: 1px solid {c['divider']}; border-radius: 4px;")
                 more_btn.clicked.connect(lambda: self._open_task_folder())
                 file_layout.addWidget(more_btn)
             elif file_count > 0:
                 view_all_btn = PushButton("打开文件夹")
                 view_all_btn.setFixedHeight(26)
-                view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+                view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']}; background-color: {c['card_bg']}; border: 1px solid {c['divider']}; border-radius: 4px;")
                 view_all_btn.clicked.connect(lambda: self._open_task_folder())
                 file_layout.addWidget(view_all_btn)
 
@@ -855,33 +871,52 @@ class TodoDetailDialog(MessageBoxBase):
 
         recurrence_type = todo.get("recurrence_type")
         if recurrence_type:
-            from config.constants import RECURRENCE_TYPES
+            from config.constants import RECURRENCE_TYPES, WEEKDAY_NAMES, parse_recurrence_day
             interval = todo.get("recurrence_interval", 1)
             recurrence_day = todo.get("recurrence_day")
             type_name = RECURRENCE_TYPES.get(recurrence_type, "")
             if recurrence_type == "weekly" and recurrence_day:
-                weekday_names = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日"}
-                day_name = weekday_names.get(recurrence_day, "")
+                days = parse_recurrence_day(recurrence_day)
+                day_names = "".join(WEEKDAY_NAMES.get(d, "") for d in sorted(days))
                 if interval > 1:
-                    text = f"每{interval}周周{day_name}"
+                    text = f"每{interval}周周{day_names}"
                 else:
-                    text = f"每周{day_name}"
+                    text = f"每周{day_names}"
             elif recurrence_type == "monthly" and recurrence_day:
+                day_list = parse_recurrence_day(recurrence_day)
+                day_val = day_list[0] if day_list else ""
                 if interval > 1:
-                    text = f"每{interval}月{recurrence_day}号"
+                    text = f"每{interval}月{day_val}号"
                 else:
-                    text = f"每月{recurrence_day}号"
+                    text = f"每月{day_val}号"
             elif interval > 1:
                 unit = {"daily": "天", "weekly": "周", "monthly": "月"}.get(recurrence_type, "")
                 text = f"每{interval}{unit}"
             else:
                 text = type_name
+            start_str = todo.get("recurrence_start_date")
             end_str = todo.get("recurrence_end_date")
-            if end_str:
+            if start_str and end_str:
+                text += f"（{start_str} ~ {end_str}）"
+            elif start_str:
+                text += f"（从 {start_str}）"
+            elif end_str:
                 text += f"（至 {end_str}）"
             row = InfoRow(FluentIcon.UPDATE, "重复", text)
             layout.addWidget(row)
             self._add_divider(layout, c)
+
+        if is_done:
+            completed = todo.get("completed_at")
+            if completed:
+                try:
+                    dt = datetime.fromisoformat(completed)
+                    completed_text = dt.strftime("%Y-%m-%d %H:%M")
+                except (ValueError, TypeError):
+                    completed_text = completed
+                row = InfoRow(FluentIcon.COMPLETED, "完成时间", completed_text, c['done_green'])
+                layout.addWidget(row)
+                self._add_divider(layout, c)
 
         created = todo.get("created_at")
         if created:
@@ -953,13 +988,13 @@ class TodoDetailDialog(MessageBoxBase):
         if file_count > 5:
             more_btn = PushButton("查看全部")
             more_btn.setFixedHeight(28)
-            more_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+            more_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']}; background-color: {c['card_bg']}; border: 1px solid {c['divider']}; border-radius: 4px;")
             more_btn.clicked.connect(lambda: self._open_task_folder())
             layout.addWidget(more_btn)
         elif file_count > 0:
             view_all_btn = PushButton("查看全部")
             view_all_btn.setFixedHeight(28)
-            view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']};")
+            view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']}; background-color: {c['card_bg']}; border: 1px solid {c['divider']}; border-radius: 4px;")
             view_all_btn.clicked.connect(lambda: self._open_task_folder())
             layout.addWidget(view_all_btn)
 

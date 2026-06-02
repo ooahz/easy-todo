@@ -10,7 +10,6 @@ from qfluentwidgets import (
 )
 from views.todo_card import TodoCard
 from views.subtask_card import SubtaskCard
-from views.skeleton_widget import SkeletonCard, SkeletonSubtaskCard
 from views.calendar_view import WeekView
 from config.settings import settings
 
@@ -55,6 +54,7 @@ class TodoListView(QWidget):
     archive_clicked = Signal(int)
     archive_all_clicked = Signal()
     filter_changed = Signal(str)
+    time_filter_changed = Signal(str)
     page_changed = Signal(int, int)  # (page, page_size)
 
     def __init__(self, parent=None, view_name: str = "", readonly: bool = False):
@@ -62,10 +62,10 @@ class TodoListView(QWidget):
         self._todos: list[dict] = []
         self._all_todos: list[dict] = []
         self._cards: list = []
-        self._skeleton_cards: list = []
         self._view_name = view_name
         self._readonly = readonly
         self._filter_date: date_type | None = None
+        self._time_filter: str = "all"
         self._page_size = 100
         self._current_page = 0
         self._total_count = 0
@@ -93,6 +93,14 @@ class TodoListView(QWidget):
         )
         self.filter_combo.setVisible(False)
         self.toolbar.addWidget(self.filter_combo)
+
+        self.time_filter_combo = ComboBox()
+        self.time_filter_combo.addItems(["全部", "本周", "本月", "本年"])
+        self.time_filter_combo.setCurrentIndex(0)
+        self.time_filter_combo.setFixedWidth(90)
+        self.time_filter_combo.currentIndexChanged.connect(self._on_time_filter_index_changed)
+        self.time_filter_combo.setVisible(False)
+        self.toolbar.addWidget(self.time_filter_combo)
 
         self.toolbar.addStretch()
 
@@ -191,10 +199,7 @@ class TodoListView(QWidget):
 
     def set_todos(self, todos: list[dict], recurring_instances: list[dict] = None,
                   total_count: int = -1):
-        """设置待办列表数据（父任务列表，已包含 children）
-
-        total_count: 数据库端总数，用于分页器。-1 表示使用客户端数据长度。
-        """
+        """设置待办列表数据"""
         self._all_todos = todos
         self.week_view.set_todos(todos)
 
@@ -258,7 +263,6 @@ class TodoListView(QWidget):
 
     @staticmethod
     def _dedup_recurrence(todos: list[dict]) -> list[dict]:
-        """每个重复系列只保留离今天最近的未完成实例"""
         from datetime import date
         today = date.today()
         best: dict[int, dict] = {}
@@ -364,17 +368,13 @@ class TodoListView(QWidget):
         return filtered
 
     def _refresh_list(self):
-        """刷新列表显示 - 树形渲染：父任务 + 缩进子任务"""
-        self._hide_skeleton()
-
-        for card in self._cards:
-            card.deleteLater()
-        self._cards.clear()
-
+        """刷新列表显示"""
+        # 统一清理：只通过布局项清理，避免对同一 widget 重复调用 deleteLater
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._cards.clear()
 
         if self._groups is not None:
             self._refresh_grouped_list()
@@ -536,7 +536,7 @@ class TodoListView(QWidget):
         self.stats_label.setVisible(False)
 
     def update_single_todo(self, todo_data: dict):
-        """更新单个卡片（父任务或子任务）"""
+        """更新单个卡片"""
         for card in self._cards:
             if card.todo_id == todo_data["id"]:
                 card.update_data(todo_data)
@@ -561,7 +561,7 @@ class TodoListView(QWidget):
             self.empty_widget.setVisible(True)
 
     def show_loading(self):
-        """展示骨架加载态"""
+        """展示加载态"""
         for card in self._cards:
             card.deleteLater()
         self._cards.clear()
@@ -569,38 +569,26 @@ class TodoListView(QWidget):
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self._show_skeleton()
-
-    def _show_skeleton(self):
-        """显示骨架占位"""
-        self._hide_skeleton()
-        self.empty_widget.setVisible(False)
-        self.scroll_area.setVisible(True)
-
-        for i in range(5):
-            card = SkeletonCard()
-            self.list_layout.addWidget(card)
-            self._skeleton_cards.append(card)
-            if i % 2 == 0:
-                container = QWidget()
-                container_layout = QHBoxLayout(container)
-                container_layout.setContentsMargins(24, 0, 0, 0)
-                container_layout.setSpacing(0)
-                sub = SkeletonSubtaskCard()
-                container_layout.addWidget(sub)
-                self.list_layout.addWidget(container)
-                self._skeleton_cards.append(sub)
-        self.list_layout.addStretch()
-
-    def _hide_skeleton(self):
-        """移除骨架占位"""
-        for card in self._skeleton_cards:
-            card.stop()
-            card.deleteLater()
-        self._skeleton_cards.clear()
 
     def set_show_week_view(self, show: bool):
-        """设置是否显示周日程视图"""
         self.week_view.setVisible(show)
         if not show:
             self.week_view.clear_selection()
+
+    def _on_time_filter_index_changed(self, idx: int):
+        keys = ["all", "week", "month", "year"]
+        if 0 <= idx < len(keys):
+            self._time_filter = keys[idx]
+            self.time_filter_changed.emit(self._time_filter)
+
+    def set_time_filter_visible(self, visible: bool):
+        self.time_filter_combo.setVisible(visible)
+
+    def current_time_filter(self) -> str:
+        return self._time_filter
+
+    def reset_time_filter(self):
+        self._time_filter = "all"
+        self.time_filter_combo.blockSignals(True)
+        self.time_filter_combo.setCurrentIndex(0)
+        self.time_filter_combo.blockSignals(False)

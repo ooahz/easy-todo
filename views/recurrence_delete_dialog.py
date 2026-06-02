@@ -111,7 +111,7 @@ class _OptionCard(CardWidget):
 
 
 class RecurrenceDeleteDialog(MessageBoxBase):
-    """重复任务删除对话框：RadioButton + 选项卡片 + 文件删除选项"""
+    """重复任务删除对话框"""
 
     def __init__(self, file_count: int = 0, parent=None):
         super().__init__(parent)

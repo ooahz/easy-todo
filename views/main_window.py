@@ -4,10 +4,10 @@ import json
 import os
 import sys
 import winreg
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QRunnable, QThreadPool, Signal, QObject
 from PySide6.QtWidgets import QApplication, QWidget, QFileDialog, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QAction, QIcon
 
@@ -30,6 +30,164 @@ from services.category_service import CategoryService
 from services.file_service import FileService
 from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED, APP_NAME
 from config.settings import settings
+
+
+class _LoadTodosSignals(QObject):
+    """后台加载待办数据的信号"""
+    done = Signal(dict)
+
+
+class _LoadTodosWorker(QRunnable):
+    """后台线程执行数据库查询，避免阻塞 UI"""
+
+    def __init__(self, params: dict):
+        super().__init__()
+        self._signals = _LoadTodosSignals()
+        self.params = params
+        self.setAutoDelete(True)
+
+    @property
+    def signals(self):
+        return self._signals
+
+    @staticmethod
+    def _build_tree(todos, truncate_desc=False):
+        """将 ORM 对象列表转为树形字典"""
+        todo_dicts = [t.to_dict(truncate_desc=truncate_desc) for t in todos]
+        id_map = {t["id"]: t for t in todo_dicts}
+        parents = []
+        for t in todo_dicts:
+            if t["pid"] is None:
+                parents.append(t)
+            else:
+                parent = id_map.get(t["pid"])
+                if parent:
+                    parent["children"].append(t)
+        return parents
+
+    @staticmethod
+    def _mark_done(tree, done_at_bottom=False):
+        """为任务树设置完成/归档标志"""
+        for t in tree:
+            t["_is_done"] = t.get("status", 0) == 1
+            t["_is_archived"] = t.get("status", 0) == 2
+            for ch in t.get("children", []):
+                ch["_is_done"] = ch.get("status", 0) == 1
+                ch["_is_archived"] = ch.get("status", 0) == 2
+        if done_at_bottom:
+            tree.sort(key=lambda t: t.get("status", 0))
+
+    def run(self):
+        from services.todo_service import TodoService
+        svc = TodoService()
+        try:
+            p = self.params
+            PAGE_SIZE = 100
+            sort_rules = p['sort_rules']
+            done_at_bottom = p['done_at_bottom']
+            show_done = p['show_done_tasks']
+            result = {}
+
+            # ---- 全部任务 ----
+            due_start, due_end = p.get('all_due_start'), p.get('all_due_end')
+            if show_done:
+                todos = svc.get_all_including_done(
+                    sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                    page=0, page_size=PAGE_SIZE,
+                    due_start=due_start, due_end=due_end,
+                )
+                total = svc.count_filtered_including_done(
+                    due_start=due_start, due_end=due_end,
+                )
+            else:
+                todos = svc.get_all(
+                    status=STATUS_TODO, sort_rules=sort_rules,
+                    page=0, page_size=PAGE_SIZE,
+                    due_start=due_start, due_end=due_end,
+                )
+                total = svc.count_filtered(
+                    status=STATUS_TODO, due_start=due_start, due_end=due_end,
+                )
+            tree = self._build_tree(todos, truncate_desc=True)
+            self._mark_done(tree, done_at_bottom=done_at_bottom)
+            result['all'] = {'tree': tree, 'total': total}
+
+            # ---- 最近待办 ----
+            due_start, due_end = p.get('recent_due_start'), p.get('recent_due_end')
+            recent_todos = svc.get_all_including_done(
+                sort_rules=sort_rules, done_at_bottom=False,
+                page=0, page_size=PAGE_SIZE,
+                due_start=due_start, due_end=due_end,
+            )
+            recent_total = svc.count_filtered_including_done(
+                due_start=due_start, due_end=due_end,
+            )
+            recent_tree = self._build_tree(recent_todos, truncate_desc=True)
+            self._mark_done(recent_tree)
+            result['recent'] = {'tree': recent_tree, 'total': recent_total}
+
+            # ---- 今日任务 ----
+            if show_done:
+                today_todos = svc.get_all_including_done(
+                    sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                    page=0, page_size=PAGE_SIZE,
+                )
+                today_total = svc.count_filtered_including_done()
+            else:
+                today_todos = svc.get_all(
+                    status=STATUS_TODO, sort_rules=sort_rules,
+                    page=0, page_size=PAGE_SIZE,
+                )
+                today_total = svc.count_filtered(status=STATUS_TODO)
+            today_tree = self._build_tree(today_todos, truncate_desc=True)
+            self._mark_done(today_tree, done_at_bottom=done_at_bottom)
+            result['today'] = {'tree': today_tree, 'total': today_total}
+
+            # ---- 重要任务 ----
+            due_start, due_end = p.get('imp_due_start'), p.get('imp_due_end')
+            important_todos = svc.get_high_priority(
+                page=0, page_size=PAGE_SIZE,
+                due_start=due_start, due_end=due_end,
+            )
+            important_total = svc.count_high_priority(
+                due_start=due_start, due_end=due_end,
+            )
+            important_tree = self._build_tree(important_todos, truncate_desc=True)
+            self._mark_done(important_tree)
+            result['important'] = {'tree': important_tree, 'total': important_total}
+
+            # ---- 已完成/已归档 ----
+            done_filter = p.get('done_filter', 'done')
+            if done_filter == 'archived':
+                done_todos = svc.get_all(status=STATUS_ARCHIVED, page=0, page_size=PAGE_SIZE)
+                done_total = svc.count_filtered(status=STATUS_ARCHIVED)
+            else:
+                done_todos = svc.get_all(status=STATUS_DONE, page=0, page_size=PAGE_SIZE)
+                done_total = svc.count_filtered(status=STATUS_DONE)
+            done_tree = self._build_tree(done_todos, truncate_desc=True)
+            self._mark_done(done_tree)
+            result['done'] = {'tree': done_tree, 'total': done_total}
+
+            # ---- 分类视图 ----
+            cat_results = {}
+            for cat_id, due_start, due_end in p.get('categories', []):
+                cat_todos = svc.get_by_category(
+                    cat_id, page=0, page_size=PAGE_SIZE,
+                    due_start=due_start, due_end=due_end,
+                )
+                cat_total = svc.count_by_category(
+                    cat_id, due_start=due_start, due_end=due_end,
+                )
+                cat_tree = self._build_tree(cat_todos, truncate_desc=True)
+                self._mark_done(cat_tree)
+                cat_results[cat_id] = {'tree': cat_tree, 'total': cat_total}
+            result['categories'] = cat_results
+
+            self._signals.done.emit(result)
+        except Exception:
+            self._signals.done.emit({})
+        finally:
+            svc.close()
 
 
 class ConfirmDialog(MessageBoxBase):
@@ -78,6 +236,7 @@ class MainWindow(FluentWindow):
 
         # 分类导航项缓存 {category_id: (interface, navigation_widget)}
         self._category_nav_items: dict[int, tuple] = {}
+        self._last_system_view_order = list(settings.system_view_order)
 
         self._setup_ui()
         self._setup_navigation()
@@ -90,12 +249,12 @@ class MainWindow(FluentWindow):
         # 启动时处理自动延期
         self.todo_service.process_auto_postpone()
 
-        # 跨天检测：零点定时器 + 窗口激活时日期变化检测（应对休眠跨天）
-        self._last_date = date.today()
-        self._postpone_timer = QTimer(self)
-        self._postpone_timer.setSingleShot(True)
-        self._postpone_timer.timeout.connect(self._auto_postpone_tick)
-        self._schedule_postpone_timer()
+        # 跨天检测：5分钟轮询 + changeEvent 兜底休眠恢复
+        self._last_refresh_date = date.today()  # 启动时已执行 process_auto_postpone
+        self._daily_check_timer = QTimer(self)
+        self._daily_check_timer.setInterval(300_000)  # 5分钟
+        self._daily_check_timer.timeout.connect(self._check_daily_refresh)
+        self._daily_check_timer.start()
 
         self._load_todos()
 
@@ -244,7 +403,7 @@ class MainWindow(FluentWindow):
         return None
 
     def _tray_activated(self, reason):
-        """托盘图标激活（双击显示窗口）"""
+        """托盘图标激活"""
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self._tray_show()
 
@@ -299,6 +458,16 @@ class MainWindow(FluentWindow):
         self.done_view.filter_changed.connect(self._on_done_filter_changed)
         self.done_view.archive_all_clicked.connect(self._archive_all_done)
 
+        self.todo_list_view.set_time_filter_visible(True)
+        self.important_view.set_time_filter_visible(True)
+        self.recent_view.set_time_filter_visible(True)
+
+        for key, view in view_map.items():
+            if key not in ("done", "today"):
+                view.time_filter_changed.connect(
+                    lambda fk, k=key: self._on_time_filter_changed(k, fk)
+                )
+
         # 浮窗点击完成待办
         self.floating.todo_toggled.connect(self._toggle_todo_done)
 
@@ -311,6 +480,7 @@ class MainWindow(FluentWindow):
         self.settings_page.sort_rule_changed.connect(self._on_sort_rule_changed)
         self.settings_page.done_at_bottom_changed.connect(self._on_done_at_bottom_changed)
         self.settings_page.floating_top_changed.connect(self._on_floating_top_changed)
+        self.settings_page.manual_refresh_clicked.connect(self._manual_refresh)
         self.settings_page.export_btn.clicked.connect(self._export_data)
         self.settings_page.import_btn.clicked.connect(self._import_data)
         self.settings_page.categories_changed.connect(self._on_categories_changed)
@@ -446,33 +616,50 @@ class MainWindow(FluentWindow):
             self.floating.refresh_theme()
             self.floating.show()
 
-    def _schedule_postpone_timer(self):
-        """计算距离下一个零点的毫秒数，设置单次定时器"""
-        from datetime import datetime, timedelta
-        now = datetime.now()
-        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        interval_ms = int((tomorrow - now).total_seconds() * 1000)
-        self._postpone_timer.start(interval_ms)
+    def _check_daily_refresh(self):
+        """检测是否跨天，跨天则执行自动延期 + 刷新列表"""
+        if date.today() != self._last_refresh_date:
+            self._run_daily_refresh()
 
-    def _auto_postpone_tick(self):
-        """定时检查自动延期"""
-        self._last_date = date.today()
-        self.todo_service.process_auto_postpone()
-        self._load_todos()
-        # 重新调度到下一个零点
-        self._schedule_postpone_timer()
+    def _run_daily_refresh(self):
+        """执行每日维护：自动延期 + 刷新列表（后台线程）"""
+        self._last_refresh_date = date.today()
+        self._start_postpone_worker()
+
+    def _manual_refresh(self):
+        """手动刷新：执行自动延期 + 刷新列表，不影响跨天检测"""
+        self._start_postpone_worker()
+
+    def _start_postpone_worker(self):
+        """启动后台 worker 执行 auto-postpone 并刷新 UI"""
+        class _RefreshWorker(QRunnable):
+            def __init__(self, callback):
+                super().__init__()
+                self._signals = _LoadTodosSignals()
+                self._signals.done.connect(callback)
+                self.setAutoDelete(True)
+
+            def run(self):
+                from services.todo_service import TodoService
+                svc = TodoService()
+                try:
+                    svc.process_auto_postpone()
+                finally:
+                    svc.close()
+                self._signals.done.emit({})
+
+        def _on_done():
+            self.todo_service.reset_session()
+            self._load_todos()
+
+        worker = _RefreshWorker(_on_done)
+        QThreadPool.globalInstance().start(worker)
 
     def changeEvent(self, event):
-        """窗口激活时检测日期变化，应对系统休眠跨天"""
+        """窗口激活时检测跨天，应对系统休眠"""
         super().changeEvent(event)
         if event.type() == event.Type.ActivationChange and self.isActiveWindow():
-            today = date.today()
-            if today != self._last_date:
-                self._last_date = today
-                self._postpone_timer.stop()
-                self.todo_service.process_auto_postpone()
-                self._load_todos()
-                self._schedule_postpone_timer()
+            self._check_daily_refresh()
 
     def _build_todo_tree(self, todos: list, truncate_desc: bool = False) -> list[dict]:
         """在内存中构建任务树形结构"""
@@ -527,7 +714,14 @@ class MainWindow(FluentWindow):
         return tree
 
     def _load_todos(self):
-        """加载待办数据（先展示骨架，再异步加载真实数据）"""
+        """加载待办数据（后台线程查询，避免阻塞 UI）"""
+        if getattr(self, '_load_in_progress', False):
+            self._pending_load = True
+            return
+
+        self._load_in_progress = True
+        self._pending_load = False
+
         self.todo_list_view.show_loading()
         self.today_view.show_loading()
         self.important_view.show_loading()
@@ -536,174 +730,119 @@ class MainWindow(FluentWindow):
         for cat_id, (view, _) in self._category_nav_items.items():
             view.show_loading()
 
-        QTimer.singleShot(0, self._do_load_todos)
+        # 在主线程中收集查询参数（访问 UI 组件）
+        params = self._collect_load_params()
+        worker = _LoadTodosWorker(params)
+        worker.signals.done.connect(self._on_todos_loaded)
+        QThreadPool.globalInstance().start(worker)
 
-    def _do_load_todos(self):
-        """实际加载数据"""
-        PAGE_SIZE = 100
-        sort_rules = settings.sort_rules
-        done_at_bottom = settings.done_at_bottom
+    def _collect_load_params(self):
+        """收集查询参数（在主线程中调用，访问 UI 组件）"""
+        all_filter = self.todo_list_view.current_time_filter()
+        recent_filter = self.recent_view.current_time_filter()
+        imp_filter = self.important_view.current_time_filter()
 
-        # ---- 全部任务 ----
-        if settings.show_done_tasks:
-            todos = self.todo_service.get_all_including_done(
-                sort_rules=sort_rules, done_at_bottom=done_at_bottom,
-                page=0, page_size=PAGE_SIZE,
-            )
-            total = self.todo_service.count_filtered_including_done()
-        else:
-            todos = self.todo_service.get_all(
-                status=STATUS_TODO, sort_rules=sort_rules,
-                page=0, page_size=PAGE_SIZE,
-            )
-            total = self.todo_service.count_filtered(status=STATUS_TODO)
-        tree = self._build_todo_tree(todos, truncate_desc=True)
-        self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
-        self.todo_list_view.set_todos(tree, total_count=total)
+        all_due_start, all_due_end = self._get_date_range(all_filter)
+        recent_due_start, recent_due_end = self._get_date_range(recent_filter)
+        imp_due_start, imp_due_end = self._get_date_range(imp_filter)
 
-        # ---- 最近待办 ----
-        recent_todos = self.todo_service.get_all_including_done(
-            sort_rules=sort_rules, done_at_bottom=False,
-            page=0, page_size=PAGE_SIZE,
-        )
-        recent_total = self.todo_service.count_filtered_including_done()
-        recent_tree = self._build_todo_tree(recent_todos, truncate_desc=True)
-        self._inject_completed_dates(recent_tree)
-        self.recent_view.set_todos(recent_tree, total_count=recent_total)
-
-        # ---- 今日任务 ----
-        if settings.show_done_tasks:
-            today_todos = self.todo_service.get_all_including_done(
-                sort_rules=sort_rules, done_at_bottom=done_at_bottom,
-                page=0, page_size=PAGE_SIZE,
-            )
-            today_total = self.todo_service.count_filtered_including_done()
-        else:
-            today_todos = self.todo_service.get_all(
-                status=STATUS_TODO, sort_rules=sort_rules,
-                page=0, page_size=PAGE_SIZE,
-            )
-            today_total = self.todo_service.count_filtered(status=STATUS_TODO)
-        today_tree = self._build_todo_tree(today_todos, truncate_desc=True)
-        self._inject_completed_dates(today_tree, done_at_bottom=done_at_bottom)
-        self.today_view._filter_date = date.today()
-        self.today_view.week_view.set_selected_date(date.today())
-        self.today_view.set_todos(today_tree, total_count=today_total)
-
-        # ---- 重要任务 ----
-        important_todos = self.todo_service.get_high_priority(
-            page=0, page_size=PAGE_SIZE,
-        )
-        important_total = self.todo_service.count_high_priority()
-        important_tree = self._build_todo_tree(important_todos, truncate_desc=True)
-        self._inject_completed_dates(important_tree)
-        self.important_view.set_todos(important_tree, total_count=important_total)
-
-        # ---- 已完成/已归档 ----
-        self._done_filter = getattr(self, '_done_filter', 'done')
-        if self._done_filter == 'archived':
-            done_todos = self.todo_service.get_all(
-                status=STATUS_ARCHIVED, page=0, page_size=PAGE_SIZE,
-            )
-            done_total = self.todo_service.count_filtered(status=STATUS_ARCHIVED)
-        else:
-            done_todos = self.todo_service.get_all(
-                status=STATUS_DONE, page=0, page_size=PAGE_SIZE,
-            )
-            done_total = self.todo_service.count_filtered(status=STATUS_DONE)
-        done_tree = self._build_todo_tree(done_todos, truncate_desc=True)
-        self._inject_completed_dates(done_tree)
-        self.done_view.set_todos(done_tree, total_count=done_total)
-
-        # ---- 分类视图 ----
+        categories = []
         for cat_id, (view, _) in self._category_nav_items.items():
-            cat_todos = self.todo_service.get_by_category(
-                cat_id, page=0, page_size=PAGE_SIZE,
-            )
-            cat_total = self.todo_service.count_by_category(cat_id)
-            cat_tree = self._build_todo_tree(cat_todos, truncate_desc=True)
-            self._inject_completed_dates(cat_tree)
-            view.set_todos(cat_tree, total_count=cat_total)
+            cat_filter = view.current_time_filter()
+            cat_due_start, cat_due_end = self._get_date_range(cat_filter)
+            categories.append((cat_id, cat_due_start, cat_due_end))
+
+        return {
+            'sort_rules': settings.sort_rules,
+            'done_at_bottom': settings.done_at_bottom,
+            'show_done_tasks': settings.show_done_tasks,
+            'done_filter': getattr(self, '_done_filter', 'done'),
+            'all_due_start': all_due_start,
+            'all_due_end': all_due_end,
+            'recent_due_start': recent_due_start,
+            'recent_due_end': recent_due_end,
+            'imp_due_start': imp_due_start,
+            'imp_due_end': imp_due_end,
+            'categories': categories,
+        }
+
+    def _on_todos_loaded(self, result: dict):
+        """后台线程查询完成，在主线程中更新 UI"""
+        self._load_in_progress = False
+
+        if not result:
+            return
+
+        if 'all' in result:
+            r = result['all']
+            self.todo_list_view.set_todos(r['tree'], total_count=r['total'])
+
+        if 'recent' in result:
+            r = result['recent']
+            self.recent_view.set_todos(r['tree'], total_count=r['total'])
+
+        if 'today' in result:
+            r = result['today']
+            self.today_view._filter_date = date.today()
+            self.today_view.week_view.set_selected_date(date.today())
+            self.today_view.set_todos(r['tree'], total_count=r['total'])
+
+        if 'important' in result:
+            r = result['important']
+            self.important_view.set_todos(r['tree'], total_count=r['total'])
+
+        if 'done' in result:
+            r = result['done']
+            self.done_view.set_todos(r['tree'], total_count=r['total'])
+
+        if 'categories' in result:
+            for cat_id, cat_data in result['categories'].items():
+                if cat_id in self._category_nav_items:
+                    view, _ = self._category_nav_items[cat_id]
+                    view.set_todos(cat_data['tree'], total_count=cat_data['total'])
 
         if self.floating.isVisible():
             self._update_floating_data(self._floating_view_key)
+
+        # 如果在加载期间有新的刷新请求，执行延迟刷新
+        if getattr(self, '_pending_load', False):
+            self._pending_load = False
+            self._load_todos()
 
     def _refresh_all_views(self):
         self._load_todos()
 
     def _on_page_changed(self, view_key: str, page: int, page_size: int):
-        """处理分页切换，仅重新加载对应视图"""
         sort_rules = settings.sort_rules
         done_at_bottom = settings.done_at_bottom
 
-        if view_key == "all":
-            if settings.show_done_tasks:
-                todos = self.todo_service.get_all_including_done(
-                    sort_rules=sort_rules, done_at_bottom=done_at_bottom,
-                    page=page, page_size=page_size,
-                )
+        if view_key in ("done", "today"):
+            if view_key == "today":
+                if settings.show_done_tasks:
+                    todos = self.todo_service.get_all_including_done(
+                        sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                        page=page, page_size=page_size,
+                    )
+                else:
+                    todos = self.todo_service.get_all(
+                        status=STATUS_TODO, sort_rules=sort_rules,
+                        page=page, page_size=page_size,
+                    )
+                tree = self._build_todo_tree(todos, truncate_desc=True)
+                self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
+                self.today_view.set_todos(tree)
             else:
+                done_filter = getattr(self, '_done_filter', 'done')
+                status = STATUS_ARCHIVED if done_filter == 'archived' else STATUS_DONE
                 todos = self.todo_service.get_all(
-                    status=STATUS_TODO, sort_rules=sort_rules,
-                    page=page, page_size=page_size,
-                )
-            tree = self._build_todo_tree(todos, truncate_desc=True)
-            self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
-            self.todo_list_view.set_todos(tree)
-
-        elif view_key == "today":
-            if settings.show_done_tasks:
-                todos = self.todo_service.get_all_including_done(
-                    sort_rules=sort_rules, done_at_bottom=done_at_bottom,
-                    page=page, page_size=page_size,
-                )
-            else:
-                todos = self.todo_service.get_all(
-                    status=STATUS_TODO, sort_rules=sort_rules,
-                    page=page, page_size=page_size,
-                )
-            tree = self._build_todo_tree(todos, truncate_desc=True)
-            self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
-            self.today_view.set_todos(tree)
-
-        elif view_key == "important":
-            todos = self.todo_service.get_high_priority(
-                page=page, page_size=page_size,
-            )
-            tree = self._build_todo_tree(todos, truncate_desc=True)
-            self._inject_completed_dates(tree)
-            self.important_view.set_todos(tree)
-
-        elif view_key == "done":
-            done_filter = getattr(self, '_done_filter', 'done')
-            status = STATUS_ARCHIVED if done_filter == 'archived' else STATUS_DONE
-            todos = self.todo_service.get_all(
-                status=status, page=page, page_size=page_size,
-            )
-            tree = self._build_todo_tree(todos, truncate_desc=True)
-            self._inject_completed_dates(tree)
-            self.done_view.set_todos(tree)
-
-        elif view_key == "recent":
-            recent_todos = self.todo_service.get_all_including_done(
-                sort_rules=sort_rules, done_at_bottom=False,
-                page=page, page_size=page_size,
-            )
-            tree = self._build_todo_tree(recent_todos, truncate_desc=True)
-            self._inject_completed_dates(tree)
-            self.recent_view.set_todos(tree)
-
-        elif view_key.startswith("cat_"):
-            cat_id = int(view_key.split("_")[1])
-            item = self._category_nav_items.get(cat_id)
-            if item:
-                view = item[0]
-                todos = self.todo_service.get_by_category(
-                    cat_id, page=page, page_size=page_size,
+                    status=status, page=page, page_size=page_size,
                 )
                 tree = self._build_todo_tree(todos, truncate_desc=True)
                 self._inject_completed_dates(tree)
-                view.set_todos(tree)
+                self.done_view.set_todos(tree)
+            return
+
+        self._reload_view_with_time_filter(view_key, page=page)
 
     def _open_todo_dialog(self, todo_id: int = None):
         todo_data = None
@@ -829,6 +968,131 @@ class MainWindow(FluentWindow):
         tree = self._build_todo_tree(todos, truncate_desc=True)
         self._inject_completed_dates(tree)
         self.done_view.set_todos(tree, total_count=total)
+
+    @staticmethod
+    def _get_date_range(filter_key: str):
+        if filter_key == "week":
+            today = date.today()
+            weekday = today.weekday()
+            start = today - timedelta(days=weekday)
+            end = start + timedelta(days=6)
+            return start, end
+        elif filter_key == "month":
+            today = date.today()
+            start = today.replace(day=1)
+            if today.month == 12:
+                end = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                end = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
+            return start, end
+        elif filter_key == "year":
+            today = date.today()
+            start = today.replace(month=1, day=1)
+            end = today.replace(month=12, day=31)
+            return start, end
+        return None, None
+
+    def _on_time_filter_changed(self, view_key: str, filter_key: str):
+        self._reload_view_with_time_filter(view_key, page=0)
+
+    def _reload_view_with_time_filter(self, view_key: str, page: int = 0):
+        PAGE_SIZE = 100
+        sort_rules = settings.sort_rules
+        done_at_bottom = settings.done_at_bottom
+
+        if view_key in ("done", "today"):
+            return
+
+        view = self._get_view_by_key(view_key)
+        if not view:
+            return
+
+        filter_key = view.current_time_filter()
+        due_start, due_end = self._get_date_range(filter_key)
+
+        if view_key == "all":
+            if settings.show_done_tasks:
+                todos = self.todo_service.get_all_including_done(
+                    sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                    page=page, page_size=PAGE_SIZE,
+                    due_start=due_start, due_end=due_end,
+                )
+                total = self.todo_service.count_filtered_including_done(
+                    due_start=due_start, due_end=due_end,
+                )
+            else:
+                todos = self.todo_service.get_all(
+                    status=STATUS_TODO, sort_rules=sort_rules,
+                    page=page, page_size=PAGE_SIZE,
+                    due_start=due_start, due_end=due_end,
+                )
+                total = self.todo_service.count_filtered(
+                    status=STATUS_TODO, due_start=due_start, due_end=due_end,
+                )
+            tree = self._build_todo_tree(todos, truncate_desc=True)
+            self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
+            view.set_todos(tree, total_count=total)
+
+        elif view_key == "important":
+            todos = self.todo_service.get_high_priority(
+                page=page, page_size=PAGE_SIZE,
+                due_start=due_start, due_end=due_end,
+            )
+            total = self.todo_service.count_high_priority(
+                due_start=due_start, due_end=due_end,
+            )
+            tree = self._build_todo_tree(todos, truncate_desc=True)
+            self._inject_completed_dates(tree)
+            view.set_todos(tree, total_count=total)
+
+        elif view_key == "recent":
+            recent_todos = self.todo_service.get_all_including_done(
+                sort_rules=sort_rules, done_at_bottom=False,
+                page=page, page_size=PAGE_SIZE,
+                due_start=due_start, due_end=due_end,
+            )
+            recent_total = self.todo_service.count_filtered_including_done(
+                due_start=due_start, due_end=due_end,
+            )
+            recent_tree = self._build_todo_tree(recent_todos, truncate_desc=True)
+            self._inject_completed_dates(recent_tree)
+            view.set_todos(recent_tree, total_count=recent_total)
+
+        elif view_key.startswith("cat_"):
+            cat_id = int(view_key.split("_")[1])
+            item = self._category_nav_items.get(cat_id)
+            if item:
+                cat_view = item[0]
+                cat_filter_key = cat_view.current_time_filter()
+                cat_due_start, cat_due_end = self._get_date_range(cat_filter_key)
+                todos = self.todo_service.get_by_category(
+                    cat_id, page=page, page_size=PAGE_SIZE,
+                    due_start=cat_due_start, due_end=cat_due_end,
+                )
+                total = self.todo_service.count_by_category(
+                    cat_id, due_start=cat_due_start, due_end=cat_due_end,
+                )
+                tree = self._build_todo_tree(todos, truncate_desc=True)
+                self._inject_completed_dates(tree)
+                cat_view.set_todos(tree, total_count=total)
+
+    def _get_view_by_key(self, view_key: str):
+        if view_key == "all":
+            return self.todo_list_view
+        elif view_key == "today":
+            return self.today_view
+        elif view_key == "important":
+            return self.important_view
+        elif view_key == "done":
+            return self.done_view
+        elif view_key == "recent":
+            return self.recent_view
+        elif view_key.startswith("cat_"):
+            cat_id = int(view_key.split("_")[1])
+            item = self._category_nav_items.get(cat_id)
+            if item:
+                return item[0]
+        return None
 
     def _on_card_clicked(self, todo_id: int):
         """父任务卡片点击 - 弹出详情对话框"""
@@ -1025,11 +1289,14 @@ class MainWindow(FluentWindow):
                 self._add_category_nav_item(cat)
 
     def _add_category_nav_item(self, cat):
-        """添加单个分类导航项"""
         view = TodoListView(view_name=cat.name)
         view.setObjectName(f"categoryView_{cat.id}")
+        view.set_time_filter_visible(True)
 
-        self.addSubInterface(view, FluentIcon.BOOK_SHELF, cat.name)
+        self.addSubInterface(view, FluentIcon.BOOK_SHELF, cat.name,
+                             position=NavigationItemPosition.SCROLL)
+
+        cat_key = f"cat_{cat.id}"
 
         # 连接信号
         view.add_clicked.connect(lambda: self._open_todo_dialog())
@@ -1040,14 +1307,21 @@ class MainWindow(FluentWindow):
         view.add_subtask_clicked.connect(self._open_todo_dialog_for_subtask)
         view.card_clicked.connect(self._on_card_clicked)
         view.archive_clicked.connect(self._archive_todo)
-        view.float_clicked.connect(lambda k=f"cat_{cat.id}": self._toggle_floating(k))
-        view.page_changed.connect(lambda page, ps, k=f"cat_{cat.id}": self._on_page_changed(k, page, ps))
+        view.float_clicked.connect(lambda k=cat_key: self._toggle_floating(k))
+        view.page_changed.connect(lambda page, ps, k=cat_key: self._on_page_changed(k, page, ps))
+        view.time_filter_changed.connect(
+            lambda fk, k=cat_key: self._on_time_filter_changed(k, fk)
+        )
 
         # 缓存
         self._category_nav_items[cat.id] = (view, cat.name)
 
     def _on_categories_changed(self):
         """分类变更时刷新导航"""
+        current_order = list(settings.system_view_order)
+        order_changed = self._last_system_view_order != current_order
+        self._last_system_view_order = current_order
+
         for cat_id, (view, _) in list(self._category_nav_items.items()):
             try:
                 self.removeInterface(view)
@@ -1056,39 +1330,48 @@ class MainWindow(FluentWindow):
             view.deleteLater()
         self._category_nav_items.clear()
 
-        order = settings.system_view_order
-        for key in order:
-            if key in self._view_instances:
-                view = self._view_instances[key]
-                if view is None:
-                    continue
-                icon = self._view_map[key]
-                name = self._view_names[key]
+        if order_changed:
+            for key in current_order:
+                if key in self._view_instances:
+                    view = self._view_instances[key]
+                    if view is None:
+                        continue
+                    try:
+                        self.removeInterface(view, isDelete=False)
+                    except Exception:
+                        pass
+
+            if self.settings_page is not None:
                 try:
-                    self.removeInterface(view, isDelete=False)
+                    self.removeInterface(self.settings_page, isDelete=False)
                 except Exception:
                     pass
+
+            QApplication.processEvents()  # 确保 removeInterface 布局变更生效后再 addSubInterface
+
+            for key in current_order:
+                if key in self._view_instances:
+                    view = self._view_instances[key]
+                    if view is None:
+                        continue
+                    icon = self._view_map[key]
+                    name = self._view_names[key]
+                    try:
+                        self.addSubInterface(view, icon, name)
+                    except Exception:
+                        pass
+
+            if self.settings_page is not None:
                 try:
-                    self.addSubInterface(view, icon, name)
+                    self.addSubInterface(
+                        self.settings_page, FluentIcon.SETTING,
+                        "设置",
+                        position=NavigationItemPosition.BOTTOM,
+                    )
                 except Exception:
                     pass
 
         self._setup_category_navigation()
-
-        if self.settings_page is not None:
-            try:
-                self.removeInterface(self.settings_page, isDelete=False)
-            except Exception:
-                pass
-            try:
-                self.addSubInterface(
-                    self.settings_page, FluentIcon.SETTING,
-                    "设置",
-                    position=NavigationItemPosition.BOTTOM,
-                )
-            except Exception:
-                pass
-
         self._refresh_all_views()
 
     def _on_floating_pin_changed(self, pinned: bool):

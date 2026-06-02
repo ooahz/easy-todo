@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QGraphicsDropShadowEffect, QSizePolicy
 )
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter, QPainterPath
 
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ToolButton, FluentIcon, isDarkTheme, StrongBodyLabel, IconWidget, SubtitleLabel,
@@ -318,6 +318,7 @@ class CalendarDialog(QDialog):
     def __init__(self, todos: list[dict], parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumSize(680, 400)
         self.setMaximumSize(1200, 900)
         self.resize(760, 520)
@@ -345,6 +346,19 @@ class CalendarDialog(QDialog):
     def mouseReleaseEvent(self, event):
         """鼠标释放清除位置"""
         self._drag_pos = None
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        dark = isDarkTheme()
+        bg_color = QColor(30, 30, 30) if dark else QColor(250, 250, 250)
+        border_color = QColor(60, 60, 60) if dark else QColor(210, 210, 210)
+        path = QPainterPath()
+        path.addRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 10, 10)
+        painter.fillPath(path, bg_color)
+        painter.setPen(border_color)
+        painter.drawPath(path)
+        super().paintEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -386,7 +400,7 @@ class CalendarDialog(QDialog):
         bg_color = "#1E1E1E" if dark else "#FAFAFA"
         self.setStyleSheet(f"""
             QDialog {{
-                background-color: {bg_color};
+                background-color: transparent;
             }}
             {tooltip_style}
         """)

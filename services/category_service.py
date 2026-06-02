@@ -12,6 +12,14 @@ class CategoryService:
     def __init__(self):
         self.session = db.get_session()
 
+    def reset_session(self):
+        """重置会话，清理 identity map 缓存，防止长期持有导致内存膨胀"""
+        try:
+            self.session.close()
+        except Exception:
+            pass
+        self.session = db.get_session()
+
     def create(self, name: str, color: str = "#0078D4") -> Category:
         """创建分类"""
         # 获取当前最大排序值

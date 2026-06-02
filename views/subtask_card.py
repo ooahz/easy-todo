@@ -49,7 +49,7 @@ def _tooltip_style() -> str:
 
 
 class SubtaskCard(CardWidget):
-    """子任务卡片组件 - 缩进样式，无优先级色条"""
+    """子任务卡片组件"""
 
     edit_clicked = Signal(int)
     delete_clicked = Signal(int)

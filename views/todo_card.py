@@ -64,7 +64,7 @@ def _tooltip_style() -> str:
 
 
 class TodoCard(CardWidget):
-    """待办事项卡片组件（仅用于父任务）"""
+    """待办事项卡片组件"""
 
     card_clicked = Signal(int)
     edit_clicked = Signal(int)
@@ -159,7 +159,7 @@ class TodoCard(CardWidget):
         if due:
             due_date = date.fromisoformat(due)
             today = date.today()
-            if due_date < today:
+            if due_date < today and not self._is_done:
                 info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
             elif due_date == today:
                 info_parts.append("今天")
@@ -168,27 +168,38 @@ class TodoCard(CardWidget):
 
         recurrence = self.todo_data.get("recurrence_type")
         if recurrence:
-            from config.constants import RECURRENCE_TYPES
+            from config.constants import RECURRENCE_TYPES, WEEKDAY_NAMES, parse_recurrence_day
             interval = self.todo_data.get("recurrence_interval", 1)
             recurrence_day = self.todo_data.get("recurrence_day")
+            recurrence_start = self.todo_data.get("recurrence_start_date")
+            recurrence_end = self.todo_data.get("recurrence_end_date")
             type_name = RECURRENCE_TYPES.get(recurrence, "")
             if recurrence == "weekly" and recurrence_day:
-                weekday_names = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日"}
-                day_name = weekday_names.get(recurrence_day, "")
+                days = parse_recurrence_day(recurrence_day)
+                day_names = "".join(WEEKDAY_NAMES.get(d, "") for d in sorted(days))
                 if interval > 1:
-                    info_parts.append(f"每{interval}周周{day_name}")
+                    info_parts.append(f"每{interval}周周{day_names}")
                 else:
-                    info_parts.append(f"每周{day_name}")
+                    info_parts.append(f"每周{day_names}")
             elif recurrence == "monthly" and recurrence_day:
+                day_list = parse_recurrence_day(recurrence_day)
+                day_val = day_list[0] if day_list else ""
                 if interval > 1:
-                    info_parts.append(f"每{interval}月{recurrence_day}号")
+                    info_parts.append(f"每{interval}月{day_val}号")
                 else:
-                    info_parts.append(f"每月{recurrence_day}号")
+                    info_parts.append(f"每月{day_val}号")
             elif interval > 1:
                 unit = {"daily": "天", "weekly": "周", "monthly": "月"}.get(recurrence, "")
                 info_parts.append(f"每{interval}{unit}")
             else:
                 info_parts.append(type_name)
+            # 显示开始-结束日期范围
+            if recurrence_start and recurrence_end:
+                info_parts.append(f"{recurrence_start} ~ {recurrence_end}")
+            elif recurrence_start:
+                info_parts.append(f"从 {recurrence_start}")
+            elif recurrence_end:
+                info_parts.append(f"至 {recurrence_end}")
 
         if info_parts:
             self.info_label = CaptionLabel("  |  ".join(info_parts))

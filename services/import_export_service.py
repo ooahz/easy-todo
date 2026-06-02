@@ -16,7 +16,7 @@ EXPORT_FIELDS_TODO = {
     "title", "description", "priority", "status", "color_tag",
     "due_date", "auto_postpone", "sort_order", "category_name",
     "recurrence_type", "recurrence_interval", "recurrence_day",
-    "recurrence_end_date", "is_recurrence_template",
+    "recurrence_start_date", "recurrence_end_date", "is_recurrence_template",
     "occurrence_date", "is_exception", "completed_at",
 }
 
@@ -409,6 +409,15 @@ class ImportExportService:
                 params["recurrence_end_date"] = None
         elif end_date is not None:
             params["recurrence_end_date"] = end_date
+
+        start_date = node.get("recurrence_start_date")
+        if isinstance(start_date, str) and start_date:
+            try:
+                params["recurrence_start_date"] = date.fromisoformat(start_date)
+            except Exception:
+                params["recurrence_start_date"] = None
+        elif start_date is not None:
+            params["recurrence_start_date"] = start_date
 
         return params
 

@@ -11,7 +11,7 @@ from PySide6.QtGui import QFont
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, Slider, ComboBox, CheckBox,
     PrimaryPushButton, PushButton, FluentIcon, SmoothScrollArea,
-    setTheme, Theme, isDarkTheme, setCustomStyleSheet, IconWidget
+    setTheme, Theme, isDarkTheme, setCustomStyleSheet, IconWidget,
 )
 
 from config.settings import settings
@@ -34,6 +34,7 @@ class SettingsPage(QWidget):
     categories_changed = Signal()
     description_mode_changed = Signal(str)
     dialog_mode_changed = Signal(str)
+    manual_refresh_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,6 +104,10 @@ class SettingsPage(QWidget):
 
         self.list_layout.addWidget(self._make_card("数据", [
             self._make_data_btns(),
+        ]))
+
+        self.list_layout.addWidget(self._make_card("自动刷新", [
+            self._create_manual_refresh_btn(),
         ]))
 
         self.list_layout.addWidget(self._make_card("启动", [
@@ -604,3 +609,18 @@ class SettingsPage(QWidget):
         mode = "default" if index == 0 else "widescreen"
         settings.dialog_mode = mode
         self.dialog_mode_changed.emit(mode)
+
+    def _create_manual_refresh_btn(self) -> QHBoxLayout:
+        """创建手动刷新按钮行"""
+        row = QHBoxLayout()
+        row.setSpacing(12)
+
+        desc_label = BodyLabel("立即执行一次刷新（自动延期 + 刷新列表）")
+        row.addWidget(desc_label)
+        row.addStretch()
+
+        self.manual_refresh_btn = PushButton(FluentIcon.SYNC, "立即刷新")
+        self.manual_refresh_btn.clicked.connect(self.manual_refresh_clicked.emit)
+        row.addWidget(self.manual_refresh_btn)
+
+        return row

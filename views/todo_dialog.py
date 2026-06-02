@@ -4,17 +4,18 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from PySide6.QtCore import Signal, Qt, QDate, QSize
+from PySide6.QtGui import QPainter, QColor, QPainterPath
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame, QWidget, QSizePolicy
 )
 from qfluentwidgets import (
-    LineEdit, TextEdit, ComboBox, CalendarPicker,
+    LineEdit, TextEdit, ComboBox, FastCalendarPicker,
     PrimaryPushButton, PushButton, SubtitleLabel, CheckBox,
     FluentIcon, isDarkTheme, BodyLabel, TransparentToolButton, CompactSpinBox,
     InfoBar, InfoBarPosition, CaptionLabel
 )
 
-from config.constants import PRIORITY_MAP, TODO_COLORS, RECURRENCE_TYPES
+from config.constants import PRIORITY_MAP, TODO_COLORS, RECURRENCE_TYPES, WEEKDAY_LABELS, parse_recurrence_day
 from config.settings import settings
 from services.category_service import CategoryService
 from services.file_service import FileService
@@ -22,7 +23,7 @@ from views.markdown_editor import MarkdownEditor
 
 
 class TodoDialog(QDialog):
-    """新建/编辑待办对话框，支持父任务和子任务"""
+    """新建/编辑待办对话框"""
 
     todo_saved = Signal(dict)
 
@@ -30,6 +31,7 @@ class TodoDialog(QDialog):
                  edit_mode: str = None, template_data: dict = None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self.todo_data = todo_data
         self._is_edit = todo_data is not None
@@ -72,6 +74,19 @@ class TodoDialog(QDialog):
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        dark = isDarkTheme()
+        bg_color = QColor(43, 43, 43) if dark else QColor(249, 249, 249)
+        border_color = QColor(60, 60, 60) if dark else QColor(210, 210, 210)
+        path = QPainterPath()
+        path.addRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 10, 10)
+        painter.fillPath(path, bg_color)
+        painter.setPen(border_color)
+        painter.drawPath(path)
+        super().paintEvent(event)
 
     def closeEvent(self, event):
         if hasattr(self, '_category_service') and self._category_service:
@@ -145,6 +160,7 @@ class TodoDialog(QDialog):
         close_btn.clicked.connect(self.reject)
         top_bar.addWidget(close_btn)
         layout.addLayout(top_bar)
+        layout.addSpacing(6)
 
         divider = QFrame()
         divider.setFixedHeight(1)
@@ -191,6 +207,7 @@ class TodoDialog(QDialog):
         close_btn.clicked.connect(self.reject)
         top_bar.addWidget(close_btn)
         layout.addLayout(top_bar)
+        layout.addSpacing(6)
 
         divider = QFrame()
         divider.setFixedHeight(1)
@@ -248,7 +265,8 @@ class TodoDialog(QDialog):
         due_container_layout.setContentsMargins(0, 0, 0, 0)
         due_container_layout.setSpacing(0)
 
-        self.due_picker = CalendarPicker()
+        self.due_picker = FastCalendarPicker()
+        self.due_picker.setToolTip("选择截止日期")
         if not self._is_edit:
             self.due_picker.setDate(QDate.currentDate())
         else:
@@ -285,6 +303,7 @@ class TodoDialog(QDialog):
         self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
 
         self.recurrence_combo = ComboBox()
+        self.recurrence_combo.setToolTip("任务重复设置")
         self.recurrence_combo.addItem("不重复", userData=None)
         for key, label in RECURRENCE_TYPES.items():
             self.recurrence_combo.addItem(label, userData=key)
@@ -295,12 +314,39 @@ class TodoDialog(QDialog):
         self.recurrence_interval_spin.setVisible(False)
         self.recurrence_interval_spin.setToolTip("重复间隔")
 
+        # 周重复：星期按钮
+        self.weekday_container = QWidget()
+        weekday_layout = QHBoxLayout(self.weekday_container)
+        weekday_layout.setContentsMargins(0, 0, 0, 0)
+        weekday_layout.setSpacing(4)
+        self.weekday_btns: dict[int, QPushButton] = {}
+        for day_num, day_label in WEEKDAY_LABELS.items():
+            btn = QPushButton(day_label[-1])
+            btn.setFixedSize(26, 26)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setProperty("day_num", day_num)
+            weekday_layout.addWidget(btn)
+            self.weekday_btns[day_num] = btn
+        self._apply_weekday_btn_style()
+        self.weekday_container.setVisible(False)
+
+        # 月重复：日期选择
         self.recurrence_day_spin = CompactSpinBox()
-        self.recurrence_day_spin.setRange(1, 7)
+        self.recurrence_day_spin.setRange(1, 31)
         self.recurrence_day_spin.setValue(1)
         self.recurrence_day_spin.setVisible(False)
+        self.recurrence_day_spin.setSuffix(" 号")
 
-        self.recurrence_end_picker = CalendarPicker()
+        self.recurrence_start_picker = FastCalendarPicker()
+        self.recurrence_start_picker.setToolTip("开始日期（不早于今日）")
+        self.recurrence_start_picker.setVisible(False)
+        try:
+            self.recurrence_start_picker.setText("开始日期")
+        except Exception:
+            pass
+
+        self.recurrence_end_picker = FastCalendarPicker()
         self.recurrence_end_picker.setToolTip("结束日期（不早于今日，不超过一年）")
         self.recurrence_end_picker.setVisible(False)
         try:
@@ -379,10 +425,24 @@ class TodoDialog(QDialog):
         recurrence_row.addWidget(self.recurrence_interval_spin)
         self.recurrence_day_spin.setFixedWidth(80)
         recurrence_row.addWidget(self.recurrence_day_spin)
-        self.recurrence_end_picker.setFixedWidth(130)
-        recurrence_row.addWidget(self.recurrence_end_picker)
         recurrence_row.addStretch()
         layout.addLayout(recurrence_row)
+
+        # 周几选择行
+        self.recurrence_day_row = QHBoxLayout()
+        self.recurrence_day_row.setSpacing(10)
+        self.recurrence_day_row.addWidget(self.weekday_container)
+        self.recurrence_day_row.addStretch()
+        layout.addLayout(self.recurrence_day_row)
+
+        recurrence_date_row = QHBoxLayout()
+        recurrence_date_row.setSpacing(10)
+        self.recurrence_start_picker.setFixedWidth(130)
+        recurrence_date_row.addWidget(self.recurrence_start_picker)
+        self.recurrence_end_picker.setFixedWidth(130)
+        recurrence_date_row.addWidget(self.recurrence_end_picker)
+        recurrence_date_row.addStretch()
+        layout.addLayout(recurrence_date_row)
 
         layout.addWidget(self.recurrence_instance_label)
 
@@ -408,9 +468,9 @@ class TodoDialog(QDialog):
         layout.addWidget(category_label)
         layout.addWidget(self.category_combo)
 
-        due_label = CaptionLabel("截止日期")
-        due_label.setStyleSheet(lbl_style)
-        layout.addWidget(due_label)
+        self.due_label = CaptionLabel("截止日期")
+        self.due_label.setStyleSheet(lbl_style)
+        layout.addWidget(self.due_label)
         layout.addWidget(self.due_container)
         layout.addWidget(self.auto_postpone_cb)
 
@@ -423,9 +483,21 @@ class TodoDialog(QDialog):
         recurrence_label.setStyleSheet(lbl_style)
         layout.addWidget(recurrence_label)
         layout.addWidget(self.recurrence_combo)
-        layout.addWidget(self.recurrence_interval_spin)
-        layout.addWidget(self.recurrence_day_spin)
-        layout.addWidget(self.recurrence_end_picker)
+        recurrence_spin_row = QHBoxLayout()
+        recurrence_spin_row.setSpacing(6)
+        self.recurrence_interval_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        recurrence_spin_row.addWidget(self.recurrence_interval_spin, 1)
+        self.recurrence_day_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        recurrence_spin_row.addWidget(self.recurrence_day_spin, 1)
+        layout.addLayout(recurrence_spin_row)
+        layout.addWidget(self.weekday_container)
+        recurrence_date_row = QHBoxLayout()
+        recurrence_date_row.setSpacing(6)
+        self.recurrence_start_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.recurrence_end_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        recurrence_date_row.addWidget(self.recurrence_start_picker, 1)
+        recurrence_date_row.addWidget(self.recurrence_end_picker, 1)
+        layout.addLayout(recurrence_date_row)
         layout.addWidget(self.recurrence_instance_label)
 
         sep2 = QFrame()
@@ -501,6 +573,7 @@ class TodoDialog(QDialog):
 
     def _on_recurrence_changed(self, index: int):
         show = index > 0
+        self.recurrence_start_picker.setVisible(show)
         self.recurrence_end_picker.setVisible(show)
 
         recurrence_type = self.recurrence_combo.currentData()
@@ -508,14 +581,11 @@ class TodoDialog(QDialog):
         is_monthly = recurrence_type == "monthly"
 
         self.recurrence_interval_spin.setVisible(show)
-        self.recurrence_day_spin.setVisible(show and (is_weekly or is_monthly))
 
-        if is_weekly:
-            self.recurrence_day_spin.setRange(1, 7)
-            self.recurrence_day_spin.setPrefix("周 ")
-            self.recurrence_day_spin.setSuffix("")
-            self.recurrence_day_spin.setValue(1)
-        elif is_monthly:
+        self.weekday_container.setVisible(show and is_weekly)
+        self.recurrence_day_spin.setVisible(show and is_monthly)
+
+        if is_monthly:
             self.recurrence_day_spin.setRange(1, 31)
             self.recurrence_day_spin.setPrefix("")
             self.recurrence_day_spin.setSuffix(" 号")
@@ -523,6 +593,8 @@ class TodoDialog(QDialog):
 
         self.due_container.setVisible(not show)
         self.auto_postpone_cb.setVisible(not show)
+        if hasattr(self, 'due_label'):
+            self.due_label.setVisible(not show)
 
     def _on_clear_due_date(self):
         self.due_picker.setDate(QDate())
@@ -530,6 +602,66 @@ class TodoDialog(QDialog):
             self.due_picker.setText("截止日期")
         except Exception:
             pass
+
+    def _get_weekday_value(self) -> str | None:
+        """获取选中的星期几，返回逗号分隔字符串如 '1,3,5'，未选返回 None"""
+        selected = [str(n) for n, btn in self.weekday_btns.items() if btn.isChecked()]
+        return ",".join(selected) if selected else None
+
+    def _set_weekday_value(self, value):
+        """设置星期几按钮，value 可以是 int、str 或 None"""
+        days = parse_recurrence_day(value)
+        for n, btn in self.weekday_btns.items():
+            btn.setChecked(n in days)
+
+    def _apply_weekday_btn_style(self):
+        """应用星期按钮样式"""
+        dark = isDarkTheme()
+        for btn in self.weekday_btns.values():
+            if dark:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #3C3C3C;
+                        color: #CCC;
+                        border: 1px solid #555;
+                        border-radius: 13px;
+                        font-size: 12px;
+                        font-weight: bold;
+                    }
+                    QPushButton:checked {
+                        background-color: #0078D4;
+                        color: #FFF;
+                        border: 1px solid #0078D4;
+                    }
+                    QPushButton:hover {
+                        border: 1px solid #888;
+                    }
+                    QPushButton:checked:hover {
+                        border: 1px solid #006CBD;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #F5F5F5;
+                        color: #666;
+                        border: 1px solid #DDD;
+                        border-radius: 13px;
+                        font-size: 12px;
+                        font-weight: bold;
+                    }
+                    QPushButton:checked {
+                        background-color: #0078D4;
+                        color: #FFF;
+                        border: 1px solid #0078D4;
+                    }
+                    QPushButton:hover {
+                        border: 1px solid #BBB;
+                    }
+                    QPushButton:checked:hover {
+                        border: 1px solid #006CBD;
+                    }
+                """)
 
     def _on_color_clicked(self, color: str, btn: QPushButton):
         if self._selected_color == color:
@@ -646,8 +778,23 @@ class TodoDialog(QDialog):
                                 break
                         self.recurrence_interval_spin.setValue(tpl.get("recurrence_interval", 1))
                         r_day = tpl.get("recurrence_day")
+                        r_type = tpl.get("recurrence_type")
                         if r_day:
-                            self.recurrence_day_spin.setValue(r_day)
+                            if r_type == "weekly":
+                                self._set_weekday_value(r_day)
+                            else:
+                                self.recurrence_day_spin.setValue(int(parse_recurrence_day(r_day)[0]) if parse_recurrence_day(r_day) else 1)
+                        start_str = tpl.get("recurrence_start_date")
+                        if start_str:
+                            try:
+                                from PySide6.QtCore import QDate
+                                if isinstance(start_str, str):
+                                    pyd = date.fromisoformat(start_str)
+                                    self.recurrence_start_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
+                                else:
+                                    self.recurrence_start_picker.setDate(QDate(start_str.year, start_str.month, start_str.day))
+                            except Exception:
+                                pass
                         end_str = tpl.get("recurrence_end_date")
                         if end_str:
                             try:
@@ -664,7 +811,9 @@ class TodoDialog(QDialog):
                 self.auto_postpone_cb.setVisible(False)
                 self.recurrence_combo.setVisible(False)
                 self.recurrence_interval_spin.setVisible(False)
+                self.weekday_container.setVisible(False)
                 self.recurrence_day_spin.setVisible(False)
+                self.recurrence_start_picker.setVisible(False)
                 self.recurrence_end_picker.setVisible(False)
                 self.recurrence_instance_label.setVisible(True)
             else:
@@ -677,7 +826,21 @@ class TodoDialog(QDialog):
                     self.recurrence_interval_spin.setValue(data.get("recurrence_interval", 1))
                     recurrence_day = data.get("recurrence_day")
                     if recurrence_day:
-                        self.recurrence_day_spin.setValue(recurrence_day)
+                        if recurrence_type == "weekly":
+                            self._set_weekday_value(recurrence_day)
+                        else:
+                            self.recurrence_day_spin.setValue(int(parse_recurrence_day(recurrence_day)[0]) if parse_recurrence_day(recurrence_day) else 1)
+                    start_str = data.get("recurrence_start_date")
+                    if start_str:
+                        try:
+                            from PySide6.QtCore import QDate
+                            if isinstance(start_str, str):
+                                pyd = date.fromisoformat(start_str)
+                                self.recurrence_start_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
+                            else:
+                                self.recurrence_start_picker.setDate(QDate(start_str.year, start_str.month, start_str.day))
+                        except Exception:
+                            pass
                     end_str = data.get("recurrence_end_date")
                     if end_str:
                         try:
@@ -735,10 +898,21 @@ class TodoDialog(QDialog):
                 data["recurrence_interval"] = self.recurrence_interval_spin.value() if hasattr(self,
                                                                                                'recurrence_interval_spin') else 1
                 recurrence_type = data.get("recurrence_type")
-                if recurrence_type in ("weekly", "monthly") and hasattr(self, 'recurrence_day_spin'):
-                    data["recurrence_day"] = self.recurrence_day_spin.value()
+                if recurrence_type == "weekly" and hasattr(self, 'weekday_btns'):
+                    data["recurrence_day"] = self._get_weekday_value()
+                elif recurrence_type == "monthly" and hasattr(self, 'recurrence_day_spin'):
+                    data["recurrence_day"] = str(self.recurrence_day_spin.value())
                 else:
                     data["recurrence_day"] = None
+                recurrence_start = None
+                if hasattr(self, 'recurrence_start_picker') and data.get("recurrence_type"):
+                    try:
+                        qdate = self.recurrence_start_picker.date
+                        if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                            recurrence_start = date(qdate.year(), qdate.month(), qdate.day())
+                    except Exception:
+                        pass
+                data["recurrence_start_date"] = recurrence_start
                 recurrence_end = None
                 if hasattr(self, 'recurrence_end_picker') and data.get("recurrence_type"):
                     try:
@@ -748,6 +922,12 @@ class TodoDialog(QDialog):
                     except Exception:
                         pass
                 data["recurrence_end_date"] = recurrence_end
+                if recurrence_start is not None:
+                    today = date.today()
+                    if recurrence_start < today:
+                        InfoBar.error(title="日期无效", content="开始日期不能早于今日", parent=self,
+                                      position=InfoBarPosition.TOP, duration=3000)
+                        return
                 if recurrence_end is not None:
                     today = date.today()
                     max_end = today + timedelta(days=365)
@@ -759,6 +939,15 @@ class TodoDialog(QDialog):
                         InfoBar.error(title="日期无效", content="结束日期不能超过一年", parent=self,
                                       position=InfoBarPosition.TOP, duration=3000)
                         return
+                if recurrence_start and recurrence_end and recurrence_start > recurrence_end:
+                    InfoBar.error(title="日期无效", content="开始日期不能晚于结束日期", parent=self,
+                                  position=InfoBarPosition.TOP, duration=3000)
+                    return
+                # 周重复必须至少选择一天
+                if recurrence_type == "weekly" and not data.get("recurrence_day"):
+                    InfoBar.error(title="设置无效", content="周重复至少需要选择一天", parent=self,
+                                  position=InfoBarPosition.TOP, duration=3000)
+                    return
             elif is_instance:
                 data["edit_mode"] = "this"
             elif not is_instance:
@@ -767,13 +956,24 @@ class TodoDialog(QDialog):
                 data["recurrence_interval"] = self.recurrence_interval_spin.value() if hasattr(self,
                                                                                                'recurrence_interval_spin') else 1
                 recurrence_type = data.get("recurrence_type")
-                if recurrence_type in ("weekly", "monthly") and hasattr(self, 'recurrence_day_spin'):
-                    data["recurrence_day"] = self.recurrence_day_spin.value()
+                if recurrence_type == "weekly" and hasattr(self, 'weekday_btns'):
+                    data["recurrence_day"] = self._get_weekday_value()
+                elif recurrence_type == "monthly" and hasattr(self, 'recurrence_day_spin'):
+                    data["recurrence_day"] = str(self.recurrence_day_spin.value())
                 else:
                     data["recurrence_day"] = None
 
                 if recurrence_type:
                     data["auto_postpone"] = False
+                recurrence_start = None
+                if hasattr(self, 'recurrence_start_picker') and data.get("recurrence_type"):
+                    try:
+                        qdate = self.recurrence_start_picker.date
+                        if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                            recurrence_start = date(qdate.year(), qdate.month(), qdate.day())
+                    except Exception:
+                        pass
+                data["recurrence_start_date"] = recurrence_start
                 recurrence_end = None
                 if hasattr(self, 'recurrence_end_picker') and data.get("recurrence_type"):
                     try:
@@ -783,6 +983,12 @@ class TodoDialog(QDialog):
                     except Exception:
                         pass
                 data["recurrence_end_date"] = recurrence_end
+                if recurrence_start is not None:
+                    today = date.today()
+                    if recurrence_start < today:
+                        InfoBar.error(title="日期无效", content="开始日期不能早于今日", parent=self,
+                                      position=InfoBarPosition.TOP, duration=3000)
+                        return
                 if recurrence_end is not None:
                     today = date.today()
                     max_end = today + timedelta(days=365)
@@ -794,6 +1000,15 @@ class TodoDialog(QDialog):
                         InfoBar.error(title="日期无效", content="结束日期不能超过一年", parent=self,
                                       position=InfoBarPosition.TOP, duration=3000)
                         return
+                if recurrence_start and recurrence_end and recurrence_start > recurrence_end:
+                    InfoBar.error(title="日期无效", content="开始日期不能晚于结束日期", parent=self,
+                                  position=InfoBarPosition.TOP, duration=3000)
+                    return
+                # 周重复必须至少选择一天
+                if recurrence_type == "weekly" and not data.get("recurrence_day"):
+                    InfoBar.error(title="设置无效", content="周重复至少需要选择一天", parent=self,
+                                  position=InfoBarPosition.TOP, duration=3000)
+                    return
         else:
             data["pid"] = self._pid
 
@@ -856,12 +1071,13 @@ class TodoDialog(QDialog):
         self.move(x, y)
         self.title_edit.setFocus()
         self.title_edit.setStyleSheet("")
+        self._apply_weekday_btn_style()
 
         dark = isDarkTheme()
         if dark:
             base_style = """
                 QDialog {
-                    background-color: rgb(43, 43, 43);
+                    background-color: transparent;
                 }
                 SubtitleLabel { color: #EEE; }
                 QLabel { color: #DDD; }
@@ -884,7 +1100,7 @@ class TodoDialog(QDialog):
         else:
             base_style = """
                 QDialog {
-                    background-color: rgb(249, 249, 249);
+                    background-color: transparent;
                 }
                 SubtitleLabel { color: #111; }
                 QLabel { color: #333; }

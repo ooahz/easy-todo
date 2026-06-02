@@ -1,4 +1,5 @@
 """应用常量定义"""
+from __future__ import annotations
 
 # 优先级
 PRIORITY_NONE = 0
@@ -49,6 +50,31 @@ RECURRENCE_TYPES = {
     "weekly": "每周",
     "monthly": "每月",
 }
+
+# 星期名称映射（1=周一, 7=周日）
+WEEKDAY_NAMES = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日"}
+WEEKDAY_LABELS = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
+
+
+def parse_recurrence_day(value) -> list[int]:
+    """解析 recurrence_day 字段为整数列表
+
+    兼容旧数据（int）和新数据（逗号分隔字符串），返回 [1,3,5] 形式的列表。
+    """
+    if value is None:
+        return []
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.split(",") if p.strip()]
+        result = []
+        for p in parts:
+            try:
+                result.append(int(p))
+            except ValueError:
+                pass
+        return result
+    return []
 
 # 应用信息
 APP_NAME = "Easy Todo"
