@@ -76,6 +76,7 @@ class Database:
         self._migrate_add_recurrence_template()
         self._migrate_add_completed_at()
         self._migrate_add_recurrence_start_date()
+        self._migrate_add_start_date()
         self._init_default_categories()
         self._migrate_add_indexes()
 
@@ -187,6 +188,17 @@ class Database:
         if "recurrence_start_date" not in columns:
             with self.engine.connect() as conn:
                 conn.execute(text("ALTER TABLE todos ADD COLUMN recurrence_start_date DATE"))
+                conn.commit()
+
+    def _migrate_add_start_date(self):
+        """迁移：为 todos 表添加 start_date 列"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        if "start_date" not in columns:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN start_date DATE"))
                 conn.commit()
 
     def _init_default_categories(self):

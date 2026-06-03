@@ -557,15 +557,11 @@ class FloatingWidget(QWidget):
             edge = self._resize_edge
 
             if edge & 1:   # 上
-                new_top = geo.top() + delta.y()
-                if self.height() - delta.y() >= self.MIN_HEIGHT:
-                    geo.setTop(new_top)
+                geo.setTop(geo.top() + delta.y())
             if edge & 2:   # 下
                 geo.setBottom(geo.bottom() + delta.y())
             if edge & 4:   # 左
-                new_left = geo.left() + delta.x()
-                if self.width() - delta.x() >= self.MIN_WIDTH:
-                    geo.setLeft(new_left)
+                geo.setLeft(geo.left() + delta.x())
             if edge & 8:   # 右
                 geo.setRight(geo.right() + delta.x())
 
@@ -580,6 +576,19 @@ class FloatingWidget(QWidget):
                     geo.setTop(geo.bottom() - self.MIN_HEIGHT)
                 else:
                     geo.setBottom(geo.top() + self.MIN_HEIGHT)
+
+            # 强制最大尺寸
+            max_w, max_h = 800, 1200
+            if geo.width() > max_w:
+                if edge & 4:
+                    geo.setLeft(geo.right() - max_w)
+                else:
+                    geo.setRight(geo.left() + max_w)
+            if geo.height() > max_h:
+                if edge & 1:
+                    geo.setTop(geo.bottom() - max_h)
+                else:
+                    geo.setBottom(geo.top() + max_h)
 
             self.setGeometry(geo)
             return

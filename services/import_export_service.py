@@ -14,7 +14,7 @@ EXPORT_VERSION = "2.0"
 
 EXPORT_FIELDS_TODO = {
     "title", "description", "priority", "status", "color_tag",
-    "due_date", "auto_postpone", "sort_order", "category_name",
+    "start_date", "due_date", "auto_postpone", "sort_order", "category_name",
     "recurrence_type", "recurrence_interval", "recurrence_day",
     "recurrence_start_date", "recurrence_end_date", "is_recurrence_template",
     "occurrence_date", "is_exception", "completed_at",
@@ -27,7 +27,7 @@ EXPORT_FIELDS_CHILD = {
 
 EXPORT_FIELDS_INSTANCE = {
     "title", "description", "priority", "status", "color_tag",
-    "due_date", "sort_order", "category_name",
+    "start_date", "due_date", "sort_order", "category_name",
     "occurrence_date", "is_exception", "completed_at",
 }
 
@@ -401,6 +401,15 @@ class ImportExportService:
         elif due is not None:
             params["due_date"] = due
 
+        start = node.get("start_date")
+        if isinstance(start, str) and start:
+            try:
+                params["start_date"] = date.fromisoformat(start)
+            except Exception:
+                params["start_date"] = None
+        elif start is not None:
+            params["start_date"] = start
+
         end_date = node.get("recurrence_end_date")
         if isinstance(end_date, str) and end_date:
             try:
@@ -450,6 +459,15 @@ class ImportExportService:
                 params["due_date"] = None
         elif due is not None:
             params["due_date"] = due
+
+        start = node.get("start_date")
+        if isinstance(start, str) and start:
+            try:
+                params["start_date"] = date.fromisoformat(start)
+            except Exception:
+                params["start_date"] = None
+        elif start is not None:
+            params["start_date"] = start
 
         occ = node.get("occurrence_date")
         if isinstance(occ, str) and occ:

@@ -25,6 +25,7 @@ class Todo(Base):
     priority = Column(Integer, default=0)       # 0=无, 1=低, 2=中, 3=高
     status = Column(Integer, default=0)          # 0=待办, 1=已完成, 2=已归档
     color_tag = Column(String(7), default=None, nullable=True)
+    start_date = Column(Date, nullable=True)  # 起始日期
     due_date = Column(Date, nullable=True)
     auto_postpone = Column(Boolean, default=False)  # 自动延期
     recurrence_type = Column(String(20), default=None, nullable=True)  # daily/weekly/monthly
@@ -77,6 +78,7 @@ class Todo(Base):
             "priority": self.priority,
             "status": self.status,
             "color_tag": self.color_tag,
+            "start_date": self.start_date.isoformat() if self.start_date else None,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "auto_postpone": self.auto_postpone,
             "recurrence_type": self.recurrence_type,
@@ -104,6 +106,7 @@ class Todo(Base):
             "priority": self.priority,
             "status": self.status,
             "color_tag": self.color_tag,
+            "start_date": self.start_date.isoformat() if self.start_date else None,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "auto_postpone": self.auto_postpone,
             "sort_order": self.sort_order,

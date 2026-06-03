@@ -50,6 +50,7 @@ class TodoService:
 
     def create(self, title: str, description: str = "", priority: int = 0,
                color_tag: Optional[str] = None, due_date=None,
+               start_date=None,
                auto_postpone: bool = False, category_id: Optional[int] = None,
                pid: Optional[int] = None,
                recurrence_type: Optional[str] = None,
@@ -61,6 +62,10 @@ class TodoService:
         if due_date is not None and hasattr(due_date, 'year') and not isinstance(due_date, date):
             from datetime import date as pydate
             due_date = pydate(due_date.year(), due_date.month(), due_date.day())
+
+        if start_date is not None and hasattr(start_date, 'year') and not isinstance(start_date, date):
+            from datetime import date as pydate
+            start_date = pydate(start_date.year(), start_date.month(), start_date.day())
 
         if recurrence_end_date is not None and hasattr(recurrence_end_date, 'year') and not isinstance(recurrence_end_date, date):
             from datetime import date as pydate
@@ -84,6 +89,7 @@ class TodoService:
             priority=priority,
             status=STATUS_TODO,
             color_tag=color_tag,
+            start_date=start_date,
             due_date=due_date,
             auto_postpone=auto_postpone,
             sort_order=max_order,
@@ -111,6 +117,11 @@ class TodoService:
             from datetime import date as pydate
             qd = kwargs['due_date']
             kwargs['due_date'] = pydate(qd.year(), qd.month(), qd.day())
+
+        if 'start_date' in kwargs and kwargs['start_date'] is not None and hasattr(kwargs['start_date'], 'year') and not isinstance(kwargs['start_date'], date):
+            from datetime import date as pydate
+            qd = kwargs['start_date']
+            kwargs['start_date'] = pydate(qd.year(), qd.month(), qd.day())
 
         if 'recurrence_end_date' in kwargs and kwargs['recurrence_end_date'] is not None and hasattr(kwargs['recurrence_end_date'], 'year') and not isinstance(kwargs['recurrence_end_date'], date):
             from datetime import date as pydate
@@ -154,6 +165,11 @@ class TodoService:
             from datetime import date as pydate
             qd = kwargs['due_date']
             kwargs['due_date'] = pydate(qd.year(), qd.month(), qd.day())
+
+        if 'start_date' in kwargs and kwargs['start_date'] is not None and hasattr(kwargs['start_date'], 'year') and not isinstance(kwargs['start_date'], date):
+            from datetime import date as pydate
+            qd = kwargs['start_date']
+            kwargs['start_date'] = pydate(qd.year(), qd.month(), qd.day())
 
         if 'recurrence_end_date' in kwargs and kwargs['recurrence_end_date'] is not None and hasattr(kwargs['recurrence_end_date'], 'year') and not isinstance(kwargs['recurrence_end_date'], date):
             from datetime import date as pydate
@@ -696,6 +712,7 @@ class TodoService:
             priority=template.priority,
             status=STATUS_TODO,
             color_tag=template.color_tag,
+            start_date=template.start_date,
             due_date=occurrence_date,
             auto_postpone=False,
             sort_order=template.sort_order,
@@ -877,6 +894,7 @@ class TodoService:
             priority=kwargs.get("priority", old_template.priority),
             status=STATUS_TODO,
             color_tag=kwargs.get("color_tag", old_template.color_tag),
+            start_date=kwargs.get("start_date", old_template.start_date),
             due_date=occ_date,
             auto_postpone=False,
             sort_order=old_template.sort_order,

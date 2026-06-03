@@ -156,15 +156,27 @@ class TodoCard(CardWidget):
         if category:
             info_parts.append(category.get("name", ""))
 
+        start = self.todo_data.get("start_date")
         if due:
             due_date = date.fromisoformat(due)
             today = date.today()
             if due_date < today and not self._is_done:
-                info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
+                if start:
+                    info_parts.append(f'<span style="color:{settings.warning_color}">{start} ~ {due}（已过期）</span>')
+                else:
+                    info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
             elif due_date == today:
-                info_parts.append("今天")
+                if start:
+                    info_parts.append(f"{start} ~ 今天")
+                else:
+                    info_parts.append("今天")
             else:
-                info_parts.append(f"{due}")
+                if start:
+                    info_parts.append(f"{start} ~ {due}")
+                else:
+                    info_parts.append(f"{due}")
+        elif start:
+            info_parts.append(f"从 {start}")
 
         recurrence = self.todo_data.get("recurrence_type")
         if recurrence:

@@ -842,6 +842,12 @@ class TodoDetailDialog(MessageBoxBase):
             layout.addWidget(row)
             self._add_divider(layout, c)
 
+        start = todo.get("start_date")
+        if start:
+            row = InfoRow(FluentIcon.CALENDAR, "起始日期", start)
+            layout.addWidget(row)
+            self._add_divider(layout, c)
+
         due = todo.get("due_date")
         if due:
             try:

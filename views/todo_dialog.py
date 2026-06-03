@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from PySide6.QtCore import Signal, Qt, QDate, QSize
+from PySide6.QtCore import Signal, Qt, QDate, QSize, QPoint, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QPainterPath
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame, QWidget, QSizePolicy
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame, QWidget, QSizePolicy, QGraphicsOpacityEffect, QApplication
 )
 from qfluentwidgets import (
     LineEdit, TextEdit, ComboBox, FastCalendarPicker,
@@ -20,6 +20,271 @@ from config.settings import settings
 from services.category_service import CategoryService
 from services.file_service import FileService
 from views.markdown_editor import MarkdownEditor
+
+
+class DateRangeButton(QPushButton):
+    """日期范围选择按钮，点击后打开抽屉式面板选择开始日期和截止日期"""
+
+    date_changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._start_date = None  # date object or None
+        self._due_date = None    # date object or None
+        self._drawer = None
+
+        self.setText("截止日期")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(33)
+        self.clicked.connect(self._open_drawer)
+
+    def paintEvent(self, event):
+        """自定义绘制，确保与 FastCalendarPicker 风格一致"""
+        dark = isDarkTheme()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        bg = QColor(43, 43, 43) if dark else QColor(255, 255, 255)
+        border = QColor(80, 80, 80) if dark else QColor(209, 209, 209)
+        text_color = QColor(205, 205, 205) if dark else QColor(51, 51, 51)
+
+        # 绘制背景
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 6, 6)
+
+        # 绘制边框
+        painter.setPen(border)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 6, 6)
+
+        # 绘制文字
+        painter.setPen(text_color)
+        font = painter.font()
+        font.setPixelSize(13)
+        painter.setFont(font)
+        text_width = self.width() - 36
+        painter.drawText(12, 0, text_width, self.height(), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+
+        # 绘制右侧日历图标
+        from PySide6.QtGui import QPixmap
+        icon = FluentIcon.CALENDAR.icon()
+        icon_color = QColor(160, 160, 160) if dark else QColor(136, 136, 136)
+        pixmap = icon.pixmap(QSize(14, 14))
+        # 给图标着色
+        colored = QPixmap(pixmap.size())
+        colored.fill(Qt.GlobalColor.transparent)
+        p = QPainter(colored)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        p.drawPixmap(0, 0, pixmap)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        p.fillRect(colored.rect(), icon_color)
+        p.end()
+        painter.drawPixmap(self.width() - 26, (self.height() - 14) // 2, colored)
+
+        painter.end()
+
+    def _update_display(self):
+        """更新按钮显示文本"""
+        if self._start_date and self._due_date:
+            start_str = self._start_date.strftime("%Y-%m-%d") if isinstance(self._start_date, date) else str(self._start_date)
+            due_str = self._due_date.strftime("%Y-%m-%d") if isinstance(self._due_date, date) else str(self._due_date)
+            self.setText(f"{start_str} ~ {due_str}")
+        elif self._due_date:
+            due_str = self._due_date.strftime("%Y-%m-%d") if isinstance(self._due_date, date) else str(self._due_date)
+            self.setText(due_str)
+        elif self._start_date:
+            start_str = self._start_date.strftime("%Y-%m-%d") if isinstance(self._start_date, date) else str(self._start_date)
+            self.setText(f"{start_str} ~ ...")
+        else:
+            self.setText("截止日期")
+
+    def set_start_date(self, d):
+        """设置起始日期 (date object, QDate, or None)"""
+        if d is None:
+            self._start_date = None
+        elif isinstance(d, QDate):
+            self._start_date = date(d.year(), d.month(), d.day()) if d.isValid() else None
+        else:
+            self._start_date = d
+        self._update_display()
+
+    def set_due_date(self, d):
+        """设置截止日期 (date object, QDate, or None)"""
+        if d is None:
+            self._due_date = None
+        elif isinstance(d, QDate):
+            self._due_date = date(d.year(), d.month(), d.day()) if d.isValid() else None
+        else:
+            self._due_date = d
+        self._update_display()
+
+    def get_start_date(self):
+        """返回起始日期的 date 对象或 None"""
+        return self._start_date
+
+    def get_due_date(self):
+        """返回截止日期的 date 对象或 None"""
+        return self._due_date
+
+    def clear_dates(self):
+        """清除所有日期"""
+        self._start_date = None
+        self._due_date = None
+        self._update_display()
+
+    def _open_drawer(self):
+        """打开抽屉式日期选择面板"""
+        if self._drawer is not None:
+            self._drawer.close()
+            self._drawer = None
+            return
+
+        dark = isDarkTheme()
+        label_color = "#CCC" if dark else "#666"
+
+        # 使用自定义绘制背景的容器
+        class DrawerFrame(QFrame):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self._dark = isDarkTheme()
+
+            def paintEvent(self, event):
+                painter = QPainter(self)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                bg_color = QColor(45, 45, 45) if self._dark else QColor(255, 255, 255)
+                border_color = QColor(85, 85, 85) if self._dark else QColor(221, 221, 221)
+                # 绘制圆角背景
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(bg_color)
+                painter.drawRoundedRect(0, 0, self.width(), self.height(), 10, 10)
+                # 绘制边框
+                painter.setPen(border_color)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 10, 10)
+                painter.end()
+
+        drawer = DrawerFrame(self.window())
+        drawer.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+
+        layout = QVBoxLayout(drawer)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(10)
+
+        # 起始日期
+        start_label = CaptionLabel("起始日期")
+        start_label.setStyleSheet(f"color: {label_color}; font-size: 12px; font-weight: bold;")
+        layout.addWidget(start_label)
+
+        start_picker = FastCalendarPicker()
+        start_picker.setToolTip("选择起始日期")
+        try:
+            start_picker.setText("起始日期")
+        except Exception:
+            pass
+        if self._start_date:
+            sd = self._start_date
+            start_picker.setDate(QDate(sd.year, sd.month, sd.day) if isinstance(sd, date) else QDate())
+        layout.addWidget(start_picker)
+
+        # 截止日期
+        due_label = CaptionLabel("截止日期")
+        due_label.setStyleSheet(f"color: {label_color}; font-size: 12px; font-weight: bold;")
+        layout.addWidget(due_label)
+
+        due_picker = FastCalendarPicker()
+        due_picker.setToolTip("选择截止日期")
+        try:
+            due_picker.setText("截止日期")
+        except Exception:
+            pass
+        if self._due_date:
+            dd = self._due_date
+            due_picker.setDate(QDate(dd.year, dd.month, dd.day) if isinstance(dd, date) else QDate())
+        else:
+            due_picker.setDate(QDate.currentDate())
+        layout.addWidget(due_picker)
+
+        # 按钮行
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        clear_btn = PushButton("清除")
+        clear_btn.setFixedHeight(28)
+        clear_btn.clicked.connect(lambda: self._on_drawer_clear(drawer, start_picker, due_picker))
+
+        save_btn = PrimaryPushButton("保存")
+        save_btn.setFixedHeight(28)
+        save_btn.clicked.connect(lambda: self._on_drawer_save(drawer, start_picker, due_picker))
+
+        btn_row.addStretch()
+        btn_row.addWidget(clear_btn)
+        btn_row.addWidget(save_btn)
+        layout.addLayout(btn_row)
+
+        # 定位：在按钮下方弹出
+        drawer.adjustSize()
+        btn_pos = self.mapToGlobal(QPoint(0, self.height()))
+        # 确保不超出屏幕
+        screen = QApplication.screenAt(btn_pos)
+        if screen:
+            screen_geo = screen.availableGeometry()
+            x = min(btn_pos.x(), screen_geo.right() - drawer.width())
+            y = btn_pos.y() + 4
+            if y + drawer.height() > screen_geo.bottom():
+                y = self.mapToGlobal(QPoint(0, 0)).y() - drawer.height() - 4
+        else:
+            x, y = btn_pos.x(), btn_pos.y() + 4
+
+        drawer.move(x, y)
+        drawer.show()
+        self._drawer = drawer
+
+    def _on_drawer_clear(self, drawer, start_picker, due_picker):
+        """清除日期"""
+        self._start_date = None
+        self._due_date = None
+        start_picker.setDate(QDate())
+        try:
+            start_picker.setText("起始日期")
+        except Exception:
+            pass
+        due_picker.setDate(QDate())
+        try:
+            due_picker.setText("截止日期")
+        except Exception:
+            pass
+        self._update_display()
+        self.date_changed.emit()
+        drawer.close()
+        self._drawer = None
+
+    def _on_drawer_save(self, drawer, start_picker, due_picker):
+        """保存日期选择"""
+        # 获取起始日期
+        new_start = None
+        try:
+            qdate = start_picker.date
+            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                new_start = date(qdate.year(), qdate.month(), qdate.day())
+        except Exception:
+            pass
+
+        # 获取截止日期
+        new_due = None
+        try:
+            qdate = due_picker.date
+            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                new_due = date(qdate.year(), qdate.month(), qdate.day())
+        except Exception:
+            pass
+
+        self._start_date = new_start
+        self._due_date = new_due
+        self._update_display()
+        self.date_changed.emit()
+        drawer.close()
+        self._drawer = None
 
 
 class TodoDialog(QDialog):
@@ -260,44 +525,10 @@ class TodoDialog(QDialog):
         self.category_combo = ComboBox()
         self.category_combo.addItem("无分类", userData=None)
 
-        self.due_container = QWidget()
-        due_container_layout = QHBoxLayout(self.due_container)
-        due_container_layout.setContentsMargins(0, 0, 0, 0)
-        due_container_layout.setSpacing(0)
-
-        self.due_picker = FastCalendarPicker()
-        self.due_picker.setToolTip("选择截止日期")
+        self.due_range_btn = DateRangeButton()
+        self.due_range_btn.setToolTip("选择日期范围")
         if not self._is_edit:
-            self.due_picker.setDate(QDate.currentDate())
-        else:
-            try:
-                self.due_picker.setText("截止日期")
-            except Exception:
-                pass
-        due_container_layout.addWidget(self.due_picker)
-
-        dark = isDarkTheme()
-        btn_bg = "rgba(255,255,255,1)" if dark else "rgba(0,0,0,0.04)"
-        btn_hover = "rgba(255,255,255,0.5)" if dark else "rgba(0,0,0,0.08)"
-        btn_border = "#555" if dark else "#ccc"
-        icon_color = "#aaa" if dark else "#888"
-
-        self._clear_due_btn = TransparentToolButton(FluentIcon.CLOSE)
-        self._clear_due_btn.setFixedSize(30, 30)
-        self._clear_due_btn.setIconSize(QSize(12, 12))
-        self._clear_due_btn.setToolTip("清除截止日期")
-        self._clear_due_btn.clicked.connect(self._on_clear_due_date)
-        self._clear_due_btn.setStyleSheet(f"""
-            TransparentToolButton {{
-                border: 1px solid {btn_border};
-                border-radius: 6px;
-                color: {icon_color};
-            }}
-            TransparentToolButton:hover {{
-                background: {btn_hover};
-            }}
-        """)
-        due_container_layout.addWidget(self._clear_due_btn)
+            self.due_range_btn.set_due_date(QDate.currentDate())
 
         self.auto_postpone_cb = CheckBox("自动延期")
         self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
@@ -359,6 +590,7 @@ class TodoDialog(QDialog):
 
         self.color_buttons = []
         for name, color in TODO_COLORS:
+            dark = isDarkTheme()
             btn = QPushButton()
             btn.setFixedSize(24, 24)
             btn.setCheckable(True)
@@ -410,9 +642,8 @@ class TodoDialog(QDialog):
 
         due_row = QHBoxLayout()
         due_row.setSpacing(20)
-        self.due_container.setFixedWidth(240)
-        self.due_picker.setFixedWidth(205)
-        due_row.addWidget(self.due_container)
+        self.due_range_btn.setFixedWidth(205)
+        due_row.addWidget(self.due_range_btn)
         due_row.addWidget(self.auto_postpone_cb)
         due_row.addStretch()
         layout.addLayout(due_row)
@@ -471,7 +702,7 @@ class TodoDialog(QDialog):
         self.due_label = CaptionLabel("截止日期")
         self.due_label.setStyleSheet(lbl_style)
         layout.addWidget(self.due_label)
-        layout.addWidget(self.due_container)
+        layout.addWidget(self.due_range_btn)
         layout.addWidget(self.auto_postpone_cb)
 
         sep1 = QFrame()
@@ -591,17 +822,13 @@ class TodoDialog(QDialog):
             self.recurrence_day_spin.setSuffix(" 号")
             self.recurrence_day_spin.setValue(1)
 
-        self.due_container.setVisible(not show)
+        self.due_range_btn.setVisible(not show)
         self.auto_postpone_cb.setVisible(not show)
         if hasattr(self, 'due_label'):
             self.due_label.setVisible(not show)
 
     def _on_clear_due_date(self):
-        self.due_picker.setDate(QDate())
-        try:
-            self.due_picker.setText("截止日期")
-        except Exception:
-            pass
+        self.due_range_btn.clear_dates()
 
     def _get_weekday_value(self) -> str | None:
         """获取选中的星期几，返回逗号分隔字符串如 '1,3,5'，未选返回 None"""
@@ -757,15 +984,29 @@ class TodoDialog(QDialog):
                     from PySide6.QtCore import QDate
                     if isinstance(due_str, str):
                         pyd = date.fromisoformat(due_str)
-                        self.due_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
+                        self.due_range_btn.set_due_date(QDate(pyd.year, pyd.month, pyd.day))
                     else:
-                        self.due_picker.setDate(QDate(due_str.year, due_str.month, due_str.day))
+                        self.due_range_btn.set_due_date(QDate(due_str.year, due_str.month, due_str.day))
+                except Exception:
+                    pass
+            else:
+                self.due_range_btn.set_due_date(None)
+
+            start_str = data.get("start_date")
+            if start_str:
+                try:
+                    from PySide6.QtCore import QDate
+                    if isinstance(start_str, str):
+                        pyd = date.fromisoformat(start_str)
+                        self.due_range_btn.set_start_date(QDate(pyd.year, pyd.month, pyd.day))
+                    else:
+                        self.due_range_btn.set_start_date(QDate(start_str.year, start_str.month, start_str.day))
                 except Exception:
                     pass
 
             is_instance = bool(data.get("recurrence_template_id")) and bool(data.get("recurrence_type"))
             if is_instance and self._edit_mode == "this_and_future":
-                self.due_container.setVisible(False)
+                self.due_range_btn.setVisible(False)
                 self.auto_postpone_cb.setVisible(False)
                 self.recurrence_instance_label.setVisible(False)
                 if self._template_data:
@@ -807,7 +1048,7 @@ class TodoDialog(QDialog):
                             except Exception:
                                 pass
             elif is_instance:
-                self.due_container.setVisible(False)
+                self.due_range_btn.setVisible(False)
                 self.auto_postpone_cb.setVisible(False)
                 self.recurrence_combo.setVisible(False)
                 self.recurrence_interval_spin.setVisible(False)
@@ -870,14 +1111,12 @@ class TodoDialog(QDialog):
             data["description"] = self.desc_edit.toPlainText().strip()
 
             due_date = None
-            if hasattr(self, 'due_picker'):
-                try:
-                    qdate = self.due_picker.date
-                    if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
-                        due_date = date(qdate.year(), qdate.month(), qdate.day())
-                except Exception:
-                    pass
+            start_date = None
+            if hasattr(self, 'due_range_btn'):
+                due_date = self.due_range_btn.get_due_date()
+                start_date = self.due_range_btn.get_start_date()
             data["due_date"] = due_date
+            data["start_date"] = start_date
 
             priority_val = getattr(self, 'priority_combo', None)
             if priority_val:
