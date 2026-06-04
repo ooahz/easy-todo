@@ -35,9 +35,10 @@ def _tc():
             "accent": "#60CDFF",
             "divider": "rgba(255, 255, 255, 0.06)",
             "tag_bg": "rgba(255, 255, 255, 0.06)",
-            "priority_high": "#FF6B6B",
-            "priority_medium": "#FFB347",
-            "priority_low": "#60CDFF",
+            "priority_urgent_important": "#FF6B6B",
+            "priority_important": "#FFB347",
+            "priority_urgent": "#60CDFF",
+            "priority_minor": "#8764B8",
             "overdue": "#FF6B6B",
             "done_green": "#6BCB77",
             "code_bg": "#3A3A3A",
@@ -58,9 +59,10 @@ def _tc():
         "accent": "#0078D4",
         "divider": "rgba(0, 0, 0, 0.06)",
         "tag_bg": "rgba(0, 0, 0, 0.04)",
-        "priority_high": "#D13438",
-        "priority_medium": "#FF8C00",
-        "priority_low": "#0078D4",
+        "priority_urgent_important": "#D13438",
+        "priority_important": "#0078D4",
+        "priority_urgent": "#CA5010",
+        "priority_minor": "#8764B8",
         "overdue": "#D13438",
         "done_green": "#107C10",
         "code_bg": "#F5F5F5",
@@ -547,7 +549,7 @@ class TodoDetailDialog(MessageBoxBase):
         elif is_done:
             self.edit_btn.hide()
             self.archive_btn.show()
-            self.done_btn.hide()
+            self.done_btn.show()
         else:
             self.edit_btn.show()
             self.archive_btn.hide()
@@ -826,12 +828,14 @@ class TodoDetailDialog(MessageBoxBase):
         if priority > 0:
             priority_text = PRIORITY_MAP.get(priority, "无")
             priority_color = c['muted']
-            if priority == 3:
-                priority_color = c['priority_high']
+            if priority == 1:
+                priority_color = c['priority_urgent_important']
             elif priority == 2:
-                priority_color = c['priority_medium']
-            elif priority == 1:
-                priority_color = c['priority_low']
+                priority_color = c['priority_important']
+            elif priority == 3:
+                priority_color = c['priority_urgent']
+            elif priority == 4:
+                priority_color = c['priority_minor']
             row = InfoRow(FluentIcon.HEART, "优先级", priority_text, priority_color)
             layout.addWidget(row)
             self._add_divider(layout, c)

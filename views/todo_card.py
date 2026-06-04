@@ -82,12 +82,27 @@ class TodoCard(CardWidget):
         self._is_selected = False
         self._readonly = readonly
 
-        self._base_height = 72
+        # 单列模式下，如果描述为纯文本且不超过100字符，使用较小高度
+        desc = todo_data.get("description", "")
+        is_short_desc = len(desc) <= 100 and not self._has_markdown(desc)
+        if settings.dialog_mode == "default" and is_short_desc:
+            self._base_height = 50
+        else:
+            self._base_height = 72
         self.setMinimumHeight(self._base_height)
         self.setCursor(Qt.PointingHandCursor)
 
         self._setup_ui()
         self._apply_styles()
+
+    @staticmethod
+    def _has_markdown(text: str) -> bool:
+        """检查文本是否包含 Markdown 格式"""
+        if not text:
+            return False
+        # 检查常见的 Markdown 标记
+        md_patterns = ['**', '__', '##', '###', '- ', '* ', '1. ', '```', '`', '[', '](', '  \n']
+        return any(p in text for p in md_patterns)
 
     def _setup_ui(self):
         """构建卡片 UI"""
@@ -421,17 +436,118 @@ class TodoCard(CardWidget):
     def update_data(self, todo_data: dict):
         """更新卡片数据"""
         self.todo_data = todo_data
+        self.todo_id = todo_data["id"]
         self._is_done = todo_data.get("_is_done", False)
+
         self.checkbox.blockSignals(True)
         self.checkbox.setChecked(self._is_done)
         self.checkbox.blockSignals(False)
+        self.checkbox.setEnabled(not todo_data.get("_is_archived", False))
+
         self.title_label.setText(todo_data["title"])
         self._apply_title_style()
         self._update_bar_color()
+
+        # 描述
         desc = todo_data.get("description", "")
-        if hasattr(self, "desc_label") and desc:
-            self.desc_label.setText(desc)
-            self._apply_desc_style()
+        if hasattr(self, "desc_label"):
+            if desc:
+                self.desc_label.setText(desc)
+                self.desc_label.setVisible(True)
+                self._apply_desc_style()
+            else:
+                self.desc_label.setVisible(False)
+
+        # 重建信息行
+        self._rebuild_info_label()
+
+        # 归档按钮可见性
+        if self._readonly:
+            self.archive_btn.setVisible(self._is_done)
+        else:
+            self.archive_btn.hide()
+
+        self._apply_styles()
+
+    def _rebuild_info_label(self):
+        """重建信息行内容"""
+        info_parts = []
+        priority = self.todo_data.get("priority", 0)
+        if priority in PRIORITY_MAP and priority > 0:
+            info_parts.append(PRIORITY_MAP[priority])
+
+        category = self.todo_data.get("category")
+        if category:
+            info_parts.append(category.get("name", ""))
+
+        due = self.todo_data.get("due_date", "")
+        start = self.todo_data.get("start_date")
+        if due:
+            due_date = date.fromisoformat(due)
+            today = date.today()
+            if due_date < today and not self._is_done:
+                if start:
+                    info_parts.append(f'<span style="color:{settings.warning_color}">{start} ~ {due}（已过期）</span>')
+                else:
+                    info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
+            elif due_date == today:
+                if start:
+                    info_parts.append(f"{start} ~ 今天")
+                else:
+                    info_parts.append("今天")
+            else:
+                if start:
+                    info_parts.append(f"{start} ~ {due}")
+                else:
+                    info_parts.append(f"{due}")
+        elif start:
+            info_parts.append(f"从 {start}")
+
+        recurrence = self.todo_data.get("recurrence_type")
+        if recurrence:
+            from config.constants import RECURRENCE_TYPES, WEEKDAY_NAMES, parse_recurrence_day
+            interval = self.todo_data.get("recurrence_interval", 1)
+            recurrence_day = self.todo_data.get("recurrence_day")
+            recurrence_start = self.todo_data.get("recurrence_start_date")
+            recurrence_end = self.todo_data.get("recurrence_end_date")
+            type_name = RECURRENCE_TYPES.get(recurrence, "")
+            if recurrence == "weekly" and recurrence_day:
+                days = parse_recurrence_day(recurrence_day)
+                day_names = "".join(WEEKDAY_NAMES.get(d, "") for d in sorted(days))
+                if interval > 1:
+                    info_parts.append(f"每{interval}周周{day_names}")
+                else:
+                    info_parts.append(f"每周{day_names}")
+            elif recurrence == "monthly" and recurrence_day:
+                day_list = parse_recurrence_day(recurrence_day)
+                day_val = day_list[0] if day_list else ""
+                if interval > 1:
+                    info_parts.append(f"每{interval}月{day_val}号")
+                else:
+                    info_parts.append(f"每月{day_val}号")
+            elif interval > 1:
+                unit = {"daily": "天", "weekly": "周", "monthly": "月"}.get(recurrence, "")
+                info_parts.append(f"每{interval}{unit}")
+            else:
+                info_parts.append(type_name)
+            if recurrence_start and recurrence_end:
+                info_parts.append(f"{recurrence_start} ~ {recurrence_end}")
+            elif recurrence_start:
+                info_parts.append(f"从 {recurrence_start}")
+            elif recurrence_end:
+                info_parts.append(f"至 {recurrence_end}")
+
+        if info_parts:
+            if hasattr(self, "info_label"):
+                self.info_label.setText("  |  ".join(info_parts))
+                self.info_label.setVisible(True)
+            else:
+                self.info_label = CaptionLabel("  |  ".join(info_parts))
+                self.info_label.setObjectName("infoLabel")
+                self.content_layout.addWidget(self.info_label)
+            self._apply_info_style()
+        elif hasattr(self, "info_label"):
+            self.info_label.setVisible(False)
 
     def set_selected(self, selected: bool):
         self._is_selected = selected

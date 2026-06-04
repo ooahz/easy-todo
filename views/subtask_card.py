@@ -164,12 +164,18 @@ class SubtaskCard(CardWidget):
     def update_data(self, todo_data: dict):
         """更新卡片数据"""
         self.todo_data = todo_data
+        self.todo_id = todo_data["id"]
         self._is_done = todo_data.get("_is_done", False)
         self.checkbox.blockSignals(True)
         self.checkbox.setChecked(self._is_done)
         self.checkbox.blockSignals(False)
+        self.checkbox.setEnabled(not todo_data.get("_is_archived", False))
         self.title_label.setText(todo_data["title"])
         self._apply_title_style()
+        if self._readonly:
+            self.archive_btn.setVisible(self._is_done)
+        else:
+            self.archive_btn.hide()
 
     def set_selected(self, selected: bool):
         self._is_selected = selected

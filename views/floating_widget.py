@@ -132,14 +132,14 @@ class FloatingWidget(QWidget):
         # 安装事件过滤器：阻止点击，放行滚轮
         self._pin_mask.installEventFilter(self)
 
-        # 遮罩层（新建任务时阻止点击列表）
+        # 遮罩层
         self.mask_layer = QLabel(self.bg_frame)
         self.mask_layer.setVisible(False)
         self.mask_opacity = QGraphicsOpacityEffect(self.mask_layer)
         self.mask_layer.setGraphicsEffect(self.mask_opacity)
         self.mask_opacity.setOpacity(0)
 
-        # 快速新建弹窗（居中覆盖，模拟弹窗效果）
+        # 快速新建弹窗
         self.quick_overlay = QFrame(self.bg_frame)
         self.quick_overlay.setObjectName("quickOverlay")
         self.quick_overlay.setVisible(False)
@@ -157,7 +157,6 @@ class FloatingWidget(QWidget):
         self.quick_input.setClearButtonEnabled(True)
         self.quick_input.returnPressed.connect(self._on_quick_add)
         overlay_layout.addWidget(self.quick_input)
-        # 取消 + 确认文字按钮（右对齐）
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_row.setSpacing(12)
@@ -331,8 +330,7 @@ class FloatingWidget(QWidget):
         self.pin_changed.emit(self._pinned)
 
     def _show_quick_add(self):
-        """显示快速新建弹窗（带动画）"""
-        # 计算弹窗位置
+        """显示快速新建弹窗"""
         overlay_w = min(self.bg_frame.width() - 24, 240)
         overlay_h = 110
         x = (self.bg_frame.width() - overlay_w) // 2
@@ -367,7 +365,6 @@ class FloatingWidget(QWidget):
         self.quick_input.setFocus()
 
     def _hide_quick_add(self):
-        """隐藏快速新建弹窗（带动画）"""
         mask_anim = QPropertyAnimation(self.mask_opacity, b"opacity")
         mask_anim.setDuration(120)
         mask_anim.setStartValue(1)
@@ -424,7 +421,7 @@ class FloatingWidget(QWidget):
                 # 父任务行
                 row = self._create_todo_row(todo, c)
                 self.list_layout.addWidget(row)
-                # 子任务行（根据配置决定是否显示）
+                # 子任务行
                 if show_subtasks:
                     for child in todo.get("children", []):
                         child_row = self._create_todo_row(child, c, is_child=True)

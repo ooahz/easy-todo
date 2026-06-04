@@ -22,7 +22,7 @@ class Todo(Base):
     pid = Column(Integer, ForeignKey("todos.id", ondelete="CASCADE"), nullable=True)  # 父任务ID，NULL 表示顶级任务
     title = Column(String(200), nullable=False)
     description = Column(Text, default="")
-    priority = Column(Integer, default=0)       # 0=无, 1=低, 2=中, 3=高
+    priority = Column(Integer, default=0)       # 0=无, 1=重要且紧急, 2=重要不紧急, 3=不重要但紧急, 4=不重要不紧急
     status = Column(Integer, default=0)          # 0=待办, 1=已完成, 2=已归档
     color_tag = Column(String(7), default=None, nullable=True)
     start_date = Column(Date, nullable=True)  # 起始日期

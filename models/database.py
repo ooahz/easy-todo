@@ -44,7 +44,7 @@ class Database:
             try:
                 cursor.execute("PRAGMA journal_mode=WAL")
             except Exception:
-                pass  # 某些环境不支持 WAL（如网络驱动器），回退到默认模式
+                pass
             try:
                 cursor.execute("PRAGMA busy_timeout=5000")
             except Exception:
@@ -94,7 +94,7 @@ class Database:
                 conn.commit()
 
     def _migrate_add_pid(self):
-        """迁移：为 todos 表添加 pid 列（父任务ID）"""
+        """迁移：为 todos 表添加 pid 列"""
         from sqlalchemy import inspect, text
 
         inspector = inspect(self.engine)
@@ -202,7 +202,7 @@ class Database:
                 conn.commit()
 
     def _init_default_categories(self):
-        """清理旧的系统分类（系统视图由导航栏硬编码，不存入数据库）"""
+        """清理旧的系统分类"""
         from models.category import Category
         from models.todo import Todo
 

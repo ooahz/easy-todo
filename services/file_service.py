@@ -29,23 +29,12 @@ class FileService:
         return self._base_path
 
     def _get_task_folder(self, todo_id: int, create: bool = False) -> Path:
-        """获取任务关联文件夹路径
-        
-        :param todo_id: 任务ID
-        :param create: 是否创建文件夹（仅在保存文件时为True）
-        """
         folder = self.base_path / f"task_{todo_id}"
         if create and not folder.exists():
             folder.mkdir(parents=True, exist_ok=True)
         return folder
 
     def save_file(self, todo_id: int, source_path: str) -> str:
-        """
-        保存文件到任务关联文件夹
-        :param todo_id: 任务ID
-        :param source_path: 源文件路径
-        :return: 保存后的文件名
-        """
         source = Path(source_path)
         if not source.exists():
             raise FileNotFoundError(f"文件不存在: {source_path}")
@@ -131,7 +120,7 @@ class FileService:
             return False
 
     def delete_task_folder(self, todo_id: int) -> bool:
-        """删除任务关联的整个文件夹（任务删除时调用）"""
+        """删除任务关联的整个文件夹"""
         task_folder = self._get_task_folder(todo_id)
 
         if task_folder.exists():

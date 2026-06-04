@@ -1,17 +1,303 @@
 """待办列表视图 - 核心内容区域"""
 from __future__ import annotations
-from datetime import date as date_type
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
-from qfluentwidgets import (
-    PrimaryPushButton, ToolButton, BodyLabel, CaptionLabel, FluentIcon,
-    SmoothScrollArea, PipsPager, PipsScrollButtonDisplayMode, ComboBox, isDarkTheme
+from datetime import date
+from datetime import date as date_type
+
+from PySide6.QtCore import Signal, Qt, QDate, QSize, QPoint
+from PySide6.QtGui import QPainter, QColor
+from PySide6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QWidget, QApplication
 )
-from views.todo_card import TodoCard
-from views.subtask_card import SubtaskCard
-from views.calendar_view import WeekView
+from qfluentwidgets import (
+    ComboBox, CalendarPicker, ToolButton, SmoothScrollArea, PipsPager, PipsScrollButtonDisplayMode, isDarkTheme,
+    FluentIcon, CaptionLabel, PushButton, PrimaryPushButton, BodyLabel
+)
+
+from config.constants import PRIORITY_GROUP_COLORS, PRIORITY_MAP
 from config.settings import settings
+from views.calendar_view import WeekView
+from views.subtask_card import SubtaskCard
+from views.todo_card import TodoCard
+
+
+class DateRangeButton(QPushButton):
+    """日期范围选择按钮，点击后打开抽屉式面板选择开始日期和截止日期"""
+
+    date_changed = Signal()
+
+    def __init__(self, parent=None, placeholder: str = "截止日期"):
+        super().__init__(parent)
+        self._start_date = None
+        self._due_date = None
+        self._drawer = None
+        self._placeholder = placeholder
+
+        self.setText(placeholder)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(33)
+        self.clicked.connect(self._open_drawer)
+
+    def paintEvent(self, event):
+        dark = isDarkTheme()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        bg = QColor(43, 43, 43) if dark else QColor(255, 255, 255)
+        border = QColor(80, 80, 80) if dark else QColor(209, 209, 209)
+        text_color = QColor(205, 205, 205) if dark else QColor(51, 51, 51)
+
+        # 绘制背景
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 6, 6)
+
+        # 绘制边框
+        painter.setPen(border)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 6, 6)
+
+        # 绘制文字
+        painter.setPen(text_color)
+        font = painter.font()
+        font.setPixelSize(13)
+        painter.setFont(font)
+        text_width = self.width() - 40
+        painter.drawText(12, 0, text_width, self.height(), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                         self.text())
+
+        # 绘制右侧日历图标
+        from PySide6.QtGui import QPixmap
+        icon = FluentIcon.CALENDAR.icon()
+        icon_color = QColor(160, 160, 160) if dark else QColor(136, 136, 136)
+        pixmap = icon.pixmap(QSize(14, 14))
+        # 给图标着色
+        colored = QPixmap(pixmap.size())
+        colored.fill(Qt.GlobalColor.transparent)
+        p = QPainter(colored)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        p.drawPixmap(0, 0, pixmap)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        p.fillRect(colored.rect(), icon_color)
+        p.end()
+        painter.drawPixmap(self.width() - 26, (self.height() - 14) // 2, colored)
+
+        painter.end()
+
+    def _update_display(self):
+        """更新按钮显示文本，并自动调整宽度"""
+        if self._start_date and self._due_date:
+            start_str = self._start_date.strftime("%m/%d") if isinstance(self._start_date, date) else str(
+                self._start_date)
+            due_str = self._due_date.strftime("%m/%d") if isinstance(self._due_date, date) else str(self._due_date)
+            self.setText(f"{start_str} ~ {due_str}")
+        elif self._due_date:
+            due_str = self._due_date.strftime("%Y/%m/%d") if isinstance(self._due_date, date) else str(self._due_date)
+            self.setText(due_str)
+        elif self._start_date:
+            start_str = self._start_date.strftime("%m/%d") if isinstance(self._start_date, date) else str(
+                self._start_date)
+            self.setText(f"{start_str} ~ ...")
+        else:
+            self.setText(self._placeholder)
+
+        # 根据文本长度自动调整按钮宽度
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(self.font())
+        text_width = fm.horizontalAdvance(self.text())
+        # 文字宽度 + 左边距12 + 右侧图标区域26 + 边距余量
+        new_width = max(120, text_width + 48)
+        self.setMinimumWidth(new_width)
+
+    def set_start_date(self, d):
+        """设置起始日期 (date object, QDate, or None)"""
+        if d is None:
+            self._start_date = None
+        elif isinstance(d, QDate):
+            self._start_date = date(d.year(), d.month(), d.day()) if d.isValid() else None
+        else:
+            self._start_date = d
+        self._update_display()
+
+    def set_due_date(self, d):
+        """设置截止日期 (date object, QDate, or None)"""
+        if d is None:
+            self._due_date = None
+        elif isinstance(d, QDate):
+            self._due_date = date(d.year(), d.month(), d.day()) if d.isValid() else None
+        else:
+            self._due_date = d
+        self._update_display()
+
+    def get_start_date(self):
+        """返回起始日期的 date 对象或 None"""
+        return self._start_date
+
+    def get_due_date(self):
+        """返回截止日期的 date 对象或 None"""
+        return self._due_date
+
+    def clear_dates(self):
+        """清除所有日期"""
+        self._start_date = None
+        self._due_date = None
+        self._update_display()
+
+    def _open_drawer(self):
+        """打开抽屉式日期选择面板"""
+        if self._drawer is not None:
+            self._drawer.close()
+            self._drawer = None
+            return
+
+        dark = isDarkTheme()
+        label_color = "#CCC" if dark else "#666"
+
+        # 使用自定义绘制背景的容器
+        class DrawerFrame(QFrame):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self._dark = isDarkTheme()
+
+            def paintEvent(self, event):
+                painter = QPainter(self)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                # 使用与 ComboBox 下拉面板一致的背景色
+                bg_color = QColor(43, 43, 43) if self._dark else QColor(252, 252, 252)
+                border_color = QColor(65, 65, 65) if self._dark else QColor(225, 225, 225)
+                # 绘制圆角背景
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(bg_color)
+                painter.drawRoundedRect(0, 0, self.width(), self.height(), 10, 10)
+                # 绘制边框
+                painter.setPen(border_color)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 10, 10)
+                painter.end()
+
+        drawer = DrawerFrame(self.window())
+        drawer.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+
+        layout = QVBoxLayout(drawer)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(10)
+
+        # 起始日期
+        start_label = CaptionLabel("起始日期")
+        start_label.setStyleSheet(f"color: {label_color}; font-size: 12px; font-weight: bold;")
+        layout.addWidget(start_label)
+
+        start_picker = CalendarPicker()
+        start_picker.setToolTip("选择起始日期")
+        try:
+            start_picker.setText("起始日期")
+        except Exception:
+            pass
+        if self._start_date:
+            sd = self._start_date
+            start_picker.setDate(QDate(sd.year, sd.month, sd.day) if isinstance(sd, date) else QDate())
+        else:
+            start_picker.setDate(QDate.currentDate())
+        layout.addWidget(start_picker)
+
+        # 截止日期
+        due_label = CaptionLabel("截止日期")
+        due_label.setStyleSheet(f"color: {label_color}; font-size: 12px; font-weight: bold;")
+        layout.addWidget(due_label)
+
+        due_picker = CalendarPicker()
+        due_picker.setToolTip("选择截止日期")
+        try:
+            due_picker.setText("截止日期")
+        except Exception:
+            pass
+        if self._due_date:
+            dd = self._due_date
+            due_picker.setDate(QDate(dd.year, dd.month, dd.day) if isinstance(dd, date) else QDate())
+        else:
+            due_picker.setDate(QDate.currentDate())
+        layout.addWidget(due_picker)
+
+        # 按钮行
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        clear_btn = PushButton("清除")
+        clear_btn.setFixedHeight(28)
+        clear_btn.clicked.connect(lambda: self._on_drawer_clear(drawer, start_picker, due_picker))
+
+        save_btn = PrimaryPushButton("保存")
+        save_btn.setFixedHeight(28)
+        save_btn.clicked.connect(lambda: self._on_drawer_save(drawer, start_picker, due_picker))
+
+        btn_row.addStretch()
+        btn_row.addWidget(clear_btn)
+        btn_row.addWidget(save_btn)
+        layout.addLayout(btn_row)
+
+        # 定位：在按钮下方弹出
+        drawer.adjustSize()
+        btn_pos = self.mapToGlobal(QPoint(0, self.height()))
+        # 确保不超出屏幕
+        screen = QApplication.screenAt(btn_pos)
+        if screen:
+            screen_geo = screen.availableGeometry()
+            x = min(btn_pos.x(), screen_geo.right() - drawer.width())
+            y = btn_pos.y() + 4
+            if y + drawer.height() > screen_geo.bottom():
+                y = self.mapToGlobal(QPoint(0, 0)).y() - drawer.height() - 4
+        else:
+            x, y = btn_pos.x(), btn_pos.y() + 4
+
+        drawer.move(x, y)
+        drawer.show()
+        self._drawer = drawer
+
+    def _on_drawer_clear(self, drawer, start_picker, due_picker):
+        """清除日期"""
+        self._start_date = None
+        self._due_date = None
+        start_picker.setDate(QDate())
+        try:
+            start_picker.setText("起始日期")
+        except Exception:
+            pass
+        due_picker.setDate(QDate())
+        try:
+            due_picker.setText("截止日期")
+        except Exception:
+            pass
+        self._update_display()
+        self.date_changed.emit()
+        drawer.close()
+        self._drawer = None
+
+    def _on_drawer_save(self, drawer, start_picker, due_picker):
+        """保存日期选择"""
+        # 获取起始日期
+        new_start = None
+        try:
+            qdate = start_picker.getDate()
+            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                new_start = date(qdate.year(), qdate.month(), qdate.day())
+        except Exception:
+            pass
+
+        # 获取截止日期
+        new_due = None
+        try:
+            qdate = due_picker.getDate()
+            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                new_due = date(qdate.year(), qdate.month(), qdate.day())
+        except Exception:
+            pass
+
+        self._start_date = new_start
+        self._due_date = new_due
+        self._update_display()
+        self.date_changed.emit()
+        drawer.close()
+        self._drawer = None
 
 
 def _tooltip_style() -> str:
@@ -66,6 +352,8 @@ class TodoListView(QWidget):
         self._readonly = readonly
         self._filter_date: date_type | None = None
         self._time_filter: str = "all"
+        self._custom_due_start: date_type | None = None
+        self._custom_due_end: date_type | None = None
         self._page_size = 100
         self._current_page = 0
         self._total_count = 0
@@ -83,7 +371,7 @@ class TodoListView(QWidget):
         self.toolbar = QHBoxLayout()
         self.toolbar.setSpacing(8)
 
-        # 过滤下拉框（仅已完成页面使用）
+        # 过滤下拉框
         self.filter_combo = ComboBox()
         self.filter_combo.addItems(["已完成", "已归档"])
         self.filter_combo.setCurrentIndex(0)
@@ -95,12 +383,19 @@ class TodoListView(QWidget):
         self.toolbar.addWidget(self.filter_combo)
 
         self.time_filter_combo = ComboBox()
-        self.time_filter_combo.addItems(["全部", "本周", "本月", "本年"])
+        self.time_filter_combo.addItems(["全部", "本周", "本月", "本年", "自定义"])
         self.time_filter_combo.setCurrentIndex(0)
         self.time_filter_combo.setFixedWidth(90)
         self.time_filter_combo.currentIndexChanged.connect(self._on_time_filter_index_changed)
         self.time_filter_combo.setVisible(False)
         self.toolbar.addWidget(self.time_filter_combo)
+
+        self.date_range_btn = DateRangeButton(placeholder="日期范围")
+        self.date_range_btn.setFixedHeight(33)
+        self.date_range_btn.setMinimumWidth(120)
+        self.date_range_btn.date_changed.connect(self._on_custom_date_changed)
+        self.date_range_btn.setVisible(False)
+        self.toolbar.addWidget(self.date_range_btn)
 
         self.toolbar.addStretch()
 
@@ -193,7 +488,7 @@ class TodoListView(QWidget):
 
         self.empty_widget.setVisible(False)
         self.main_layout.addWidget(self.empty_widget)
-        
+
         # 设置 tooltip 样式
         self.setStyleSheet(_tooltip_style())
 
@@ -208,10 +503,12 @@ class TodoListView(QWidget):
             self._total_count = len(self._todos)
             self._groups = None
         else:
-            self._todos = self._dedup_recurrence(todos)
+            self._todos = todos
             self._total_count = total_count if total_count >= 0 else len(self._todos)
             if self._view_name == "最近待办":
                 self._groups = self._categorize_for_recent(self._todos)
+            elif self._view_name == "重要任务":
+                self._groups = self._categorize_for_important(self._todos)
             else:
                 self._groups = None
 
@@ -227,10 +524,12 @@ class TodoListView(QWidget):
             self._total_count = len(self._todos)
             self._groups = None
         else:
-            self._todos = self._dedup_recurrence(self._all_todos)
+            self._todos = self._all_todos
             self._total_count = len(self._todos)
             if self._view_name == "最近待办":
                 self._groups = self._categorize_for_recent(self._todos)
+            elif self._view_name == "重要任务":
+                self._groups = self._categorize_for_important(self._todos)
             else:
                 self._groups = None
 
@@ -243,7 +542,7 @@ class TodoListView(QWidget):
         """更新分页器状态"""
         total = self._total_count
         total_pages = (total + self._page_size - 1) // self._page_size if total > 0 else 1
-        
+
         if total_pages <= 1:
             self.pager.setVisible(False)
         else:
@@ -333,6 +632,27 @@ class TodoListView(QWidget):
                 groups[2]["todos"].append(todo)
         return groups
 
+    @staticmethod
+    def _categorize_for_important(todos: list[dict]) -> list[dict]:
+        """按优先级分组"""
+        groups = []
+        for prio_val, prio_name in PRIORITY_MAP.items():
+            if prio_val == 0:
+                continue
+            groups.append({
+                "key": f"priority_{prio_val}",
+                "title": prio_name,
+                "color": PRIORITY_GROUP_COLORS.get(prio_val, "#888"),
+                "todos": [],
+            })
+        for todo in todos:
+            priority = todo.get("priority", 0)
+            for group in groups:
+                if group["key"] == f"priority_{priority}":
+                    group["todos"].append(todo)
+                    break
+        return groups
+
     def _filter_todos_by_date(self, todos: list[dict], target_date: date_type) -> list[dict]:
         """根据截止日期过滤任务"""
         filtered = []
@@ -369,7 +689,43 @@ class TodoListView(QWidget):
 
     def _refresh_list(self):
         """刷新列表显示"""
-        # 统一清理：只通过布局项清理，避免对同一 widget 重复调用 deleteLater
+        if self._groups is not None:
+            self._full_rebuild()
+            return
+
+        page_todos = self._todos
+
+        # 快速路径：如果 ID 序列完全一致，就地更新卡片数据
+        new_ids = self._flat_id_list(page_todos)
+        old_ids = [c.todo_id for c in self._cards]
+        if new_ids and new_ids == old_ids:
+            data_map = {}
+            for t in page_todos:
+                data_map[t["id"]] = t
+                for ch in t.get("children", []):
+                    data_map[ch["id"]] = ch
+            for card in self._cards:
+                d = data_map.get(card.todo_id)
+                if d:
+                    card.update_data(d)
+            self._update_stats()
+            return
+
+        # 慢速路径：全量重建
+        self._full_rebuild()
+
+    @staticmethod
+    def _flat_id_list(todos: list[dict]) -> list[int]:
+        """提取父+子任务的 ID 平铺序列"""
+        ids = []
+        for t in todos:
+            ids.append(t["id"])
+            for ch in t.get("children", []):
+                ids.append(ch["id"])
+        return ids
+
+    def _full_rebuild(self):
+        """全量销毁重建列表"""
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
             if item.widget():
@@ -380,7 +736,6 @@ class TodoListView(QWidget):
             self._refresh_grouped_list()
             return
 
-        # 数据已在数据库端分页，直接渲染当前页数据
         page_todos = self._todos
 
         self.stats_label.setVisible(True)
@@ -389,11 +744,9 @@ class TodoListView(QWidget):
         self.scroll_area.setVisible(has_todos)
         self.empty_widget.setVisible(not has_todos)
 
-        # 构建父任务 ID 列表（用于拖拽排序）
         parent_ids = [t["id"] for t in page_todos]
 
         for todo_data in page_todos:
-            # 父任务卡片
             card = TodoCard(todo_data, readonly=self._readonly)
             card.edit_clicked.connect(self.edit_clicked.emit)
             card.delete_clicked.connect(self.delete_clicked.emit)
@@ -402,47 +755,51 @@ class TodoListView(QWidget):
             card.card_clicked.connect(self.card_clicked.emit)
             card.archive_clicked.connect(self.archive_clicked.emit)
             card.reorder_requested.connect(
-                lambda from_id, to_id, after, order=parent_ids: self.reorder_requested.emit(from_id, to_id, after, order)
+                lambda from_id, to_id, after, order=parent_ids: self.reorder_requested.emit(from_id, to_id, after,
+                                                                                            order)
             )
             self.list_layout.addWidget(card)
             self._cards.append(card)
 
-            # 子任务卡片（整体缩进）
             children = todo_data.get("children", [])
             for child_data in children:
                 container = QWidget()
                 container_layout = QHBoxLayout(container)
                 container_layout.setContentsMargins(24, 0, 0, 0)
                 container_layout.setSpacing(0)
-                
+
                 child_card = SubtaskCard(child_data, readonly=self._readonly)
                 child_card.edit_clicked.connect(self.edit_clicked.emit)
                 child_card.delete_clicked.connect(self.delete_clicked.emit)
                 child_card.toggle_done.connect(self.toggle_done.emit)
                 child_card.archive_clicked.connect(self.archive_clicked.emit)
                 container_layout.addWidget(child_card)
-                
+
                 self.list_layout.addWidget(container)
                 self._cards.append(child_card)
 
         self.list_layout.addStretch()
+        self._update_stats()
 
+    def _update_stats(self):
+        """更新底部统计标签"""
         parent_count = self._total_count
         child_count = sum(len(t.get("children", [])) for t in self._todos)
         total_count = parent_count + child_count
-        
+
         if self._filter_date and self._view_name != "今日任务":
-            self.stats_label.setText(f"筛选: {self._filter_date.month}月{self._filter_date.day}日 · 共{total_count}个任务")
+            self.stats_label.setText(
+                f"筛选: {self._filter_date.month}月{self._filter_date.day}日 · 共{total_count}个任务")
         elif self._view_name == "今日任务":
             from datetime import date as _date
             if self._filter_date and self._filter_date != _date.today():
-                self.stats_label.setText(f"筛选: {self._filter_date.month}月{self._filter_date.day}日 · 共{total_count}个任务")
+                self.stats_label.setText(
+                    f"筛选: {self._filter_date.month}月{self._filter_date.day}日 · 共{total_count}个任务")
             else:
                 all_count = parent_count
                 done_count = sum(1 for t in self._todos if t.get("_is_done", False))
                 self.stats_label.setText(f"今日任务{all_count} · 已完成{done_count}")
         elif self._view_name == "全部任务":
-            # 全部任务页面：只统计父任务（不统计子任务）
             from datetime import date
             all_count = parent_count
             done_count = sum(1 for t in self._todos if t.get("_is_done", False))
@@ -455,14 +812,14 @@ class TodoListView(QWidget):
                         try:
                             if date.fromisoformat(due) < today:
                                 overdue_count += 1
-                        except:
+                        except (ValueError, TypeError):
                             pass
             self.stats_label.setText(f"全部任务{all_count} · 已完成{done_count} · 已超期{overdue_count}")
         else:
             self.stats_label.setText(f"共{total_count}个任务")
 
     def _refresh_grouped_list(self):
-        """刷新分组列表显示（最近待办视图）"""
+        """刷新分组列表显示"""
         all_todos = []
         for group in self._groups:
             all_todos.extend(group["todos"])
@@ -509,7 +866,8 @@ class TodoListView(QWidget):
                 card.card_clicked.connect(self.card_clicked.emit)
                 card.archive_clicked.connect(self.archive_clicked.emit)
                 card.reorder_requested.connect(
-                    lambda from_id, to_id, after, order=parent_ids: self.reorder_requested.emit(from_id, to_id, after, order)
+                    lambda from_id, to_id, after, order=parent_ids: self.reorder_requested.emit(from_id, to_id, after,
+                                                                                                order)
                 )
                 self.list_layout.addWidget(card)
                 self._cards.append(card)
@@ -576,19 +934,43 @@ class TodoListView(QWidget):
             self.week_view.clear_selection()
 
     def _on_time_filter_index_changed(self, idx: int):
-        keys = ["all", "week", "month", "year"]
+        keys = ["all", "week", "month", "year", "custom"]
         if 0 <= idx < len(keys):
             self._time_filter = keys[idx]
+            self.date_range_btn.setVisible(self._time_filter == "custom")
+            if self._time_filter == "custom":
+                # 如果还没有设置自定义日期，不立即触发过滤
+                return
             self.time_filter_changed.emit(self._time_filter)
 
     def set_time_filter_visible(self, visible: bool):
         self.time_filter_combo.setVisible(visible)
+        if visible and self._time_filter == "custom":
+            self.date_range_btn.setVisible(True)
+        else:
+            self.date_range_btn.setVisible(False)
 
     def current_time_filter(self) -> str:
         return self._time_filter
 
+    def get_custom_date_range(self) -> tuple:
+        """返回自定义日期范围 """
+        return self._custom_due_start, self._custom_due_end
+
+    def _on_custom_date_changed(self):
+        """自定义日期范围变化时触发过滤"""
+        start = self.date_range_btn.get_start_date()
+        end = self.date_range_btn.get_due_date()
+        self._custom_due_start = start
+        self._custom_due_end = end
+        self.time_filter_changed.emit(self._time_filter)
+
     def reset_time_filter(self):
         self._time_filter = "all"
+        self._custom_due_start = None
+        self._custom_due_end = None
         self.time_filter_combo.blockSignals(True)
         self.time_filter_combo.setCurrentIndex(0)
         self.time_filter_combo.blockSignals(False)
+        self.date_range_btn.setVisible(False)
+        self.date_range_btn.clear_dates()

@@ -1,4 +1,4 @@
-"""日程视图 - 月历形式展示任务（弹窗模式）"""
+"""日程视图"""
 from __future__ import annotations
 from datetime import date, timedelta
 from calendar import monthrange
@@ -172,7 +172,7 @@ class WeekView(QWidget):
         today = date.today()
 
         weekday = today.weekday()
-        # 计算当前显示周的起始日期（包含周偏移）- 从周一开始
+        # 计算当前显示周的起始日期
         days_offset = self._week_offset * 7
         start_of_week = today - timedelta(days=weekday) + timedelta(days=days_offset)
 
@@ -292,8 +292,7 @@ class WeekView(QWidget):
                         pass
 
     def _update_pending_dates(self):
-        """更新待办日期显示（不重新计算）"""
-        # 重新计算以获取新周的待办日期
+        """更新待办日期显示"""
         self._calculate_pending_dates()
         self._update_week_display()
 
@@ -729,7 +728,7 @@ class CalendarDialog(QDialog):
         return f"color: {color}; font-size: 12px; font-weight: {'600' if is_weekend else '500'};"
 
     def _get_day_label_style_dim(self, col: int) -> str:
-        """非当月日期的日期标签样式（灰色淡化）"""
+        """非当月日期的日期标签样式"""
         dark = isDarkTheme()
         if dark:
             color = "#555"
@@ -738,7 +737,7 @@ class CalendarDialog(QDialog):
         return f"color: {color}; font-size: 12px; font-weight: 400;"
 
     def _get_cell_style_dim(self, col: int) -> str:
-        """非当月日期的单元格样式（淡化）"""
+        """非当月日期的单元格样式"""
         dark = isDarkTheme()
         if dark:
             bg_color = "rgba(255, 255, 255, 0.01)"

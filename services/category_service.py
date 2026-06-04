@@ -38,7 +38,7 @@ class CategoryService:
         return category
 
     def update(self, category_id: int, **kwargs) -> Optional[Category]:
-        """更新分类（系统分类不允许编辑）"""
+        """更新分类"""
         category = self.session.query(Category).filter(
             Category.id == category_id
         ).first()
@@ -56,7 +56,7 @@ class CategoryService:
         return category
 
     def delete(self, category_id: int, move_to_id: Optional[int] = None) -> bool:
-        """删除分类（系统分类不允许删除）
+        """删除分类
 
         Args:
             category_id: 要删除的分类ID
