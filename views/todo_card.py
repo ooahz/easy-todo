@@ -450,13 +450,25 @@ class TodoCard(CardWidget):
 
         # 描述
         desc = todo_data.get("description", "")
-        if hasattr(self, "desc_label"):
-            if desc:
+        if desc:
+            if hasattr(self, "desc_label"):
                 self.desc_label.setText(desc)
                 self.desc_label.setVisible(True)
                 self._apply_desc_style()
             else:
-                self.desc_label.setVisible(False)
+                self.desc_label = CaptionLabel(desc)
+                self.desc_label.setObjectName("descLabel")
+                self.desc_label.setWordWrap(True)
+                self.desc_label.setMaximumHeight(36)
+                self._apply_desc_style()
+                # 插入到 info_label 之前，保持布局顺序：标题 → 描述 → 信息
+                if hasattr(self, "info_label"):
+                    idx = self.content_layout.indexOf(self.info_label)
+                    self.content_layout.insertWidget(idx, self.desc_label)
+                else:
+                    self.content_layout.addWidget(self.desc_label)
+        elif hasattr(self, "desc_label"):
+            self.desc_label.setVisible(False)
 
         # 重建信息行
         self._rebuild_info_label()

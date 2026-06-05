@@ -12,6 +12,7 @@ from qfluentwidgets import (
     BodyLabel, CaptionLabel, Slider, ComboBox, CheckBox,
     PrimaryPushButton, PushButton, FluentIcon, SmoothScrollArea,
     setTheme, Theme, isDarkTheme, setCustomStyleSheet, IconWidget,
+    TransparentToolButton, ToolTipFilter, ToolTipPosition,
 )
 
 from config.settings import settings
@@ -613,6 +614,11 @@ class SettingsPage(QWidget):
         self.manual_refresh_btn = PushButton(FluentIcon.SYNC, "刷新列表")
         self.manual_refresh_btn.clicked.connect(self.manual_refresh_clicked.emit)
         row.addWidget(self.manual_refresh_btn)
+
+        info_btn = TransparentToolButton(FluentIcon.INFO)
+        info_btn.setToolTip("列表跨天自动刷新，存在5分钟延迟，可点击按钮立即刷新")
+        info_btn.installEventFilter(ToolTipFilter(info_btn, showDelay=300, position=ToolTipPosition.RIGHT))
+        row.addWidget(info_btn)
 
         row.addStretch()
 

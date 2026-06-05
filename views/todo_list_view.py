@@ -176,7 +176,8 @@ class DateRangeButton(QPushButton):
                 painter.end()
 
         drawer = DrawerFrame(self.window())
-        drawer.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        drawer.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        drawer.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         layout = QVBoxLayout(drawer)
         layout.setContentsMargins(16, 12, 16, 12)
@@ -291,6 +292,20 @@ class DateRangeButton(QPushButton):
                 new_due = date(qdate.year(), qdate.month(), qdate.day())
         except Exception:
             pass
+
+        # 校验日期范围不超过一年
+        if new_start and new_due:
+            delta = (new_due - new_start).days
+            if delta > 365:
+                from qfluentwidgets import InfoBar, InfoBarPosition
+                InfoBar.warning(
+                    title="范围过大",
+                    content="筛选日期范围不能超过一年",
+                    parent=self.window(),
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                )
+                return
 
         self._start_date = new_start
         self._due_date = new_due

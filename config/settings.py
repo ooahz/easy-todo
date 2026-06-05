@@ -38,6 +38,8 @@ class Settings:
         "dialog_mode": "default",  # default / widescreen
         "detail_dialog_width": 480,
         "detail_dialog_height": 520,
+        "todo_dialog_width": None,
+        "todo_dialog_height": None,
         "system_view_order": ["recent", "today", "important", "all", "done"],
     }
 
@@ -299,6 +301,23 @@ class Settings:
     @detail_dialog_size.setter
     def detail_dialog_size(self, value: tuple):
         self._data["detail_dialog_width"], self._data["detail_dialog_height"] = value
+        self.save_debounced()
+
+    @property
+    def todo_dialog_size(self) -> tuple | None:
+        w = self._data.get("todo_dialog_width")
+        h = self._data.get("todo_dialog_height")
+        if w is not None and h is not None:
+            return (w, h)
+        return None
+
+    @todo_dialog_size.setter
+    def todo_dialog_size(self, value: tuple | None):
+        if value:
+            self._data["todo_dialog_width"], self._data["todo_dialog_height"] = value
+        else:
+            self._data["todo_dialog_width"] = None
+            self._data["todo_dialog_height"] = None
         self.save_debounced()
 
     @property

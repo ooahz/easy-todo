@@ -1,6 +1,6 @@
 """浮窗组件 - 显示当前页面任务列表"""
 from __future__ import annotations
-from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup, QParallelAnimationGroup, QSize
+from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup, QParallelAnimationGroup, QSize, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGraphicsOpacityEffect,
     QApplication, QGraphicsScale,
@@ -46,6 +46,8 @@ class FloatingWidget(QWidget):
         self._resize_start_pos = QPoint()
         self._todos: list[dict] = []
         self._pinned = False
+        self._user_visible = False
+        self._closing = False
 
         self._setup_ui()
         self._apply_theme()
@@ -610,6 +612,28 @@ class FloatingWidget(QWidget):
         self._resizing = False
         self._resize_edge = 0
         super().mouseReleaseEvent(event)
+
+    def show(self):
+        self._user_visible = True
+        super().show()
+
+    def hide(self):
+        self._user_visible = False
+        super().hide()
+
+    def close(self):
+        self._closing = True
+        self._user_visible = False
+        super().close()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self._user_visible and not self._closing:
+            QTimer.singleShot(50, self._restore_visibility)
+
+    def _restore_visibility(self):
+        if self._user_visible and not self._closing:
+            super().show()
 
     def showEvent(self, event):
         super().showEvent(event)

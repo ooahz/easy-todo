@@ -270,6 +270,14 @@ class MainWindow(FluentWindow):
 
         self._setup_ui()
         self._setup_navigation()
+
+        # 根据导航顺序确定初始视图（FluentWindow 默认显示第一个添加的视图）
+        order = settings.system_view_order
+        for key in order:
+            if key in self._view_instances:
+                self._current_view_key = key
+                break
+
         self._setup_category_navigation()
         self._setup_floating()
         self._setup_tray()

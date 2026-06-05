@@ -449,6 +449,13 @@ class TodoDetailDialog(MessageBoxBase):
         self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         top_bar.addWidget(self.title_label, 1)
 
+        if self._is_widescreen:
+            self._toggle_detail_btn = TransparentToolButton(FluentIcon.ALIGNMENT)
+            self._toggle_detail_btn.setFixedSize(28, 28)
+            self._toggle_detail_btn.setToolTip("显示/隐藏任务信息")
+            self._toggle_detail_btn.clicked.connect(self._toggle_detail_panel)
+            top_bar.addWidget(self._toggle_detail_btn)
+
         self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
         self.close_btn.setFixedSize(28, 28)
         self.close_btn.clicked.connect(self.reject)
@@ -1037,6 +1044,11 @@ class TodoDetailDialog(MessageBoxBase):
     def _on_toggle_done(self):
         self._pending_action = ("toggle_done", self._current_todo_id)
         self.reject()
+
+    def _toggle_detail_panel(self):
+        """切换宽屏模式下右侧任务信息面板的显示/隐藏"""
+        if hasattr(self, 'right_panel'):
+            self.right_panel.setVisible(not self.right_panel.isVisible())
 
     def _on_edit(self):
         self._pending_action = ("edit", self._current_todo_id)

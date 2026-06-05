@@ -45,11 +45,11 @@ class TodoDialog(QDialog):
         self._is_widescreen = (settings.dialog_mode == "widescreen")
 
         if self._pid is not None:
-            self.setFixedSize(400, 160)
+            self.setMinimumSize(400, 160)
         elif self._is_widescreen:
-            self.setFixedSize(810, 520)
+            self.setMinimumSize(810, 520)
         else:
-            self.setFixedSize(480, 500)
+            self.setMinimumSize(480, 500)
 
         self._setup_ui()
         self._connect_signals()
@@ -60,20 +60,91 @@ class TodoDialog(QDialog):
             self._load_files()
 
         self.setAcceptDrops(True)
+        self.setMouseTracking(True)
         self._drag_pos = None
+        self._resize_edge = 0  # 0=none, 边缘标志: 1=left, 2=right, 4=top, 8=bottom
+        self._resize_start_geo = None
+        self._resize_start_pos = None
+
+    _RESIZE_MARGIN = 6
+
+    def _detect_edge(self, pos) -> int:
+        """检测鼠标位置所在的边缘"""
+        m = self._RESIZE_MARGIN
+        edge = 0
+        if pos.x() < m:
+            edge |= 1  # left
+        elif pos.x() > self.width() - m:
+            edge |= 2  # right
+        if pos.y() < m:
+            edge |= 4  # top
+        elif pos.y() > self.height() - m:
+            edge |= 8  # bottom
+        return edge
+
+    @staticmethod
+    def _edge_cursor(edge) -> Qt.CursorShape:
+        """根据边缘标志返回光标形状"""
+        cursor_map = {
+            1: Qt.CursorShape.SizeHorCursor,
+            2: Qt.CursorShape.SizeHorCursor,
+            4: Qt.CursorShape.SizeVerCursor,
+            8: Qt.CursorShape.SizeVerCursor,
+            5: Qt.CursorShape.SizeFDiagCursor,   # top-left
+            6: Qt.CursorShape.SizeBDiagCursor,   # top-right
+            9: Qt.CursorShape.SizeBDiagCursor,   # bottom-left
+            10: Qt.CursorShape.SizeFDiagCursor,  # bottom-right
+        }
+        return cursor_map.get(edge, Qt.CursorShape.ArrowCursor)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            edge = self._detect_edge(event.position().toPoint())
+            if edge:
+                self._resize_edge = edge
+                self._resize_start_geo = self.geometry()
+                self._resize_start_pos = event.globalPosition().toPoint()
+            else:
+                self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            if self._resize_edge:
+                # 拖拽调整大小
+                delta = event.globalPosition().toPoint() - self._resize_start_pos
+                geo = self._resize_start_geo
+                min_w = self.minimumWidth()
+                min_h = self.minimumHeight()
+
+                new_left = geo.left()
+                new_top = geo.top()
+                new_right = geo.right()
+                new_bottom = geo.bottom()
+
+                if self._resize_edge & 1:  # left
+                    new_left = min(geo.left() + delta.x(), geo.right() - min_w)
+                if self._resize_edge & 2:  # right
+                    new_right = max(geo.right() + delta.x(), geo.left() + min_w)
+                if self._resize_edge & 4:  # top
+                    new_top = min(geo.top() + delta.y(), geo.bottom() - min_h)
+                if self._resize_edge & 8:  # bottom
+                    new_bottom = max(geo.bottom() + delta.y(), geo.top() + min_h)
+
+                self.setGeometry(new_left, new_top, new_right - new_left, new_bottom - new_top)
+            elif self._drag_pos is not None:
+                self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
+        else:
+            # 无按键时更新光标形状
+            edge = self._detect_edge(event.position().toPoint())
+            self.setCursor(self._edge_cursor(edge))
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+        self._resize_edge = 0
+        self._resize_start_geo = None
+        self._resize_start_pos = None
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -89,6 +160,8 @@ class TodoDialog(QDialog):
         super().paintEvent(event)
 
     def closeEvent(self, event):
+        # 保存窗口尺寸
+        settings.todo_dialog_size = (self.width(), self.height())
         if hasattr(self, '_category_service') and self._category_service:
             self._category_service.close()
         if hasattr(self, '_file_service') and self._file_service:
@@ -921,6 +994,8 @@ class TodoDialog(QDialog):
                     except Exception:
                         pass
                 data["recurrence_end_date"] = recurrence_end
+                if recurrence_type and data["due_date"] is None:
+                    data["due_date"] = date.today() + timedelta(days=365)
                 if recurrence_start is not None:
                     today = date.today()
                     if recurrence_start < today:
@@ -964,6 +1039,9 @@ class TodoDialog(QDialog):
 
                 if recurrence_type:
                     data["auto_postpone"] = False
+                    # 重复任务未设置截止日期时，自动填充为一年后
+                    if data["due_date"] is None:
+                        data["due_date"] = date.today() + timedelta(days=365)
                 recurrence_start = None
                 if hasattr(self, 'recurrence_start_picker') and data.get("recurrence_type"):
                     try:
@@ -1064,13 +1142,18 @@ class TodoDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        # 恢复窗口尺寸
+        saved_size = settings.todo_dialog_size
+        if saved_size:
+            self.resize(saved_size[0], saved_size[1])
         screen = self.screen().availableGeometry()
         x = screen.x() + (screen.width() - self.width()) // 2
         y = screen.y() + (screen.height() - self.height()) // 2
         self.move(x, y)
         self.title_edit.setFocus()
         self.title_edit.setStyleSheet("")
-        self._apply_weekday_btn_style()
+        if hasattr(self, 'weekday_btns'):
+            self._apply_weekday_btn_style()
 
         dark = isDarkTheme()
         if dark:
