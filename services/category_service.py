@@ -2,8 +2,31 @@
 from __future__ import annotations
 from typing import Optional
 
+from PySide6.QtCore import QObject, Signal
+
 from models.database import db
 from models.category import Category
+
+
+class _CategoryEventBus(QObject):
+    """分类事件总线（单例 QObject），用于跨组件通知分类变更。
+    """
+
+    created = Signal(int)
+    updated = Signal(int)
+    deleted = Signal(int)
+    reordered = Signal()
+
+
+_event_bus_instance: _CategoryEventBus | None = None
+
+
+def category_event_bus() -> _CategoryEventBus:
+    """获取分类事件总线单例"""
+    global _event_bus_instance
+    if _event_bus_instance is None:
+        _event_bus_instance = _CategoryEventBus()
+    return _event_bus_instance
 
 
 class CategoryService:
@@ -13,7 +36,7 @@ class CategoryService:
         self.session = db.get_session()
 
     def reset_session(self):
-        """重置会话，清理 identity map 缓存，防止长期持有导致内存膨胀"""
+        """重置会话"""
         try:
             self.session.close()
         except Exception:
@@ -35,6 +58,7 @@ class CategoryService:
         )
         self.session.add(category)
         self.session.commit()
+        category_event_bus().created.emit(category.id)
         return category
 
     def update(self, category_id: int, **kwargs) -> Optional[Category]:
@@ -53,6 +77,7 @@ class CategoryService:
                 setattr(category, key, value)
 
         self.session.commit()
+        category_event_bus().updated.emit(category_id)
         return category
 
     def delete(self, category_id: int, move_to_id: Optional[int] = None) -> bool:
@@ -87,10 +112,11 @@ class CategoryService:
 
         self.session.delete(category)
         self.session.commit()
+        category_event_bus().deleted.emit(category_id)
         return True
 
     def get_all(self) -> list[Category]:
-        """获取所有分类（按排序值）"""
+        """获取所有分类"""
         return self.session.query(Category).order_by(
             Category.sort_order.asc()
         ).all()
@@ -114,6 +140,7 @@ class CategoryService:
                 Category.id == category_id
             ).update({"sort_order": index})
         self.session.commit()
+        category_event_bus().reordered.emit()
         return True
 
     def get_count(self) -> int:

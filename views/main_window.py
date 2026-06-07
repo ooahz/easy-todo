@@ -7,7 +7,7 @@ import sys
 import winreg
 from datetime import date, timedelta
 
-from PySide6.QtCore import QTimer, QRunnable, QThreadPool, QObject, Signal
+from PySide6.QtCore import Qt, QTimer, QRunnable, QThreadPool, QObject, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QSystemTrayIcon, QMenu, QFileDialog, QApplication
@@ -20,7 +20,7 @@ from qfluentwidgets import (
 
 from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED, APP_NAME
 from config.settings import settings
-from services.category_service import CategoryService
+from services.category_service import CategoryService, category_event_bus
 from services.file_service import FileService
 from services.todo_service import TodoService
 from views.delete_todo_dialog import DeleteTodoDialog
@@ -256,6 +256,10 @@ class MainWindow(FluentWindow):
 
     def __init__(self):
         super().__init__()
+        # 初始化完成前禁止任何子界面被渲染到屏幕，避免 Windows 上短暂弹出空窗口
+        self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        self.stackedWidget.setAnimationEnabled(False)
+
         self.todo_service = TodoService()
         self.category_service = CategoryService()
         self.file_service = FileService()
@@ -269,9 +273,8 @@ class MainWindow(FluentWindow):
         self._load_generation: int = 0  # 异步加载代数，防止旧请求覆盖新数据
         self._view_load_in_progress: set[str] = set()  # 正在异步加载的视图集合
 
-        # 分类导航项缓存 {category_id: (interface, navigation_widget)}
+        # 分类导航项缓存 {category_id: (interface, name)}
         self._category_nav_items: dict[int, tuple] = {}
-        self._last_system_view_order = list(settings.system_view_order)
 
         self._setup_ui()
         self._setup_navigation()
@@ -301,6 +304,9 @@ class MainWindow(FluentWindow):
 
         self._load_todos(view_keys={self._current_view_key})
 
+        self.stackedWidget.setAnimationEnabled(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
+
     def _setup_ui(self):
         """初始化窗口"""
         self.setWindowTitle(APP_NAME)
@@ -320,11 +326,11 @@ class MainWindow(FluentWindow):
     def _setup_navigation(self):
         """设置导航栏"""
         self._view_instances = {
-            "all": TodoListView(view_name="全部任务"),
-            "today": TodoListView(view_name="今日任务"),
-            "important": TodoListView(view_name="重要任务"),
-            "done": TodoListView(view_name="已完成", readonly=True),
-            "recent": TodoListView(view_name="最近待办"),
+            "all": TodoListView(parent=self, view_name="全部任务"),
+            "today": TodoListView(parent=self, view_name="今日任务"),
+            "important": TodoListView(parent=self, view_name="重要任务"),
+            "done": TodoListView(parent=self, view_name="已完成", readonly=True),
+            "recent": TodoListView(parent=self, view_name="最近待办"),
         }
         self._view_instances["all"].setObjectName("todoListView")
         self._view_instances["today"].setObjectName("todayView")
@@ -362,7 +368,7 @@ class MainWindow(FluentWindow):
                 self.addSubInterface(view, icon, name)
 
         # 日程视图弹窗
-        self.settings_page = SettingsPage()
+        self.settings_page = SettingsPage(parent=self)
         self.settings_page.setObjectName("settingsPage")
         self.addSubInterface(
             self.settings_page, FluentIcon.SETTING,
@@ -522,7 +528,7 @@ class MainWindow(FluentWindow):
         self.settings_page.manual_refresh_clicked.connect(self._manual_refresh)
         self.settings_page.export_btn.clicked.connect(self._export_data)
         self.settings_page.import_btn.clicked.connect(self._import_data)
-        self.settings_page.categories_changed.connect(self._on_categories_changed)
+        # 分类变更走事件总线订阅，settings_page 自身不再需要 categories_changed 信号
 
         # 导航切换时记录当前视图
         self.stackedWidget.currentChanged.connect(self._on_view_changed)
@@ -1607,14 +1613,25 @@ class MainWindow(FluentWindow):
         self.floating.set_always_on_top(enabled)
 
     def _setup_category_navigation(self):
-        """设置分类导航"""
-        categories = self.category_service.get_all()
-        for cat in categories:
+        """启动时一次性建立分类导航（增量事件订阅 + 初始数据加载）"""
+        bus = category_event_bus()
+        bus.created.connect(self._on_category_created)
+        bus.updated.connect(self._on_category_updated)
+        bus.deleted.connect(self._on_category_deleted)
+        bus.reordered.connect(self._on_category_reordered)
+
+        for cat in self.category_service.get_all():
             if not cat.is_system:
                 self._add_category_nav_item(cat)
 
     def _add_category_nav_item(self, cat):
-        view = TodoListView(view_name=cat.name)
+        """新增一个分类的导航项与对应视图。
+
+        显式将 parent 传为 self（主窗口），
+        避免在 addSubInterface 之前的极短时间窗内 view 因无 parent
+        被 Qt 当作顶层窗口，导致多分类时出现"空窗口一闪而过"。
+        """
+        view = TodoListView(parent=self, view_name=cat.name)
         view.setObjectName(f"categoryView_{cat.id}")
         view.set_time_filter_visible(True)
 
@@ -1641,73 +1658,85 @@ class MainWindow(FluentWindow):
         # 缓存
         self._category_nav_items[cat.id] = (view, cat.name)
 
-    def _on_categories_changed(self):
-        """分类变更时刷新导航"""
-        self.stackedWidget.currentChanged.disconnect(self._on_view_changed)
-        current_widget = self.stackedWidget.currentWidget()
-        current_order = list(settings.system_view_order)
-        order_changed = self._last_system_view_order != current_order
-        self._last_system_view_order = current_order
+    # ---- 分类变更增量处理（订阅事件总线）----
+    def _on_category_created(self, category_id: int):
+        """新建分类：仅插入一个导航项，不动其它分类"""
+        if category_id in self._category_nav_items:
+            return
+        cat = self.category_service.get_by_id(category_id)
+        if not cat or cat.is_system:
+            return
+        self._add_category_nav_item(cat)
+        # 新分类的视图当前未加载数据，等用户切换过去时由 _on_view_changed 懒加载
 
-        for cat_id, (view, _) in list(self._category_nav_items.items()):
+    def _on_category_updated(self, category_id: int):
+        """分类重命名：只更新导航项的文字"""
+        item = self._category_nav_items.get(category_id)
+        if not item:
+            return
+        cat = self.category_service.get_by_id(category_id)
+        if not cat:
+            return
+        view, _ = item
+        try:
+            self.navigationInterface.widget(view.objectName()).setText(cat.name)
+        except Exception:
+            pass
+        self._category_nav_items[category_id] = (view, cat.name)
+
+    def _on_category_deleted(self, category_id: int):
+        """删除分类：仅移除对应的导航项与视图，不动其它分类"""
+        item = self._category_nav_items.pop(category_id, None)
+        if not item:
+            return
+        view, _ = item
+        cat_key = f"cat_{category_id}"
+
+        # 如果当前正显示这个被删分类的视图，先显式切到"全部任务"，
+        # 避免 removeInterface 让 QStackedWidget 自动选一个我们不期望的 widget。
+        if self.stackedWidget.currentWidget() is view:
+            self.stackedWidget.setCurrentWidget(self.todo_list_view)
+
+        try:
+            # removeInterface 内部会从 stackedWidget 摘除并 hide，
+            # 配合 isDelete=True 让框架完成 deleteLater，避免上层手动调度删除时机
+            self.removeInterface(view, isDelete=True)
+        except Exception:
             try:
-                self.removeInterface(view)
-            except Exception:
-                pass
-            view.deleteLater()
-        self._category_nav_items.clear()
-
-        if order_changed:
-            for key in current_order:
-                if key in self._view_instances:
-                    view = self._view_instances[key]
-                    if view is None:
-                        continue
-                    try:
-                        self.removeInterface(view, isDelete=False)
-                    except Exception:
-                        pass
-
-            if self.settings_page is not None:
-                try:
-                    self.removeInterface(self.settings_page, isDelete=False)
-                except Exception:
-                    pass
-
-            QApplication.processEvents()
-
-            for key in current_order:
-                if key in self._view_instances:
-                    view = self._view_instances[key]
-                    if view is None:
-                        continue
-                    icon = self._view_map[key]
-                    name = self._view_names[key]
-                    try:
-                        self.addSubInterface(view, icon, name)
-                    except Exception:
-                        pass
-
-        if self.settings_page is not None:
-            try:
-                self.removeInterface(self.settings_page, isDelete=False)
+                view.deleteLater()
             except Exception:
                 pass
 
-        self._setup_category_navigation()
+        # 清理与该分类相关的加载缓存与当前视图标记
+        self._loaded_views.discard(cat_key)
+        if self._current_view_key == cat_key:
+            self._current_view_key = "all"
 
-        if self.settings_page is not None:
+    def _on_category_reordered(self):
+        """分类顺序变化：刷新所有分类导航的内部顺序。
+
+        qfluentwidgets 的导航接口不直接暴露"指定插入位置"，
+        这里采用最简方式：读最新顺序、对比缓存，对位置不对的项进行 remove + re-add。
+        实际操作中 reorder 仅在管理弹窗中触发，开销可接受。
+        """
+        ordered_ids = [c.id for c in self.category_service.get_all() if not c.is_system]
+        cached_ids = list(self._category_nav_items.keys())
+        if ordered_ids == cached_ids:
+            return
+        # 如果只是子集调整（新增/删除），增量处理已覆盖；这里兜底处理"位置"变化
+        for cat_id in cached_ids:
+            item = self._category_nav_items.get(cat_id)
+            if not item:
+                continue
+            view, _ = item
             try:
-                self.addSubInterface(
-                    self.settings_page, FluentIcon.SETTING,
-                    "设置",
-                    position=NavigationItemPosition.BOTTOM,
-                )
+                self.removeInterface(view, isDelete=False)
             except Exception:
                 pass
-
-        self.stackedWidget.setCurrentWidget(current_widget)
-        self.stackedWidget.currentChanged.connect(self._on_view_changed)
+        for cat_id in ordered_ids:
+            cat = self.category_service.get_by_id(cat_id)
+            if cat:
+                self._add_category_nav_item(cat)
 
     def _on_floating_pin_changed(self, pinned: bool):
         """浮窗固定状态变更"""

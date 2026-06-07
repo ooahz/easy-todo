@@ -1,23 +1,163 @@
-"""设置页面 - 内嵌导航子页面"""
+"""设置页面 - 使用 QFluentWidgets 设置卡组件重构"""
 from __future__ import annotations
+
 import os
-import sys
 from pathlib import Path
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QMovie
 
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, Slider, ComboBox, CheckBox,
-    PrimaryPushButton, PushButton, FluentIcon, SmoothScrollArea,
+    BodyLabel, CaptionLabel, ComboBox, PushButton, FluentIcon, SmoothScrollArea,
     setTheme, Theme, isDarkTheme, setCustomStyleSheet, IconWidget,
-    TransparentToolButton, ToolTipFilter, ToolTipPosition,
+    SettingCardGroup, ComboBoxSettingCard, OptionsSettingCard,
+    SwitchSettingCard, RangeSettingCard, PushSettingCard,
+    PrimaryPushSettingCard, HyperlinkCard, SettingCard,
+    ConfigItem, OptionsConfigItem, RangeConfigItem,
+    OptionsValidator, RangeValidator, BoolValidator,
+    FlyoutViewBase, PopupTeachingTip, TeachingTipTailPosition,
 )
 
 from config.settings import settings
 from config.constants import APP_NAME, APP_VERSION
 from views.style_sheet import StyleSheet
+
+
+class _DataPathCard(SettingCard):
+    """数据保存路径设置卡"""
+
+    browse_clicked = Signal()
+    reset_clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(
+            FluentIcon.FOLDER,
+            "数据保存路径",
+            settings.data_path or "默认路径",
+            parent,
+        )
+
+        self.browse_btn = PushButton("浏览")
+        self.browse_btn.setFixedWidth(72)
+        self.browse_btn.clicked.connect(self.browse_clicked.emit)
+
+        self.reset_btn = PushButton("重置")
+        self.reset_btn.setFixedWidth(72)
+        self.reset_btn.clicked.connect(self.reset_clicked.emit)
+
+        self.hBoxLayout.addWidget(self.reset_btn)
+        self.hBoxLayout.addSpacing(8)
+        self.hBoxLayout.addWidget(self.browse_btn)
+        self.hBoxLayout.addSpacing(16)
+
+    def update_path(self, path: str):
+        self.contentLabel.setText(path or "默认路径")
+
+
+class SortSettingCard(SettingCard):
+    """排序规则设置卡"""
+
+    sort_changed = Signal(list)
+
+    SORT_OPTIONS = [
+        ("自定义", "custom"),
+        ("优先级", "priority"),
+        ("创建时间", "created_at"),
+        ("截止时间", "due_date"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(FluentIcon.UP, "排序规则", "设置任务列表的排序方式", parent)
+
+        self.primary_combo = ComboBox()
+        self.primary_combo.addItems([label for label, _ in self.SORT_OPTIONS])
+        self.primary_combo.setFixedWidth(140)
+
+        rules = settings.sort_rules
+        primary = rules[0] if rules else "priority"
+        for i, (_, val) in enumerate(self.SORT_OPTIONS):
+            if val == primary:
+                self.primary_combo.setCurrentIndex(i)
+                break
+
+        self.secondary_combo = ComboBox()
+        self.secondary_combo.addItems(
+            ["无"] + [label for label, _ in self.SORT_OPTIONS if _ != "custom"]
+        )
+        self.secondary_combo.setFixedWidth(140)
+
+        secondary = rules[1] if len(rules) > 1 else ""
+        if secondary:
+            field_options = [
+                (label, val) for label, val in self.SORT_OPTIONS if val != "custom"
+            ]
+            for i, (_, val) in enumerate(field_options):
+                if val == secondary:
+                    self.secondary_combo.setCurrentIndex(i + 1)
+                    break
+        else:
+            self.secondary_combo.setCurrentIndex(0)
+
+        if primary == "custom":
+            self.secondary_combo.hide()
+
+        self.primary_combo.currentIndexChanged.connect(self._on_changed)
+        self.secondary_combo.currentIndexChanged.connect(self._on_changed)
+
+        self.hBoxLayout.addSpacing(8)
+        self.hBoxLayout.addWidget(self.primary_combo)
+        self.hBoxLayout.addSpacing(12)
+        self.hBoxLayout.addWidget(self.secondary_combo)
+        self.hBoxLayout.addSpacing(16)
+
+    def _on_changed(self):
+        primary_idx = self.primary_combo.currentIndex()
+        primary_val = self.SORT_OPTIONS[primary_idx][1]
+
+        if primary_val == "custom":
+            self.secondary_combo.hide()
+            self.sort_changed.emit(["custom"])
+            return
+
+        self.secondary_combo.show()
+
+        secondary_idx = self.secondary_combo.currentIndex()
+        rules = [primary_val]
+        field_options = [
+            (label, val) for label, val in self.SORT_OPTIONS if val != "custom"
+        ]
+        if secondary_idx > 0:
+            secondary_val = field_options[secondary_idx - 1][1]
+            if secondary_val != rules[0]:
+                rules.append(secondary_val)
+
+        self.sort_changed.emit(rules)
+
+    def update_sort_ui(self, rules: list[str]):
+        """外部更新排序 UI 状态"""
+        primary = rules[0] if rules else "priority"
+        for i, (_, val) in enumerate(self.SORT_OPTIONS):
+            if val == primary:
+                self.primary_combo.setCurrentIndex(i)
+                break
+        self._on_changed()
+
+
+class GifFlyoutView(FlyoutViewBase):
+
+    def __init__(self, gif_path: str, parent=None):
+        super().__init__(parent)
+        self._movie = QMovie(gif_path)
+        self._gif_label = QLabel(self)
+        self._gif_label.setMovie(self._movie)
+        self._gif_label.setFixedSize(30, 30)
+        self._gif_label.setScaledContents(True)
+        self._movie.start()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(self._gif_label)
 
 
 class SettingsPage(QWidget):
@@ -31,33 +171,21 @@ class SettingsPage(QWidget):
     sort_rule_changed = Signal(str)
     sort_rules_changed = Signal(list)
     floating_top_changed = Signal(bool)
-    categories_changed = Signal()
     description_mode_changed = Signal(str)
     dialog_mode_changed = Signal(str)
     manual_refresh_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._cards: list[QFrame] = []
         self._setup_ui()
 
     def _setup_ui(self):
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(20, 16, 20, 8)
-        self.main_layout.setSpacing(12)
-
-        # ---- 顶部工具栏 ----
-        self.toolbar = QHBoxLayout()
-        self.toolbar.setSpacing(8)
-        self.toolbar.addStretch()
-        self.main_layout.addLayout(self.toolbar)
-
-        # ---- 统计行 ----
-        self.stats_label = CaptionLabel("")
-        self.main_layout.addWidget(self.stats_label)
+        self.main_layout.setContentsMargins(28, 16, 28, 8)
+        self.main_layout.setSpacing(0)
 
         # ---- 滚动区域 ----
-        self.scroll_area = SmoothScrollArea()
+        self.scroll_area = SmoothScrollArea(self)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet(
             "SmoothScrollArea { border: none; background: transparent; }"
@@ -66,89 +194,399 @@ class SettingsPage(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
 
-        self.scroll_widget = QWidget()
+        self.scroll_widget = QWidget(self.scroll_area)
         self.scroll_widget.setStyleSheet("background: transparent;")
         self.list_layout = QVBoxLayout(self.scroll_widget)
         self.list_layout.setContentsMargins(0, 0, 8, 0)
-        self.list_layout.setSpacing(10)
+        self.list_layout.setSpacing(16)
 
-        # ---- 设置卡片 ----
-        self.list_layout.addWidget(self._make_card("外观", [
-            self._make_combo_row("主题", self._create_theme_combo()),
-        ]))
+        # ---- 个性化组 ----
+        self.list_layout.addWidget(self._create_appearance_group())
 
-        self.list_layout.addWidget(self._make_card("任务列表", [
-            self._create_show_done_cb(),
-            self._create_show_week_view_cb(),
-            self._create_manual_refresh_btn(),
-        ]))
+        # ---- 任务列表组 ----
+        self.list_layout.addWidget(self._create_task_group())
 
-        self.list_layout.addWidget(self._make_card("编辑器", [
-            self._make_combo_row("输入模式", self._create_description_mode_combo()),
-            self._make_combo_row("布局模式", self._create_dialog_mode_combo()),
-        ]))
+        # ---- 编辑器组 ----
+        self.list_layout.addWidget(self._create_editor_group())
 
-        self.list_layout.addWidget(self._make_card("排序规则", [
-            self._create_sort_row(),
-        ]))
+        # ---- 排序规则组 ----
+        self.list_layout.addWidget(self._create_sort_group())
 
-        self.list_layout.addWidget(self._make_card("分类", [
-            self._make_category_manage_row(),
-        ]))
+        # ---- 分类组 ----
+        self.list_layout.addWidget(self._create_category_group())
 
-        self.list_layout.addWidget(self._make_card("浮窗设置", [
-            self._make_slider_row(),
-            self._create_floating_top_cb(),
-            self._create_floating_show_subtasks_cb(),
-        ]))
+        # ---- 浮窗组 ----
+        self.list_layout.addWidget(self._create_floating_group())
 
-        self.list_layout.addWidget(self._make_card("数据", [
-            self._make_data_btns(),
-        ]))
+        # ---- 数据组 ----
+        self.list_layout.addWidget(self._create_data_group())
 
-        self.list_layout.addWidget(self._make_card("启动", [
-            self._create_auto_start_cb(),
-        ]))
+        # ---- 启动组 ----
+        self.list_layout.addWidget(self._create_startup_group())
 
+        # ---- 关于组 ----
+        self.list_layout.addWidget(self._create_about_group())
+
+        # ---- 关于卡片 ----
         self.list_layout.addWidget(self._make_about_card())
+
 
         self.list_layout.addStretch()
 
         self.scroll_area.setWidget(self.scroll_widget)
         self.main_layout.addWidget(self.scroll_area, 1)
 
-    def _make_card(self, title: str, rows: list) -> QFrame:
-        """创建设置卡片"""
-        card = QFrame()
-        card.setObjectName("settingsCard")
-        self._cards.append(card)
+    # ================================================================
+    #  设置组创建
+    # ================================================================
 
-        StyleSheet.SETTINGS_CARD.apply(card)
+    def _create_appearance_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("个性化", self.scroll_widget)
 
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(16, 12, 16, 12)
-        card_layout.setSpacing(8)
+        self.theme_cfg = OptionsConfigItem(
+            "Appearance", "Theme", settings.theme,
+            OptionsValidator(["light", "dark", "system"]),
+        )
+        self.theme_card = OptionsSettingCard(
+            self.theme_cfg,
+            FluentIcon.BRUSH,
+            "应用主题",
+            "调整应用的外观",
+            texts=["浅色", "深色", "跟随系统设置"],
+        )
+        self.theme_card.optionChanged.connect(self._on_theme_changed)
+        group.addSettingCard(self.theme_card)
 
-        title_label = BodyLabel(title)
-        font = QFont()
-        font.setBold(True)
-        font.setPointSize(11)
-        title_label.setFont(font)
-        card_layout.addWidget(title_label)
+        return group
 
-        for row in rows:
-            if isinstance(row, QWidget):
-                card_layout.addWidget(row)
-            else:
-                card_layout.addLayout(row)
+    def _create_task_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("任务列表", self.scroll_widget)
 
-        return card
+        self.show_done_cfg = ConfigItem(
+            "TaskList", "ShowDoneTasks", settings.show_done_tasks, BoolValidator()
+        )
+        self.show_done_card = SwitchSettingCard(
+            FluentIcon.COMPLETED,
+            "显示已完成的任务",
+            "在任务列表中显示已完成的任务",
+            configItem=self.show_done_cfg,
+        )
+        self.show_done_card.switchButton.setOnText("开")
+        self.show_done_card.switchButton.setOffText("关")
+        self.show_done_card.checkedChanged.connect(self._on_show_done_changed)
+        group.addSettingCard(self.show_done_card)
+
+        self.show_week_view_cfg = ConfigItem(
+            "TaskList", "ShowWeekView", settings.show_week_view, BoolValidator()
+        )
+        self.show_week_view_card = SwitchSettingCard(
+            FluentIcon.CALENDAR,
+            "显示周日程视图",
+            "在任务列表显示周视图",
+            configItem=self.show_week_view_cfg,
+        )
+        self.show_week_view_card.switchButton.setOnText("开")
+        self.show_week_view_card.switchButton.setOffText("关")
+        self.show_week_view_card.checkedChanged.connect(self._on_show_week_view_changed)
+        group.addSettingCard(self.show_week_view_card)
+
+        self.refresh_card = PushSettingCard(
+            "刷新列表",
+            FluentIcon.SYNC,
+            "手动刷新列表",
+            "列表跨天自动刷新，存在5分钟延迟，可点击按钮立即刷新",
+        )
+        self.refresh_card.clicked.connect(self.manual_refresh_clicked.emit)
+        group.addSettingCard(self.refresh_card)
+
+        self.manual_refresh_btn = self.refresh_card.button
+
+        return group
+
+    def _create_editor_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("编辑器", self.scroll_widget)
+
+        self.desc_mode_cfg = OptionsConfigItem(
+            "Editor", "DescriptionMode", settings.description_mode,
+            OptionsValidator(["default", "markdown"]),
+        )
+        self.desc_mode_card = ComboBoxSettingCard(
+            self.desc_mode_cfg,
+            FluentIcon.EDIT,
+            "输入模式",
+            "选择任务描述的输入方式",
+            texts=["默认", "Markdown"],
+        )
+        self.desc_mode_card.comboBox.currentIndexChanged.connect(
+            self._on_description_mode_changed
+        )
+        group.addSettingCard(self.desc_mode_card)
+
+        self.dialog_mode_cfg = OptionsConfigItem(
+            "Editor", "DialogMode", settings.dialog_mode,
+            OptionsValidator(["default", "widescreen"]),
+        )
+        self.dialog_mode_card = ComboBoxSettingCard(
+            self.dialog_mode_cfg,
+            FluentIcon.ZOOM,
+            "布局模式",
+            "选择任务编辑对话框的布局方式",
+            texts=["单栏", "分栏"],
+        )
+        self.dialog_mode_card.comboBox.currentIndexChanged.connect(
+            self._on_dialog_mode_changed
+        )
+        group.addSettingCard(self.dialog_mode_card)
+
+        return group
+
+    def _create_sort_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("排序规则", self.scroll_widget)
+
+        self.sort_card = SortSettingCard()
+        self.sort_card.sort_changed.connect(self._on_sort_rules_changed)
+        group.addSettingCard(self.sort_card)
+
+        return group
+
+    def _create_category_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("分类", self.scroll_widget)
+
+        self.category_card = PushSettingCard(
+            "管理分类",
+            FluentIcon.BOOK_SHELF,
+            "分类管理",
+            "当前有 0 个分类",
+        )
+        self.category_card.clicked.connect(self._on_manage_categories)
+        group.addSettingCard(self.category_card)
+
+        self._update_category_count()
+        return group
+
+    def _create_floating_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("浮窗", self.scroll_widget)
+
+        self.opacity_cfg = RangeConfigItem(
+            "Floating", "Opacity", int(settings.floating_opacity * 100),
+            RangeValidator(10, 100),
+        )
+        self.opacity_card = RangeSettingCard(
+            self.opacity_cfg,
+            FluentIcon.TRANSPARENT,
+            "透明度",
+            "调整浮窗的透明度",
+        )
+        self.opacity_card.valueChanged.connect(self._on_opacity_changed)
+        group.addSettingCard(self.opacity_card)
+
+        self.floating_top_cfg = ConfigItem(
+            "Floating", "Top", settings.floating_top, BoolValidator()
+        )
+        self.floating_top_card = SwitchSettingCard(
+            FluentIcon.PIN,
+            "浮窗始终置顶",
+            "使浮窗始终保持在其他窗口之上",
+            configItem=self.floating_top_cfg,
+        )
+        self.floating_top_card.switchButton.setOnText("开")
+        self.floating_top_card.switchButton.setOffText("关")
+        self.floating_top_card.checkedChanged.connect(self._on_floating_top_changed)
+        group.addSettingCard(self.floating_top_card)
+
+        self.floating_subtasks_cfg = ConfigItem(
+            "Floating", "ShowSubtasks", settings.floating_show_subtasks, BoolValidator()
+        )
+        self.floating_subtasks_card = SwitchSettingCard(
+            FluentIcon.DOCUMENT,
+            "浮窗显示子任务",
+            "在浮窗中显示任务的子任务列表",
+            configItem=self.floating_subtasks_cfg,
+        )
+        self.floating_subtasks_card.switchButton.setOnText("开")
+        self.floating_subtasks_card.switchButton.setOffText("关")
+        self.floating_subtasks_card.checkedChanged.connect(
+            self._on_floating_show_subtasks_changed
+        )
+        group.addSettingCard(self.floating_subtasks_card)
+
+        return group
+
+    def _create_data_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("数据", self.scroll_widget)
+
+        self.data_path_card = _DataPathCard()
+        self.data_path_card.browse_clicked.connect(self._on_browse_data_path)
+        self.data_path_card.reset_clicked.connect(self._on_reset_data_path)
+        group.addSettingCard(self.data_path_card)
+
+        self.export_btn = PushSettingCard(
+            "导出",
+            FluentIcon.SAVE,
+            "导出数据",
+            "将任务数据导出为 JSON 文件",
+        )
+        group.addSettingCard(self.export_btn)
+
+        self.import_btn = PushSettingCard(
+            "导入",
+            FluentIcon.DOWNLOAD,
+            "导入数据",
+            "从 JSON 文件导入任务数据",
+        )
+        group.addSettingCard(self.import_btn)
+
+        return group
+
+    def _create_startup_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("启动", self.scroll_widget)
+
+        self.auto_start_cfg = ConfigItem(
+            "Startup", "AutoStart", settings.auto_start, BoolValidator()
+        )
+        self.auto_start_card = SwitchSettingCard(
+            FluentIcon.POWER_BUTTON,
+            "开机自动启动",
+            "系统启动时自动运行应用",
+            configItem=self.auto_start_cfg,
+        )
+        self.auto_start_card.switchButton.setOnText("开")
+        self.auto_start_card.switchButton.setOffText("关")
+        self.auto_start_card.checkedChanged.connect(self._on_auto_start_changed)
+        group.addSettingCard(self.auto_start_card)
+
+        return group
+
+    def _create_about_group(self):
+        group = SettingCardGroup("关于", self.scroll_widget)
+
+        self.repo_card = HyperlinkCard(
+            "https://github.com/ooahz",
+            "查看仓库",
+            FluentIcon.INFO,
+            "项目仓库",
+            "https://github.com/ooahz",
+        )
+        group.addSettingCard(self.repo_card)
+
+        self.homepage_card = HyperlinkCard(
+            "https://ahzoo.cn",
+            "查看主页",
+            FluentIcon.HOME,
+            "个人主页",
+            "https://ahzoo.cn",
+        )
+        self.homepage_card.mousePressEvent = lambda e: self._show_gif_tip(self.homepage_card)
+        group.addSettingCard(self.homepage_card)
+
+        return group
+
+    # ================================================================
+    #  信号处理
+    # ================================================================
+
+    def _show_gif_tip(self, target):
+        gif_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "kotone.gif")
+        if not os.path.exists(gif_path):
+            return
+        view = GifFlyoutView(gif_path)
+        PopupTeachingTip.make(
+            view, target, -1,
+            TeachingTipTailPosition.BOTTOM,
+            self,
+        )
+
+    def _on_theme_changed(self, item: OptionsConfigItem):
+        theme = item.value
+        settings.theme = theme
+        self.theme_changed.emit(theme)
+
+    def _on_show_done_changed(self, checked: bool):
+        settings.show_done_tasks = checked
+        self.show_done_changed.emit(checked)
+
+    def _on_show_week_view_changed(self, checked: bool):
+        settings.show_week_view = checked
+        self.show_week_view_changed.emit(checked)
+
+    def _on_description_mode_changed(self, index: int):
+        mode = "default" if index == 0 else "markdown"
+        settings.description_mode = mode
+        self.description_mode_changed.emit(mode)
+
+    def _on_dialog_mode_changed(self, index: int):
+        mode = "default" if index == 0 else "widescreen"
+        settings.dialog_mode = mode
+        self.dialog_mode_changed.emit(mode)
+
+    def _on_sort_rules_changed(self, rules: list):
+        settings.sort_rules = rules
+        settings.sort_rule = rules[0]
+        self.sort_rules_changed.emit(rules)
+        self.sort_rule_changed.emit(rules[0])
+
+    def _on_opacity_changed(self, value: int):
+        percent = value / 100.0
+        settings.floating_opacity = percent
+        self.opacity_changed.emit(percent)
+
+    def _on_floating_top_changed(self, checked: bool):
+        settings.floating_top = checked
+        self.floating_top_changed.emit(checked)
+
+    def _on_floating_show_subtasks_changed(self, checked: bool):
+        settings.floating_show_subtasks = checked
+
+    def _on_auto_start_changed(self, checked: bool):
+        settings.auto_start = checked
+        self.auto_start_changed.emit(checked)
+
+    def _on_browse_data_path(self):
+        """浏览选择数据保存路径"""
+        from PySide6.QtWidgets import QFileDialog
+
+        path = QFileDialog.getExistingDirectory(
+            self, "选择数据保存路径", settings.data_path or str(Path.home())
+        )
+        if path:
+            settings.data_path = path
+            self.data_path_card.update_path(path)
+
+    def _on_reset_data_path(self):
+        """重置为默认路径"""
+        settings.data_path = ""
+        self.data_path_card.update_path("")
+
+    def _on_manage_categories(self):
+        """打开分类管理对话框"""
+        from views.category_dialog import CategoryDialog
+
+        # WA_DeleteOnClose 让 Qt 在窗口关闭后自动释放底层 C++ 对象，
+        # 避免每次打开都残留一个挂在 SettingsPage 子树上的 CategoryDialog 实例
+        # （同时挂着事件总线的 4 条 connect，闭包不释放就泄漏）。
+        dialog = CategoryDialog(self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.exec()
+        # CategoryDialog 内部已订阅事件总线，自身数据已自动同步。
+        # 主窗口侧由 MainWindow 订阅同一总线完成导航增量更新，
+        # 关闭的瞬间不会再触发任何"延迟全量重建"。
+        self._update_category_count()
+
+    def _update_category_count(self):
+        """更新分类数量显示"""
+        from services.category_service import CategoryService
+
+        cs = CategoryService()
+        try:
+            count = cs.get_count()
+            self.category_card.contentLabel.setText(f"当前有 {count} 个分类")
+        finally:
+            cs.close()
 
     def _make_about_card(self) -> QFrame:
         """创建关于卡片"""
         card = QFrame()
         card.setObjectName("settingsCard")
-        self._cards.append(card)
 
         StyleSheet.SETTINGS_CARD.apply(card)
 
@@ -189,11 +627,11 @@ class SettingsPage(QWidget):
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("""
-            color: #666;
-            font-size: 13px;
-            line-height: 1.5;
-            margin-bottom: 18px;
-        """)
+             color: #666;
+             font-size: 13px;
+             line-height: 1.5;
+             margin-bottom: 18px;
+         """)
         setCustomStyleSheet(
             desc_label,
             "color: #666;",
@@ -213,9 +651,9 @@ class SettingsPage(QWidget):
         author_icon = QLabel()
         author_icon.setFixedSize(16, 16)
         author_icon.setStyleSheet("""
-            background: #0078D4;
-            border-radius: 8px;
-        """)
+             background: #0078D4;
+             border-radius: 8px;
+         """)
         author_row.addWidget(author_icon)
 
         author_key = BodyLabel("作者")
@@ -223,41 +661,11 @@ class SettingsPage(QWidget):
         author_row.addWidget(author_key)
         author_val = BodyLabel("十玖八柒")
         author_val.setStyleSheet("font-size: 13px; font-weight: 500;")
-        author_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        author_val.setCursor(Qt.CursorShape.PointingHandCursor)
+        author_val.mousePressEvent = lambda e: self._show_gif_tip(author_val)
         author_row.addWidget(author_val)
         author_row.addStretch()
         info_container.addLayout(author_row)
-
-        # 仓库信息
-        repo_row = QHBoxLayout()
-        repo_row.setSpacing(8)
-        repo_row.addStretch()
-
-        repo_icon = QLabel()
-        repo_icon.setFixedSize(16, 16)
-        repo_icon.setStyleSheet("""
-            background: #8764B8;
-            border-radius: 8px;
-        """)
-        repo_row.addWidget(repo_icon)
-
-        repo_key = BodyLabel("仓库")
-        repo_key.setStyleSheet("color: #888; font-size: 13px;")
-        repo_row.addWidget(repo_key)
-
-        repo_val = BodyLabel("github.com/ooahz")
-        repo_val.setStyleSheet("""
-            color: #0078D4;
-            font-size: 13px;
-            font-weight: 500;
-            text-decoration: none;
-        """)
-        repo_val.setCursor(Qt.CursorShape.PointingHandCursor)
-        repo_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        repo_row.addWidget(repo_val)
-        repo_row.addStretch()
-        info_container.addLayout(repo_row)
-
         card_layout.addLayout(info_container)
 
         # 底部分隔线
@@ -275,10 +683,10 @@ class SettingsPage(QWidget):
         copyright_label = CaptionLabel("© 2026 Easy Todo. All rights reserved.")
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         copyright_label.setStyleSheet("""
-            color: #999;
-            font-size: 11px;
-            margin-top: 18px;
-        """)
+             color: #999;
+             font-size: 11px;
+             margin-top: 18px;
+         """)
         setCustomStyleSheet(
             copyright_label,
             "color: #999;",
@@ -288,326 +696,6 @@ class SettingsPage(QWidget):
 
         return card
 
-    def _create_theme_combo(self) -> ComboBox:
-        self.theme_combo = ComboBox()
-        self.theme_combo.addItems(["浅色", "深色", "跟随系统"])
-        current = settings.theme
-        idx = {"light": 0, "dark": 1, "system": 2}.get(current, 0)
-        self.theme_combo.setCurrentIndex(idx)
-        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        return self.theme_combo
-
-    def _make_combo_row(self, label_text: str, combo: ComboBox) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        label = BodyLabel(label_text)
-        label.setFixedWidth(60)
-        row.addWidget(label)
-        row.addWidget(combo)
-        row.addStretch()
-        return row
-
-    def _create_show_done_cb(self) -> CheckBox:
-        self.show_done_cb = CheckBox("显示已完成的任务")
-        self.show_done_cb.setChecked(settings.show_done_tasks)
-        self.show_done_cb.checkStateChanged.connect(self._on_show_done_changed)
-        return self.show_done_cb
-
-    def _create_description_mode_combo(self) -> ComboBox:
-        self.desc_mode_combo = ComboBox()
-        self.desc_mode_combo.addItems(["默认", "Markdown"])
-        idx = 0 if settings.description_mode == "default" else 1
-        self.desc_mode_combo.setCurrentIndex(idx)
-        self.desc_mode_combo.currentIndexChanged.connect(self._on_description_mode_changed)
-        return self.desc_mode_combo
-
-    def _create_dialog_mode_combo(self) -> ComboBox:
-        self.dialog_mode_combo = ComboBox()
-        self.dialog_mode_combo.addItems(["单栏", "分栏"])
-        idx = 0 if settings.dialog_mode == "default" else 1
-        self.dialog_mode_combo.setCurrentIndex(idx)
-        self.dialog_mode_combo.currentIndexChanged.connect(self._on_dialog_mode_changed)
-        return self.dialog_mode_combo
-
-    def _create_show_week_view_cb(self) -> CheckBox:
-        self.show_week_view_cb = CheckBox("显示周日程视图")
-        self.show_week_view_cb.setChecked(settings.show_week_view)
-        self.show_week_view_cb.checkStateChanged.connect(self._on_show_week_view_changed)
-        return self.show_week_view_cb
-
-    def _make_category_manage_row(self) -> QHBoxLayout:
-        """创建分类管理行"""
-        from services.category_service import CategoryService
-
-        row = QHBoxLayout()
-        row.setSpacing(12)
-
-        self.category_count_label = BodyLabel("加载中...")
-        row.addWidget(self.category_count_label)
-        row.addStretch()
-
-        manage_btn = PushButton("管理分类")
-        manage_btn.clicked.connect(self._on_manage_categories)
-        row.addWidget(manage_btn)
-
-        self._update_category_count()
-        return row
-
-    def _update_category_count(self):
-        """更新分类数量显示"""
-        from services.category_service import CategoryService
-        cs = CategoryService()
-        try:
-            count = cs.get_count()
-            self.category_count_label.setText(f"当前有 {count} 个分类")
-        finally:
-            cs.close()
-
-    def _on_manage_categories(self):
-        """打开分类管理对话框"""
-        from views.category_dialog import CategoryDialog
-        dialog = CategoryDialog(self)
-        dialog.exec()
-        if dialog._dirty:
-            self._update_category_count()
-            self.categories_changed.emit()
-
-    SORT_OPTIONS = [
-        ("自定义", "custom"),
-        ("优先级", "priority"),
-        ("创建时间", "created_at"),
-        ("截止时间", "due_date"),
-    ]
-
-    def _create_sort_row(self):
-        """创建排序规则行"""
-        row = QHBoxLayout()
-        row.setSpacing(12)
-
-        self.sort_primary_combo = ComboBox()
-        self.sort_primary_combo.addItems([label for label, _ in self.SORT_OPTIONS])
-        self.sort_primary_combo.setFixedWidth(150)
-        rules = settings.sort_rules
-        primary = rules[0] if rules else "priority"
-        for i, (_, val) in enumerate(self.SORT_OPTIONS):
-            if val == primary:
-                self.sort_primary_combo.setCurrentIndex(i)
-                break
-        self.sort_primary_combo.currentIndexChanged.connect(self._on_sort_rules_changed)
-        row.addWidget(self.sort_primary_combo)
-
-        self.sort_secondary_combo = ComboBox()
-        self.sort_secondary_combo.addItems(["无"] + [label for label, _ in self.SORT_OPTIONS if _ != "custom"])
-        self.sort_secondary_combo.setFixedWidth(150)
-        secondary = rules[1] if len(rules) > 1 else ""
-        if secondary:
-            field_options = [(label, val) for label, val in self.SORT_OPTIONS if val != "custom"]
-            for i, (_, val) in enumerate(field_options):
-                if val == secondary:
-                    self.sort_secondary_combo.setCurrentIndex(i + 1)
-                    break
-        else:
-            self.sort_secondary_combo.setCurrentIndex(0)
-        self.sort_secondary_combo.currentIndexChanged.connect(self._on_sort_rules_changed)
-        row.addWidget(self.sort_secondary_combo)
-
-        row.addStretch()
-
-        # 初始状态：自定义时隐藏二级排序
-        if primary == "custom":
-            self.sort_secondary_combo.hide()
-
-        return row
-
-    def _on_sort_rules_changed(self):
-        primary_idx = self.sort_primary_combo.currentIndex()
-        primary_val = self.SORT_OPTIONS[primary_idx][1]
-
-        # 自定义排序时隐藏二级排序
-        if primary_val == "custom":
-            self.sort_secondary_combo.hide()
-            settings.sort_rules = ["custom"]
-            settings.sort_rule = "custom"
-            self.sort_rules_changed.emit(["custom"])
-            self.sort_rule_changed.emit("custom")
-            return
-
-        self.sort_secondary_combo.show()
-
-        secondary_idx = self.sort_secondary_combo.currentIndex()
-        rules = [primary_val]
-        field_options = [(label, val) for label, val in self.SORT_OPTIONS if val != "custom"]
-        if secondary_idx > 0:
-            secondary_val = field_options[secondary_idx - 1][1]
-            if secondary_val != rules[0]:
-                rules.append(secondary_val)
-        settings.sort_rules = rules
-        settings.sort_rule = rules[0]
-        self.sort_rules_changed.emit(rules)
-        self.sort_rule_changed.emit(rules[0])
-
     def _update_sort_ui(self, rules: list[str]):
         """外部更新排序 UI 状态"""
-        primary = rules[0] if rules else "priority"
-        for i, (_, val) in enumerate(self.SORT_OPTIONS):
-            if val == primary:
-                self.sort_primary_combo.setCurrentIndex(i)
-                break
-        self._on_sort_rules_changed()
-
-    def _create_auto_start_cb(self) -> CheckBox:
-        self.auto_start_cb = CheckBox("开机自动启动")
-        self.auto_start_cb.setChecked(settings.auto_start)
-        self.auto_start_cb.checkStateChanged.connect(self._on_auto_start_changed)
-        return self.auto_start_cb
-
-    def _create_floating_top_cb(self) -> CheckBox:
-        self.floating_top_cb = CheckBox("浮窗始终置顶")
-        self.floating_top_cb.setChecked(settings.floating_top)
-        self.floating_top_cb.checkStateChanged.connect(self._on_floating_top_changed)
-        return self.floating_top_cb
-
-    def _create_floating_show_subtasks_cb(self) -> CheckBox:
-        self.floating_show_subtasks_cb = CheckBox("浮窗显示子任务")
-        self.floating_show_subtasks_cb.setChecked(settings.floating_show_subtasks)
-        self.floating_show_subtasks_cb.checkStateChanged.connect(self._on_floating_show_subtasks_changed)
-        return self.floating_show_subtasks_cb
-
-    def _make_slider_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(12)
-
-        label = BodyLabel("透明度")
-        label.setFixedWidth(60)
-        row.addWidget(label)
-
-        self.opacity_slider = Slider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(10, 100)
-        self.opacity_slider.setValue(int(settings.floating_opacity * 100))
-        self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
-        row.addWidget(self.opacity_slider)
-
-        self.opacity_value_label = BodyLabel(f"{int(settings.floating_opacity * 100)}%")
-        self.opacity_value_label.setFixedWidth(36)
-        row.addWidget(self.opacity_value_label)
-
-        return row
-
-    def _make_data_btns(self) -> QVBoxLayout:
-        layout = QVBoxLayout()
-        layout.setSpacing(12)
-
-        # 数据保存路径
-        path_row = QHBoxLayout()
-        path_row.setSpacing(10)
-
-        path_label = BodyLabel("保存路径")
-        path_label.setFixedWidth(60)
-        path_row.addWidget(path_label)
-
-        self.data_path_label = BodyLabel(settings.data_path or "默认路径")
-        self.data_path_label.setWordWrap(True)
-        path_row.addWidget(self.data_path_label, 1)
-
-        self.browse_path_btn = PushButton(FluentIcon.FOLDER, "浏览")
-        self.browse_path_btn.clicked.connect(self._on_browse_data_path)
-        path_row.addWidget(self.browse_path_btn)
-
-        self.reset_path_btn = PushButton("重置")
-        self.reset_path_btn.clicked.connect(self._on_reset_data_path)
-        path_row.addWidget(self.reset_path_btn)
-
-        layout.addLayout(path_row)
-
-        # 导入导出按钮
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-
-        self.export_btn = PushButton(FluentIcon.SAVE, "导出数据")
-        btn_row.addWidget(self.export_btn)
-
-        self.import_btn = PushButton(FluentIcon.FOLDER, "导入数据")
-        btn_row.addWidget(self.import_btn)
-
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        return layout
-
-    def _on_browse_data_path(self):
-        """浏览选择数据保存路径"""
-        from PySide6.QtWidgets import QFileDialog
-
-        path = QFileDialog.getExistingDirectory(
-            self, "选择数据保存路径", settings.data_path or str(Path.home())
-        )
-        if path:
-            settings.data_path = path
-            self.data_path_label.setText(path)
-
-    def _on_reset_data_path(self):
-        """重置为默认路径"""
-        settings.data_path = ""
-        self.data_path_label.setText("默认路径")
-
-    def _on_opacity_changed(self, value: int):
-        percent = value / 100.0
-        self.opacity_value_label.setText(f"{value}%")
-        self.opacity_changed.emit(percent)
-        settings.floating_opacity = percent
-
-    def _on_theme_changed(self, index: int):
-        themes = ["light", "dark", "system"]
-        theme = themes[index] if index < len(themes) else "light"
-        settings.theme = theme
-        self.theme_changed.emit(theme)
-
-    def _on_show_done_changed(self, state):
-        checked = (state == Qt.CheckState.Checked)
-        settings.show_done_tasks = checked
-        self.show_done_changed.emit(checked)
-
-    def _on_show_week_view_changed(self, state):
-        checked = (state == Qt.CheckState.Checked)
-        settings.show_week_view = checked
-        self.show_week_view_changed.emit(checked)
-
-    def _on_auto_start_changed(self, state):
-        checked = (state == Qt.CheckState.Checked)
-        settings.auto_start = checked
-        self.auto_start_changed.emit(checked)
-
-    def _on_floating_top_changed(self, state):
-        checked = (state == Qt.CheckState.Checked)
-        settings.floating_top = checked
-        self.floating_top_changed.emit(checked)
-
-    def _on_floating_show_subtasks_changed(self, state):
-        checked = (state == Qt.CheckState.Checked)
-        settings.floating_show_subtasks = checked
-
-    def _on_description_mode_changed(self, index: int):
-        mode = "default" if index == 0 else "markdown"
-        settings.description_mode = mode
-        self.description_mode_changed.emit(mode)
-
-    def _on_dialog_mode_changed(self, index: int):
-        mode = "default" if index == 0 else "widescreen"
-        settings.dialog_mode = mode
-        self.dialog_mode_changed.emit(mode)
-
-    def _create_manual_refresh_btn(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-
-        self.manual_refresh_btn = PushButton(FluentIcon.SYNC, "刷新列表")
-        self.manual_refresh_btn.clicked.connect(self.manual_refresh_clicked.emit)
-        row.addWidget(self.manual_refresh_btn)
-
-        info_btn = TransparentToolButton(FluentIcon.INFO)
-        info_btn.setToolTip("列表跨天自动刷新，存在5分钟延迟，可点击按钮立即刷新")
-        info_btn.installEventFilter(ToolTipFilter(info_btn, showDelay=300, position=ToolTipPosition.RIGHT))
-        row.addWidget(info_btn)
-
-        row.addStretch()
-
-        return row
+        self.sort_card.update_sort_ui(rules)

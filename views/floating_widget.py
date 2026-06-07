@@ -32,6 +32,7 @@ class FloatingWidget(QWidget):
             Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         self.setMouseTracking(True)
         self.resize(300, 400)
         self.setMinimumSize(self.MIN_WIDTH, self.MIN_HEIGHT)
@@ -61,7 +62,7 @@ class FloatingWidget(QWidget):
         self.main_layout.setSpacing(0)
 
         # 背景容器
-        self.bg_frame = QFrame()
+        self.bg_frame = QFrame(self)
         self.bg_frame.setObjectName("floatingBg")
         self.bg_frame.setMouseTracking(True)
 
@@ -70,7 +71,7 @@ class FloatingWidget(QWidget):
         bg_layout.setSpacing(6)
 
         # 标题栏
-        self.title_bar = QWidget()
+        self.title_bar = QWidget(self.bg_frame)
         self.title_bar.setFixedHeight(32)
         title_layout = QHBoxLayout(self.title_bar)
         title_layout.setContentsMargins(1, 0, 1, 0)
@@ -112,13 +113,13 @@ class FloatingWidget(QWidget):
         bg_layout.addWidget(self.sep)
 
         # 任务列表
-        self.scroll = SmoothScrollArea()
+        self.scroll = SmoothScrollArea(self.bg_frame)
         self.scroll.setWidgetResizable(True)
         self.scroll.setStyleSheet("SmoothScrollArea { border: none; background: transparent; }")
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self.list_widget = QWidget()
+        self.list_widget = QWidget(self.scroll)
         self.list_widget.setStyleSheet("background: transparent;")
         self.list_layout = QVBoxLayout(self.list_widget)
         self.list_layout.setContentsMargins(0, 4, 0, 4)
@@ -653,6 +654,7 @@ class FloatingWidget(QWidget):
         super().mouseReleaseEvent(event)
 
     def show(self):
+        self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
         self._user_visible = True
         super().show()
 

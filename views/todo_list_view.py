@@ -390,7 +390,7 @@ class TodoListView(QWidget):
         self.toolbar.setSpacing(8)
 
         # 过滤下拉框
-        self.filter_combo = ComboBox()
+        self.filter_combo = ComboBox(self)
         self.filter_combo.addItems(["已完成", "已归档"])
         self.filter_combo.setCurrentIndex(0)
         self.filter_combo.setFixedWidth(100)
@@ -400,7 +400,7 @@ class TodoListView(QWidget):
         self.filter_combo.setVisible(False)
         self.toolbar.addWidget(self.filter_combo)
 
-        self.time_filter_combo = ComboBox()
+        self.time_filter_combo = ComboBox(self)
         self.time_filter_combo.addItems(["全部", "本周", "本月", "本年", "自定义"])
         self.time_filter_combo.setCurrentIndex(0)
         self.time_filter_combo.setFixedWidth(90)
@@ -408,7 +408,7 @@ class TodoListView(QWidget):
         self.time_filter_combo.setVisible(False)
         self.toolbar.addWidget(self.time_filter_combo)
 
-        self.date_range_btn = DateRangeButton(placeholder="日期范围")
+        self.date_range_btn = DateRangeButton(self, placeholder="日期范围")
         self.date_range_btn.setFixedHeight(33)
         self.date_range_btn.setMinimumWidth(120)
         self.date_range_btn.date_changed.connect(self._on_custom_date_changed)
@@ -446,7 +446,7 @@ class TodoListView(QWidget):
 
         self.main_layout.addLayout(self.toolbar)
 
-        self.week_view = WeekView()
+        self.week_view = WeekView(self)
         self.week_view.filter_changed.connect(self._on_filter_changed)
         self.week_view.setVisible(settings.show_week_view)
         self.main_layout.addWidget(self.week_view)
@@ -456,7 +456,7 @@ class TodoListView(QWidget):
         self.main_layout.addWidget(self.stats_label)
 
         # ---- 滚动区域 ----
-        self.scroll_area = SmoothScrollArea()
+        self.scroll_area = SmoothScrollArea(self)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("""
             SmoothScrollArea {
@@ -465,7 +465,7 @@ class TodoListView(QWidget):
             }
         """)
 
-        self.scroll_widget = QWidget()
+        self.scroll_widget = QWidget(self.scroll_area)
         self.scroll_widget.setStyleSheet("background: transparent;")
         self.list_layout = QVBoxLayout(self.scroll_widget)
         self.list_layout.setContentsMargins(0, 0, 8, 0)
@@ -484,7 +484,7 @@ class TodoListView(QWidget):
         self.main_layout.addWidget(self.pager, alignment=Qt.AlignCenter)
 
         # ---- 空状态 ----
-        self.empty_widget = QWidget()
+        self.empty_widget = QWidget(self)
         empty_layout = QVBoxLayout(self.empty_widget)
         empty_layout.setAlignment(Qt.AlignCenter)
         empty_layout.setSpacing(12)

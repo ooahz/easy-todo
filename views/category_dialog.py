@@ -11,7 +11,7 @@ from qfluentwidgets import (
     BodyLabel, CaptionLabel
 )
 
-from services.category_service import CategoryService
+from services.category_service import CategoryService, category_event_bus
 
 SYSTEM_VIEWS = [
     ("recent", "最近待办", FluentIcon.QUICK_NOTE),
@@ -130,17 +130,24 @@ class CategoryListItem(QWidget):
 class CategoryDialog(QDialog):
     """分类管理对话框"""
 
-    categories_changed = Signal()
-
     def __init__(self, parent=None):
         self.category_service = CategoryService()
         self._editing_id = None
-        self._dirty = False
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(400, 500)
         self._setup_ui()
+
+        # 订阅分类事件总线，自身的数据变更也会通过总线回灌，
+        # 这样就不需要调用方在 close 后再触发全量刷新，
+        # 关闭的瞬间也不会出现"延迟动作"导致空窗口闪烁。
+        bus = category_event_bus()
+        bus.created.connect(self._on_category_event)
+        bus.updated.connect(self._on_category_event)
+        bus.deleted.connect(self._on_category_event)
+        bus.reordered.connect(self._on_category_event)
+
         self._load_categories()
 
         # 窗口拖动相关
@@ -176,10 +183,29 @@ class CategoryDialog(QDialog):
         super().paintEvent(event)
 
     def closeEvent(self, event):
-        """关闭时释放数据库连接"""
+        """关闭时释放数据库连接并断开事件总线订阅"""
+        bus = category_event_bus()
+        try:
+            bus.created.disconnect(self._on_category_event)
+            bus.updated.disconnect(self._on_category_event)
+            bus.deleted.disconnect(self._on_category_event)
+            bus.reordered.disconnect(self._on_category_event)
+        except (TypeError, RuntimeError):
+            # 重复 disconnect / 已断开时忽略
+            pass
         if hasattr(self, 'category_service') and self.category_service:
             self.category_service.close()
         super().closeEvent(event)
+
+    def _on_category_event(self, *_args):
+        """总线事件回调：刷新自身列表"""
+        self._load_categories()
+        # 退出编辑态，避免被改/被删的分类残留
+        if self._editing_id is not None:
+            cat = self.category_service.get_by_id(self._editing_id)
+            if not cat:
+                self._editing_id = None
+                self.add_btn.setText(" 添加 ")
 
     def _setup_ui(self):
         from PySide6.QtWidgets import QFrame
@@ -321,8 +347,7 @@ class CategoryDialog(QDialog):
             self.category_service.create(name)
 
         self.name_input.clear()
-        self._load_categories()
-        self._dirty = True
+        # service 会通过事件总线触发 _on_category_event，列表自动刷新
 
     def _on_edit_clicked(self, category_id: int):
         """编辑按钮点击"""
@@ -344,8 +369,7 @@ class CategoryDialog(QDialog):
         msg.cancelButton.setText("取消")
         if msg.exec():
             self.category_service.delete(category_id)
-            self._load_categories()
-            self._dirty = True
+            # service 会通过事件总线触发 _on_category_event，列表自动刷新
 
     def _on_move_up(self, category_id: int):
         """上移分类"""
@@ -356,8 +380,7 @@ class CategoryDialog(QDialog):
         if idx > 0:
             cat_ids[idx], cat_ids[idx - 1] = cat_ids[idx - 1], cat_ids[idx]
             self.category_service.reorder(cat_ids)
-            self._load_categories()
-            self._dirty = True
+            # service 会通过事件总线触发 _on_category_event，列表自动刷新
 
     def _on_system_view_move_up(self, view_key: str):
         """上移系统视图"""
@@ -367,8 +390,8 @@ class CategoryDialog(QDialog):
         if idx > 0:
             order[idx], order[idx - 1] = order[idx - 1], order[idx]
             settings.system_view_order = order
+            # 系统视图顺序不影响分类数据，但本对话框顶部的"系统视图"段会展示出来
             self._load_categories()
-            self._dirty = True
 
     def _on_system_view_move_down(self, view_key: str):
         """下移系统视图"""
@@ -379,4 +402,3 @@ class CategoryDialog(QDialog):
             order[idx], order[idx + 1] = order[idx + 1], order[idx]
             settings.system_view_order = order
             self._load_categories()
-            self._dirty = True
