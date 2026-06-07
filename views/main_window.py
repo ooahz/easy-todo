@@ -40,7 +40,7 @@ class _LoadTodosSignals(QObject):
 
 class _LoadViewSignals(QObject):
     """后台加载单个视图的信号"""
-    done = Signal(str, list, int, int)  # view_key, tree, total, generation
+    done = Signal(str, list, int, int, dict)  # view_key, tree, total, generation, stats
 
 
 class _LoadViewWorker(QRunnable):
@@ -60,10 +60,15 @@ class _LoadViewWorker(QRunnable):
 
     def run(self):
         try:
-            tree, total = self._query_func()
-            self._signals.done.emit(self._view_key, tree, total, self._generation)
+            result = self._query_func()
+            if len(result) == 3:
+                tree, total, stats = result
+            else:
+                tree, total = result
+                stats = None
+            self._signals.done.emit(self._view_key, tree, total, self._generation, stats or {})
         except Exception:
-            self._signals.done.emit(self._view_key, [], 0, self._generation)
+            self._signals.done.emit(self._view_key, [], 0, self._generation, {})
 
 
 def _build_todo_tree(todos, truncate_desc=False):
@@ -81,16 +86,15 @@ def _build_todo_tree(todos, truncate_desc=False):
     return parents
 
 
-def _inject_completed_flags(tree, done_at_bottom=False):
-    """为任务树设置完成/归档标志"""
+def _inject_completed_flags(tree):
+    """为任务树设置完成/归档标志，已完成任务置底"""
     for t in tree:
         t["_is_done"] = t.get("status", 0) == 1
         t["_is_archived"] = t.get("status", 0) == 2
         for ch in t.get("children", []):
             ch["_is_done"] = ch.get("status", 0) == 1
             ch["_is_archived"] = ch.get("status", 0) == 2
-    if done_at_bottom:
-        tree.sort(key=lambda t: t.get("status", 0))
+    tree.sort(key=lambda t: t.get("status", 0))
 
 
 class _LoadTodosWorker(QRunnable):
@@ -113,7 +117,6 @@ class _LoadTodosWorker(QRunnable):
             p = self.params
             PAGE_SIZE = 100
             sort_rules = p['sort_rules']
-            done_at_bottom = p['done_at_bottom']
             show_done = p['show_done_tasks']
             view_keys = p.get('view_keys')
             result = {}
@@ -123,7 +126,7 @@ class _LoadTodosWorker(QRunnable):
                 due_start, due_end = p.get('all_due_start'), p.get('all_due_end')
                 if show_done:
                     todos, total = svc.get_all_including_done_with_count(
-                        sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                        sort_rules=sort_rules,
                         page=0, page_size=PAGE_SIZE,
                         due_start=due_start, due_end=due_end,
                         dedup_recurrence=True,
@@ -136,15 +139,16 @@ class _LoadTodosWorker(QRunnable):
                         dedup_recurrence=True,
                     )
                 tree = _build_todo_tree(todos, truncate_desc=True)
-                _inject_completed_flags(tree, done_at_bottom=done_at_bottom)
-                result['all'] = {'tree': tree, 'total': total}
+                _inject_completed_flags(tree)
+                all_stats = svc.count_all_view_stats(due_start=due_start, due_end=due_end)
+                result['all'] = {'tree': tree, 'total': total, 'stats': all_stats}
 
             # ---- 最近待办 ----
             if view_keys is None or 'recent' in view_keys:
                 due_start, due_end = p.get('recent_due_start'), p.get('recent_due_end')
                 recent_todos, recent_total = svc.get_all_including_done_with_count(
-                    sort_rules=sort_rules, done_at_bottom=False,
-                    page=0, page_size=PAGE_SIZE,
+                    sort_rules=sort_rules,
+                    page=0, page_size=0,
                     due_start=due_start, due_end=due_end,
                     dedup_recurrence=True,
                 )
@@ -156,7 +160,7 @@ class _LoadTodosWorker(QRunnable):
             if view_keys is None or 'today' in view_keys:
                 if show_done:
                     today_todos, today_total = svc.get_all_including_done_with_count(
-                        sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                        sort_rules=sort_rules,
                         page=0, page_size=PAGE_SIZE,
                     )
                 else:
@@ -165,14 +169,15 @@ class _LoadTodosWorker(QRunnable):
                         page=0, page_size=PAGE_SIZE,
                     )
                 today_tree = _build_todo_tree(today_todos, truncate_desc=True)
-                _inject_completed_flags(today_tree, done_at_bottom=done_at_bottom)
-                result['today'] = {'tree': today_tree, 'total': today_total}
+                _inject_completed_flags(today_tree)
+                today_stats = svc.count_today_view_stats()
+                result['today'] = {'tree': today_tree, 'total': today_total, 'stats': today_stats}
 
             # ---- 重要任务 ----
             if view_keys is None or 'important' in view_keys:
                 due_start, due_end = p.get('imp_due_start'), p.get('imp_due_end')
                 important_todos, important_total = svc.get_high_priority_with_count(
-                    page=0, page_size=PAGE_SIZE,
+                    page=0, page_size=0,
                     due_start=due_start, due_end=due_end,
                     dedup_recurrence=True,
                 )
@@ -513,7 +518,6 @@ class MainWindow(FluentWindow):
         self.settings_page.show_week_view_changed.connect(self._on_show_week_view_changed)
         self.settings_page.auto_start_changed.connect(self._on_auto_start_changed)
         self.settings_page.sort_rule_changed.connect(self._on_sort_rule_changed)
-        self.settings_page.done_at_bottom_changed.connect(self._on_done_at_bottom_changed)
         self.settings_page.floating_top_changed.connect(self._on_floating_top_changed)
         self.settings_page.manual_refresh_clicked.connect(self._manual_refresh)
         self.settings_page.export_btn.clicked.connect(self._export_data)
@@ -601,7 +605,6 @@ class MainWindow(FluentWindow):
             if settings.show_done_tasks:
                 todos = self.todo_service.get_all_including_done(
                     sort_rules=settings.sort_rules,
-                    done_at_bottom=settings.done_at_bottom
                 )
             else:
                 todos = self.todo_service.get_all(
@@ -612,14 +615,12 @@ class MainWindow(FluentWindow):
         elif view_key == "recent":
             todos = self.todo_service.get_all_including_done(
                 sort_rules=settings.sort_rules,
-                done_at_bottom=False,
                 dedup_recurrence=True,
             )
         else:
             if settings.show_done_tasks:
                 todos = self.todo_service.get_all_including_done(
                     sort_rules=settings.sort_rules,
-                    done_at_bottom=settings.done_at_bottom,
                     dedup_recurrence=True,
                 )
             else:
@@ -630,14 +631,13 @@ class MainWindow(FluentWindow):
 
         tree = self._build_todo_tree(todos, truncate_desc=True)
         if view_key == "today":
-            self._inject_completed_dates(tree, done_at_bottom=settings.done_at_bottom)
+            self._inject_completed_dates(tree)
             tree = self.today_view._filter_todos_by_date(tree, date.today())
         elif view_key == "recent":
             self._inject_completed_dates(tree)
             tree = self._sort_for_recent(tree)
         else:
-            done_at_bottom = settings.done_at_bottom if view_key in ("all",) else False
-            self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
+            self._inject_completed_dates(tree)
         self.floating.set_todos(tree)
 
     def _apply_initial_theme(self):
@@ -721,9 +721,9 @@ class MainWindow(FluentWindow):
         """在内存中构建任务树形结构"""
         return _build_todo_tree(todos, truncate_desc=truncate_desc)
 
-    def _inject_completed_dates(self, tree: list[dict], done_at_bottom: bool = False):
+    def _inject_completed_dates(self, tree: list[dict]):
         """为任务树设置完成/归档标志"""
-        _inject_completed_flags(tree, done_at_bottom=done_at_bottom)
+        _inject_completed_flags(tree)
 
     def _sort_for_recent(self, tree: list[dict]) -> list[dict]:
         """按最近待办视图的优先级排序：超期未完成 → 今日 → 后续 → 已完成"""
@@ -786,7 +786,6 @@ class MainWindow(FluentWindow):
         self.todo_service.session.expire_all()
         PAGE_SIZE = 100
         sort_rules = settings.sort_rules
-        done_at_bottom = settings.done_at_bottom
         show_done = settings.show_done_tasks
 
         view = self._get_view_by_key(view_key)
@@ -798,7 +797,7 @@ class MainWindow(FluentWindow):
                 view.current_time_filter(), view)
             if show_done:
                 todos, total = self.todo_service.get_all_including_done_with_count(
-                    sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                    sort_rules=sort_rules,
                     page=0, page_size=PAGE_SIZE,
                     due_start=due_start, due_end=due_end,
                     dedup_recurrence=True,
@@ -811,15 +810,16 @@ class MainWindow(FluentWindow):
                     dedup_recurrence=True,
                 )
             tree = self._build_todo_tree(todos, truncate_desc=True)
-            self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
-            view.set_todos(tree, total_count=total)
+            self._inject_completed_dates(tree)
+            all_stats = self.todo_service.count_all_view_stats(due_start=due_start, due_end=due_end)
+            view.set_todos(tree, total_count=total, stats=all_stats)
 
         elif view_key == "recent":
             due_start, due_end = self._get_date_range(
                 view.current_time_filter(), view)
             recent_todos, recent_total = self.todo_service.get_all_including_done_with_count(
-                sort_rules=sort_rules, done_at_bottom=False,
-                page=0, page_size=PAGE_SIZE,
+                sort_rules=sort_rules,
+                page=0, page_size=0,
                 due_start=due_start, due_end=due_end,
                 dedup_recurrence=True,
             )
@@ -830,7 +830,7 @@ class MainWindow(FluentWindow):
         elif view_key == "today":
             if show_done:
                 todos, total = self.todo_service.get_all_including_done_with_count(
-                    sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                    sort_rules=sort_rules,
                     page=0, page_size=PAGE_SIZE,
                 )
             else:
@@ -839,16 +839,17 @@ class MainWindow(FluentWindow):
                     page=0, page_size=PAGE_SIZE,
                 )
             tree = self._build_todo_tree(todos, truncate_desc=True)
-            self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
+            self._inject_completed_dates(tree)
             view._filter_date = date.today()
             view.week_view.set_selected_date(date.today())
-            view.set_todos(tree, total_count=total)
+            today_stats = self.todo_service.count_today_view_stats()
+            view.set_todos(tree, total_count=total, stats=today_stats)
 
         elif view_key == "important":
             due_start, due_end = self._get_date_range(
                 view.current_time_filter(), view)
             important_todos, important_total = self.todo_service.get_high_priority_with_count(
-                page=0, page_size=PAGE_SIZE,
+                page=0, page_size=0,
                 due_start=due_start, due_end=due_end,
                 dedup_recurrence=True,
             )
@@ -895,7 +896,6 @@ class MainWindow(FluentWindow):
         gen = self._load_generation
 
         sort_rules = settings.sort_rules
-        done_at_bottom = settings.done_at_bottom
         show_done = settings.show_done_tasks
         PAGE_SIZE = 100
 
@@ -906,14 +906,15 @@ class MainWindow(FluentWindow):
                     svc = TodoService()
                     try:
                         todos, total = svc.get_all_including_done_with_count(
-                            sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                            sort_rules=sort_rules,
                             page=0, page_size=PAGE_SIZE,
                             due_start=due_start, due_end=due_end,
                             dedup_recurrence=True,
                         )
                         tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree, done_at_bottom=done_at_bottom)
-                        return tree, total
+                        _inject_completed_flags(tree)
+                        stats = svc.count_all_view_stats(due_start=due_start, due_end=due_end)
+                        return tree, total, stats
                     finally:
                         svc.close()
             else:
@@ -927,8 +928,9 @@ class MainWindow(FluentWindow):
                             dedup_recurrence=True,
                         )
                         tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree, done_at_bottom=done_at_bottom)
-                        return tree, total
+                        _inject_completed_flags(tree)
+                        stats = svc.count_all_view_stats(due_start=due_start, due_end=due_end)
+                        return tree, total, stats
                     finally:
                         svc.close()
 
@@ -938,8 +940,8 @@ class MainWindow(FluentWindow):
                 svc = TodoService()
                 try:
                     todos, total = svc.get_all_including_done_with_count(
-                        sort_rules=sort_rules, done_at_bottom=False,
-                        page=0, page_size=PAGE_SIZE,
+                        sort_rules=sort_rules,
+                        page=0, page_size=0,
                         due_start=due_start, due_end=due_end,
                         dedup_recurrence=True,
                     )
@@ -955,12 +957,13 @@ class MainWindow(FluentWindow):
                     svc = TodoService()
                     try:
                         todos, total = svc.get_all_including_done_with_count(
-                            sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                            sort_rules=sort_rules,
                             page=0, page_size=PAGE_SIZE,
                         )
                         tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree, done_at_bottom=done_at_bottom)
-                        return tree, total
+                        _inject_completed_flags(tree)
+                        stats = svc.count_today_view_stats()
+                        return tree, total, stats
                     finally:
                         svc.close()
             else:
@@ -972,8 +975,9 @@ class MainWindow(FluentWindow):
                             page=0, page_size=PAGE_SIZE,
                         )
                         tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree, done_at_bottom=done_at_bottom)
-                        return tree, total
+                        _inject_completed_flags(tree)
+                        stats = svc.count_today_view_stats()
+                        return tree, total, stats
                     finally:
                         svc.close()
 
@@ -983,7 +987,7 @@ class MainWindow(FluentWindow):
                 svc = TodoService()
                 try:
                     todos, total = svc.get_high_priority_with_count(
-                        page=0, page_size=PAGE_SIZE,
+                        page=0, page_size=0,
                         due_start=due_start, due_end=due_end,
                         dedup_recurrence=True,
                     )
@@ -1033,7 +1037,7 @@ class MainWindow(FluentWindow):
         worker.signals.done.connect(self._on_view_loaded)
         QThreadPool.globalInstance().start(worker)
 
-    def _on_view_loaded(self, view_key: str, tree: list, total: int, generation: int):
+    def _on_view_loaded(self, view_key: str, tree: list, total: int, generation: int, stats: dict = None):
         """异步加载完成回调"""
         self._view_load_in_progress.discard(view_key)
         if generation < self._load_generation:
@@ -1047,7 +1051,7 @@ class MainWindow(FluentWindow):
             view._filter_date = date.today()
             view.week_view.set_selected_date(date.today())
 
-        view.set_todos(tree, total_count=total)
+        view.set_todos(tree, total_count=total, stats=stats or None)
         self._loaded_views.add(view_key)
 
     def _refresh_current_view(self):
@@ -1083,7 +1087,6 @@ class MainWindow(FluentWindow):
 
         return {
             'sort_rules': settings.sort_rules,
-            'done_at_bottom': settings.done_at_bottom,
             'show_done_tasks': settings.show_done_tasks,
             'done_filter': getattr(self, '_done_filter', 'done'),
             'all_due_start': all_due_start,
@@ -1104,7 +1107,8 @@ class MainWindow(FluentWindow):
 
         if 'all' in result:
             r = result['all']
-            self.todo_list_view.set_todos(r['tree'], total_count=r['total'])
+            self.todo_list_view.set_todos(r['tree'], total_count=r['total'],
+                                          stats=r.get('stats'))
             self._loaded_views.add("all")
 
         if 'recent' in result:
@@ -1116,7 +1120,8 @@ class MainWindow(FluentWindow):
             r = result['today']
             self.today_view._filter_date = date.today()
             self.today_view.week_view.set_selected_date(date.today())
-            self.today_view.set_todos(r['tree'], total_count=r['total'])
+            self.today_view.set_todos(r['tree'], total_count=r['total'],
+                                      stats=r.get('stats'))
             self._loaded_views.add("today")
 
         if 'important' in result:
@@ -1146,13 +1151,12 @@ class MainWindow(FluentWindow):
 
     def _on_page_changed(self, view_key: str, page: int, page_size: int):
         sort_rules = settings.sort_rules
-        done_at_bottom = settings.done_at_bottom
 
         if view_key in ("done", "today"):
             if view_key == "today":
                 if settings.show_done_tasks:
                     todos = self.todo_service.get_all_including_done(
-                        sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                        sort_rules=sort_rules,
                         page=page, page_size=page_size,
                     )
                 else:
@@ -1161,8 +1165,9 @@ class MainWindow(FluentWindow):
                         page=page, page_size=page_size,
                     )
                 tree = self._build_todo_tree(todos, truncate_desc=True)
-                self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
-                self.today_view.set_todos(tree)
+                self._inject_completed_dates(tree)
+                today_stats = self.todo_service.count_today_view_stats()
+                self.today_view.set_todos(tree, stats=today_stats)
             else:
                 done_filter = getattr(self, '_done_filter', 'done')
                 status = STATUS_ARCHIVED if done_filter == 'archived' else STATUS_DONE
@@ -1331,7 +1336,6 @@ class MainWindow(FluentWindow):
     def _reload_view_with_time_filter(self, view_key: str, page: int = 0):
         PAGE_SIZE = 100
         sort_rules = settings.sort_rules
-        done_at_bottom = settings.done_at_bottom
 
         if view_key in ("done", "today"):
             return
@@ -1346,7 +1350,7 @@ class MainWindow(FluentWindow):
         if view_key == "all":
             if settings.show_done_tasks:
                 todos, total = self.todo_service.get_all_including_done_with_count(
-                    sort_rules=sort_rules, done_at_bottom=done_at_bottom,
+                    sort_rules=sort_rules,
                     page=page, page_size=PAGE_SIZE,
                     due_start=due_start, due_end=due_end,
                     dedup_recurrence=True,
@@ -1359,12 +1363,13 @@ class MainWindow(FluentWindow):
                     dedup_recurrence=True,
                 )
             tree = self._build_todo_tree(todos, truncate_desc=True)
-            self._inject_completed_dates(tree, done_at_bottom=done_at_bottom)
-            view.set_todos(tree, total_count=total)
+            self._inject_completed_dates(tree)
+            all_stats = self.todo_service.count_all_view_stats(due_start=due_start, due_end=due_end)
+            view.set_todos(tree, total_count=total, stats=all_stats)
 
         elif view_key == "important":
             todos, total = self.todo_service.get_high_priority_with_count(
-                page=page, page_size=PAGE_SIZE,
+                page=0, page_size=0,
                 due_start=due_start, due_end=due_end,
                 dedup_recurrence=True,
             )
@@ -1374,8 +1379,8 @@ class MainWindow(FluentWindow):
 
         elif view_key == "recent":
             recent_todos, recent_total = self.todo_service.get_all_including_done_with_count(
-                sort_rules=sort_rules, done_at_bottom=False,
-                page=page, page_size=PAGE_SIZE,
+                sort_rules=sort_rules,
+                page=0, page_size=0,
                 due_start=due_start, due_end=due_end,
                 dedup_recurrence=True,
             )
@@ -1598,9 +1603,6 @@ class MainWindow(FluentWindow):
     def _on_sort_rule_changed(self, rule: str):
         self._refresh_all_views()
 
-    def _on_done_at_bottom_changed(self, checked: bool):
-        self._refresh_all_views()
-
     def _on_floating_top_changed(self, enabled: bool):
         self.floating.set_always_on_top(enabled)
 
@@ -1641,6 +1643,8 @@ class MainWindow(FluentWindow):
 
     def _on_categories_changed(self):
         """分类变更时刷新导航"""
+        self.stackedWidget.currentChanged.disconnect(self._on_view_changed)
+        current_widget = self.stackedWidget.currentWidget()
         current_order = list(settings.system_view_order)
         order_changed = self._last_system_view_order != current_order
         self._last_system_view_order = current_order
@@ -1670,7 +1674,7 @@ class MainWindow(FluentWindow):
                 except Exception:
                     pass
 
-            QApplication.processEvents()  # 确保 removeInterface 布局变更生效后再 addSubInterface
+            QApplication.processEvents()
 
             for key in current_order:
                 if key in self._view_instances:
@@ -1684,18 +1688,26 @@ class MainWindow(FluentWindow):
                     except Exception:
                         pass
 
-            if self.settings_page is not None:
-                try:
-                    self.addSubInterface(
-                        self.settings_page, FluentIcon.SETTING,
-                        "设置",
-                        position=NavigationItemPosition.BOTTOM,
-                    )
-                except Exception:
-                    pass
+        if self.settings_page is not None:
+            try:
+                self.removeInterface(self.settings_page, isDelete=False)
+            except Exception:
+                pass
 
         self._setup_category_navigation()
-        self._refresh_all_views()
+
+        if self.settings_page is not None:
+            try:
+                self.addSubInterface(
+                    self.settings_page, FluentIcon.SETTING,
+                    "设置",
+                    position=NavigationItemPosition.BOTTOM,
+                )
+            except Exception:
+                pass
+
+        self.stackedWidget.setCurrentWidget(current_widget)
+        self.stackedWidget.currentChanged.connect(self._on_view_changed)
 
     def _on_floating_pin_changed(self, pinned: bool):
         """浮窗固定状态变更"""

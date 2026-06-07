@@ -135,6 +135,7 @@ class CategoryDialog(QDialog):
     def __init__(self, parent=None):
         self.category_service = CategoryService()
         self._editing_id = None
+        self._dirty = False
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -321,7 +322,7 @@ class CategoryDialog(QDialog):
 
         self.name_input.clear()
         self._load_categories()
-        self.categories_changed.emit()
+        self._dirty = True
 
     def _on_edit_clicked(self, category_id: int):
         """编辑按钮点击"""
@@ -344,7 +345,7 @@ class CategoryDialog(QDialog):
         if msg.exec():
             self.category_service.delete(category_id)
             self._load_categories()
-            self.categories_changed.emit()
+            self._dirty = True
 
     def _on_move_up(self, category_id: int):
         """上移分类"""
@@ -356,7 +357,7 @@ class CategoryDialog(QDialog):
             cat_ids[idx], cat_ids[idx - 1] = cat_ids[idx - 1], cat_ids[idx]
             self.category_service.reorder(cat_ids)
             self._load_categories()
-            self.categories_changed.emit()
+            self._dirty = True
 
     def _on_system_view_move_up(self, view_key: str):
         """上移系统视图"""
@@ -367,7 +368,7 @@ class CategoryDialog(QDialog):
             order[idx], order[idx - 1] = order[idx - 1], order[idx]
             settings.system_view_order = order
             self._load_categories()
-            self.categories_changed.emit()
+            self._dirty = True
 
     def _on_system_view_move_down(self, view_key: str):
         """下移系统视图"""
@@ -378,4 +379,4 @@ class CategoryDialog(QDialog):
             order[idx], order[idx + 1] = order[idx + 1], order[idx]
             settings.system_view_order = order
             self._load_categories()
-            self.categories_changed.emit()
+            self._dirty = True

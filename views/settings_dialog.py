@@ -30,7 +30,6 @@ class SettingsPage(QWidget):
     auto_start_changed = Signal(bool)
     sort_rule_changed = Signal(str)
     sort_rules_changed = Signal(list)
-    done_at_bottom_changed = Signal(bool)
     floating_top_changed = Signal(bool)
     categories_changed = Signal()
     description_mode_changed = Signal(str)
@@ -80,7 +79,6 @@ class SettingsPage(QWidget):
 
         self.list_layout.addWidget(self._make_card("任务列表", [
             self._create_show_done_cb(),
-            self._create_done_at_bottom_cb(),
             self._create_show_week_view_cb(),
             self._create_manual_refresh_btn(),
         ]))
@@ -331,12 +329,6 @@ class SettingsPage(QWidget):
         self.dialog_mode_combo.currentIndexChanged.connect(self._on_dialog_mode_changed)
         return self.dialog_mode_combo
 
-    def _create_done_at_bottom_cb(self) -> CheckBox:
-        self.done_at_bottom_cb = CheckBox("已完成任务置底")
-        self.done_at_bottom_cb.setChecked(settings.done_at_bottom)
-        self.done_at_bottom_cb.checkStateChanged.connect(self._on_done_at_bottom_changed)
-        return self.done_at_bottom_cb
-
     def _create_show_week_view_cb(self) -> CheckBox:
         self.show_week_view_cb = CheckBox("显示周日程视图")
         self.show_week_view_cb.setChecked(settings.show_week_view)
@@ -375,9 +367,10 @@ class SettingsPage(QWidget):
         """打开分类管理对话框"""
         from views.category_dialog import CategoryDialog
         dialog = CategoryDialog(self)
-        dialog.categories_changed.connect(self._update_category_count)
-        dialog.categories_changed.connect(self.categories_changed.emit)
         dialog.exec()
+        if dialog._dirty:
+            self._update_category_count()
+            self.categories_changed.emit()
 
     SORT_OPTIONS = [
         ("自定义", "custom"),
@@ -583,11 +576,6 @@ class SettingsPage(QWidget):
         checked = (state == Qt.CheckState.Checked)
         settings.auto_start = checked
         self.auto_start_changed.emit(checked)
-
-    def _on_done_at_bottom_changed(self, state):
-        checked = (state == Qt.CheckState.Checked)
-        settings.done_at_bottom = checked
-        self.done_at_bottom_changed.emit(checked)
 
     def _on_floating_top_changed(self, state):
         checked = (state == Qt.CheckState.Checked)

@@ -175,7 +175,7 @@ class InfoRow(QWidget):
 
         value_w = BodyLabel(value)
         vc = value_color or c['body']
-        value_w.setStyleSheet(f"color: {vc}; font-size: 13px;")
+        value_w.setStyleSheet(f"color: {vc}; font-size: 12px;")
         value_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         value_w.setWordWrap(True)
         layout.addWidget(value_w, 1)
@@ -554,7 +554,7 @@ class TodoDetailDialog(MessageBoxBase):
             self.archive_btn.hide()
             self.done_btn.hide()
         elif is_done:
-            self.edit_btn.hide()
+            self.edit_btn.show()
             self.archive_btn.show()
             self.done_btn.show()
         else:
@@ -865,10 +865,10 @@ class TodoDetailDialog(MessageBoxBase):
                 due_date = date.fromisoformat(due)
                 today = date.today()
                 if due_date < today and not is_done:
-                    due_text = f"{due}（已过期）"
+                    due_text = f"{due} | 已过期"
                     due_color = c['overdue']
                 elif due_date == today:
-                    due_text = f"{due}（今天）"
+                    due_text = f"{due} | 今天"
                     due_color = c['accent']
                 else:
                     due_text = due

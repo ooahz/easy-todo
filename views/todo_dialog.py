@@ -45,7 +45,7 @@ class TodoDialog(QDialog):
         self._is_widescreen = (settings.dialog_mode == "widescreen")
 
         if self._pid is not None:
-            self.setMinimumSize(400, 160)
+            self.setFixedSize(400, 160)
         elif self._is_widescreen:
             self.setMinimumSize(810, 520)
         else:

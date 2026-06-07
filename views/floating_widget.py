@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QMouseEvent, QCursor, QIcon, QPainter, QPixmap, QVector3D
 
-from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit, FluentIcon, TransparentToolButton
+from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit, FluentIcon, TransparentToolButton, PipsPager, PipsScrollButtonDisplayMode
 
 from config.settings import settings
 
@@ -48,6 +48,8 @@ class FloatingWidget(QWidget):
         self._pinned = False
         self._user_visible = False
         self._closing = False
+        self._page_size = 20
+        self._current_page = 0
 
         self._setup_ui()
         self._apply_theme()
@@ -125,6 +127,14 @@ class FloatingWidget(QWidget):
 
         self.scroll.setWidget(self.list_widget)
         bg_layout.addWidget(self.scroll, 1)
+
+        # 分页器
+        self.pager = PipsPager(Qt.Horizontal)
+        self.pager.setNextButtonDisplayMode(PipsScrollButtonDisplayMode.ALWAYS)
+        self.pager.setPreviousButtonDisplayMode(PipsScrollButtonDisplayMode.ALWAYS)
+        self.pager.setVisible(False)
+        self.pager.currentIndexChanged.connect(self._on_page_changed)
+        bg_layout.addWidget(self.pager, alignment=Qt.AlignCenter)
 
         # 固定状态遮罩层
         self._pin_mask = QWidget(self.scroll)
@@ -395,6 +405,8 @@ class FloatingWidget(QWidget):
 
     def set_todos(self, todos: list[dict]):
         self._todos = todos
+        self._current_page = 0
+        self._update_pager()
         self._refresh_list()
 
     def refresh_theme(self):
@@ -404,7 +416,7 @@ class FloatingWidget(QWidget):
 
     def _refresh_list(self):
         from config.settings import settings
-        
+
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
             if item.widget():
@@ -419,7 +431,12 @@ class FloatingWidget(QWidget):
             empty.setAlignment(Qt.AlignCenter)
             self.list_layout.addWidget(empty)
         else:
-            for todo in self._todos:
+            # 客户端分页：只渲染当前页的数据
+            start = self._current_page * self._page_size
+            end = start + self._page_size
+            page_todos = self._todos[start:end]
+
+            for todo in page_todos:
                 # 父任务行
                 row = self._create_todo_row(todo, c)
                 self.list_layout.addWidget(row)
@@ -493,6 +510,28 @@ class FloatingWidget(QWidget):
     def _on_row_clicked(self, event, todo_id: int):
         if event.button() == Qt.LeftButton:
             self.todo_toggled.emit(todo_id)
+
+    def _update_pager(self):
+        """更新分页器状态"""
+        total = len(self._todos)
+        total_pages = (total + self._page_size - 1) // self._page_size if total > 0 else 1
+
+        if total_pages <= 1:
+            self.pager.setVisible(False)
+        else:
+            self.pager.setVisible(True)
+            self.pager.blockSignals(True)
+            if self.pager.count() != total_pages:
+                self.pager.setPageNumber(total_pages)
+            if self._current_page >= total_pages:
+                self._current_page = total_pages - 1
+            self.pager.setCurrentIndex(self._current_page)
+            self.pager.blockSignals(False)
+
+    def _on_page_changed(self, index: int):
+        """分页器页码变化，重新渲染当前页"""
+        self._current_page = index
+        self._refresh_list()
 
     # ---- 边缘检测 ----
 

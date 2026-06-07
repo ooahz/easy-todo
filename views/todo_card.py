@@ -79,6 +79,7 @@ class TodoCard(CardWidget):
         self.todo_data = todo_data
         self.todo_id = todo_data["id"]
         self._is_done = todo_data.get("_is_done", False)
+        self._is_archived = todo_data.get("_is_archived", False)
         self._is_selected = False
         self._readonly = readonly
 
@@ -172,28 +173,29 @@ class TodoCard(CardWidget):
             info_parts.append(category.get("name", ""))
 
         start = self.todo_data.get("start_date")
-        if due:
-            due_date = date.fromisoformat(due)
-            today = date.today()
-            if due_date < today and not self._is_done:
-                if start:
-                    info_parts.append(f'<span style="color:{settings.warning_color}">{start} ~ {due}（已过期）</span>')
-                else:
-                    info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
-            elif due_date == today:
-                if start:
-                    info_parts.append(f"{start} ~ 今天")
-                else:
-                    info_parts.append("今天")
-            else:
-                if start:
-                    info_parts.append(f"{start} ~ {due}")
-                else:
-                    info_parts.append(f"{due}")
-        elif start:
-            info_parts.append(f"从 {start}")
-
         recurrence = self.todo_data.get("recurrence_type")
+        if not recurrence:
+            if due:
+                due_date = date.fromisoformat(due)
+                today = date.today()
+                if due_date < today and not self._is_done:
+                    if start:
+                        info_parts.append(f'<span style="color:{settings.warning_color}">{start} ~ {due}（已过期）</span>')
+                    else:
+                        info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
+                elif due_date == today:
+                    if start:
+                        info_parts.append(f"{start} ~ 今天")
+                    else:
+                        info_parts.append("今天")
+                else:
+                    if start:
+                        info_parts.append(f"{start} ~ {due}")
+                    else:
+                        info_parts.append(f"{due}")
+            elif start:
+                info_parts.append(f"从 {start}")
+
         if recurrence:
             from config.constants import RECURRENCE_TYPES, WEEKDAY_NAMES, parse_recurrence_day
             interval = self.todo_data.get("recurrence_interval", 1)
@@ -272,12 +274,16 @@ class TodoCard(CardWidget):
         self.delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.todo_id))
         self.action_layout.addWidget(self.delete_btn)
 
-        if self._readonly:
+        if self._is_done or self._is_archived:
             self.add_subtask_btn.hide()
+        if self._is_done:
+            self.edit_btn.hide()
+
+        if self._readonly:
             self.edit_btn.hide()
             self.archive_btn.setVisible(self._is_done)
         else:
-            self.archive_btn.hide()
+            self.archive_btn.setVisible(self._is_done)
 
         self.top_row.addWidget(action_widget)
         self.main_layout.addLayout(self.top_row)
@@ -438,6 +444,7 @@ class TodoCard(CardWidget):
         self.todo_data = todo_data
         self.todo_id = todo_data["id"]
         self._is_done = todo_data.get("_is_done", False)
+        self._is_archived = todo_data.get("_is_archived", False)
 
         self.checkbox.blockSignals(True)
         self.checkbox.setChecked(self._is_done)
@@ -477,7 +484,13 @@ class TodoCard(CardWidget):
         if self._readonly:
             self.archive_btn.setVisible(self._is_done)
         else:
-            self.archive_btn.hide()
+            self.archive_btn.setVisible(self._is_done)
+
+        # 已完成或已归档时隐藏新建子任务按钮
+        self.add_subtask_btn.setVisible(not self._is_done and not self._is_archived)
+        # 已完成时隐藏编辑按钮
+        if not self._readonly:
+            self.edit_btn.setVisible(not self._is_done)
 
         self._apply_styles()
 
@@ -494,28 +507,29 @@ class TodoCard(CardWidget):
 
         due = self.todo_data.get("due_date", "")
         start = self.todo_data.get("start_date")
-        if due:
-            due_date = date.fromisoformat(due)
-            today = date.today()
-            if due_date < today and not self._is_done:
-                if start:
-                    info_parts.append(f'<span style="color:{settings.warning_color}">{start} ~ {due}（已过期）</span>')
-                else:
-                    info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
-            elif due_date == today:
-                if start:
-                    info_parts.append(f"{start} ~ 今天")
-                else:
-                    info_parts.append("今天")
-            else:
-                if start:
-                    info_parts.append(f"{start} ~ {due}")
-                else:
-                    info_parts.append(f"{due}")
-        elif start:
-            info_parts.append(f"从 {start}")
-
         recurrence = self.todo_data.get("recurrence_type")
+        if not recurrence:
+            if due:
+                due_date = date.fromisoformat(due)
+                today = date.today()
+                if due_date < today and not self._is_done:
+                    if start:
+                        info_parts.append(f'<span style="color:{settings.warning_color}">{start} ~ {due}（已过期）</span>')
+                    else:
+                        info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
+                elif due_date == today:
+                    if start:
+                        info_parts.append(f"{start} ~ 今天")
+                    else:
+                        info_parts.append("今天")
+                else:
+                    if start:
+                        info_parts.append(f"{start} ~ {due}")
+                    else:
+                        info_parts.append(f"{due}")
+            elif start:
+                info_parts.append(f"从 {start}")
+
         if recurrence:
             from config.constants import RECURRENCE_TYPES, WEEKDAY_NAMES, parse_recurrence_day
             interval = self.todo_data.get("recurrence_interval", 1)

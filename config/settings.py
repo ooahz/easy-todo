@@ -27,7 +27,6 @@ class Settings:
         "auto_start": False,
         "sort_rule": "created_at",
         "sort_rules": ["priority", "created_at"],
-        "done_at_bottom": True,
         "floating_top": False,
         "floating_pinned": False,
         "floating_geometry": None,
@@ -207,15 +206,6 @@ class Settings:
     @sort_rules.setter
     def sort_rules(self, value: list[str]):
         self._data["sort_rules"] = value
-        self.save()
-
-    @property
-    def done_at_bottom(self) -> bool:
-        return self._data.get("done_at_bottom", True)
-
-    @done_at_bottom.setter
-    def done_at_bottom(self, value: bool):
-        self._data["done_at_bottom"] = value
         self.save()
 
     @property

@@ -320,7 +320,7 @@ class TodoService:
         self.ensure_instances()
         return count
 
-    # ---- 查询：返回所有任务（含子任务） ----
+    # ---- 查询：返回所有任务 ----
 
     def _apply_recurrence_dedup(self, query):
         """在 SQL 层完成循环任务去重，每个 recurrence_template_id 只保留最优实例。
@@ -465,32 +465,25 @@ class TodoService:
 
     def get_all_including_done(self, sort_by: str = "created_at",
                                 sort_order: str = "desc",
-                                done_at_bottom: bool = True,
                                 sort_rules: list[str] = None,
                                 category_id: Optional[int] = None,
                                 page: int = 0, page_size: int = 0,
                                 due_start: date = None, due_end: date = None,
                                 dedup_recurrence: bool = False,
                                 **kwargs) -> list[Todo]:
-        """获取所有任务（含已完成，不含已归档）"""
+        """获取所有任务"""
         query = self._build_get_all_including_done_query(
             category_id=category_id, due_start=due_start, due_end=due_end,
             dedup_recurrence=dedup_recurrence, **kwargs,
         )
 
-        if done_at_bottom:
-            if not sort_rules and sort_by == "custom":
-                sort_rules = ["custom"]
-            if sort_rules:
-                sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
-            else:
-                sort_exprs = self._build_sort_expr(sort_by, sort_order)
-            query = query.order_by(Todo.status.asc(), *sort_exprs)
+        if not sort_rules and sort_by == "custom":
+            sort_rules = ["custom"]
+        if sort_rules:
+            sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
         else:
-            if sort_rules:
-                query = self._apply_multi_sort(query, sort_rules)
-            else:
-                query = self._apply_sort(query, sort_by, sort_order)
+            sort_exprs = self._build_sort_expr(sort_by, sort_order)
+        query = query.order_by(Todo.status.asc(), *sort_exprs)
 
         if page_size > 0:
             query = query.offset(page * page_size).limit(page_size)
@@ -499,7 +492,6 @@ class TodoService:
 
     def get_all_including_done_with_count(self, sort_by: str = "created_at",
                                           sort_order: str = "desc",
-                                          done_at_bottom: bool = True,
                                           sort_rules: list[str] = None,
                                           category_id: Optional[int] = None,
                                           page: int = 0, page_size: int = 0,
@@ -512,19 +504,13 @@ class TodoService:
         )
         total = query.with_entities(func.count(Todo.id)).scalar()
 
-        if done_at_bottom:
-            if not sort_rules and sort_by == "custom":
-                sort_rules = ["custom"]
-            if sort_rules:
-                sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
-            else:
-                sort_exprs = self._build_sort_expr(sort_by, sort_order)
-            query = query.order_by(Todo.status.asc(), *sort_exprs)
+        if not sort_rules and sort_by == "custom":
+            sort_rules = ["custom"]
+        if sort_rules:
+            sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
         else:
-            if sort_rules:
-                query = self._apply_multi_sort(query, sort_rules)
-            else:
-                query = self._apply_sort(query, sort_by, sort_order)
+            sort_exprs = self._build_sort_expr(sort_by, sort_order)
+        query = query.order_by(Todo.status.asc(), *sort_exprs)
 
         if page_size > 0:
             query = query.offset(page * page_size).limit(page_size)
@@ -785,6 +771,37 @@ class TodoService:
             Todo.is_recurrence_template == False,
             Todo.recurrence_type.is_(None),
         ).count()
+
+    def count_all_view_stats(self, due_start: date = None, due_end: date = None) -> dict:
+        """统计全部任务视图的数据（仅父任务）：总数、已完成数和已超期数"""
+        today = date.today()
+        base = self.session.query(Todo).filter(
+            Todo.pid.is_(None),
+            Todo.is_recurrence_template == False,
+        )
+        if due_start is not None:
+            base = base.filter(Todo.due_date >= due_start)
+        if due_end is not None:
+            base = base.filter(Todo.due_date <= due_end)
+
+        all_count = base.filter(Todo.status.in_([STATUS_TODO, STATUS_DONE])).count()
+        done_count = base.filter(Todo.status == STATUS_DONE).count()
+        overdue_count = base.filter(
+            Todo.status == STATUS_TODO,
+            Todo.due_date < today,
+        ).count()
+        return {"all_count": all_count, "done_count": done_count, "overdue_count": overdue_count}
+
+    def count_today_view_stats(self) -> dict:
+        """统计今日任务视图的数据（仅父任务）：已完成数"""
+        today = date.today()
+        done_count = self.session.query(Todo).filter(
+            Todo.pid.is_(None),
+            Todo.status == STATUS_DONE,
+            Todo.due_date == today,
+            Todo.is_recurrence_template == False,
+        ).count()
+        return {"done_count": done_count}
 
     def count_today_all(self) -> int:
         """统计今日到期的任务总数"""
