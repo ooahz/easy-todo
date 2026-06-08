@@ -40,6 +40,7 @@ class Settings:
         "todo_dialog_width": None,
         "todo_dialog_height": None,
         "system_view_order": ["recent", "today", "important", "all", "done"],
+        "shortcut_new_task": "",
     }
 
     def __init__(self):
@@ -317,6 +318,15 @@ class Settings:
     @system_view_order.setter
     def system_view_order(self, value: list):
         self._data["system_view_order"] = value
+        self.save()
+
+    @property
+    def shortcut_new_task(self) -> str:
+        return self._data.get("shortcut_new_task", "")
+
+    @shortcut_new_task.setter
+    def shortcut_new_task(self, value: str):
+        self._data["shortcut_new_task"] = value
         self.save()
 
 

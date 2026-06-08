@@ -5,22 +5,20 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from PySide6.QtGui import QFont, QMovie
-
+from PySide6.QtGui import QFont, QKeySequence, QKeyEvent, QMovie
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QLineEdit
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ComboBox, PushButton, FluentIcon, SmoothScrollArea,
-    setTheme, Theme, isDarkTheme, setCustomStyleSheet, IconWidget,
-    SettingCardGroup, ComboBoxSettingCard, OptionsSettingCard,
+    setCustomStyleSheet, SettingCardGroup, ComboBoxSettingCard, OptionsSettingCard,
     SwitchSettingCard, RangeSettingCard, PushSettingCard,
-    PrimaryPushSettingCard, HyperlinkCard, SettingCard,
+    HyperlinkCard, SettingCard,
     ConfigItem, OptionsConfigItem, RangeConfigItem,
     OptionsValidator, RangeValidator, BoolValidator,
     FlyoutViewBase, PopupTeachingTip, TeachingTipTailPosition,
 )
 
-from config.settings import settings
 from config.constants import APP_NAME, APP_VERSION
+from config.settings import settings
 from views.style_sheet import StyleSheet
 
 
@@ -53,6 +51,34 @@ class _DataPathCard(SettingCard):
 
     def update_path(self, path: str):
         self.contentLabel.setText(path or "默认路径")
+
+
+class _ExportDataCard(SettingCard):
+    """导出数据设置卡"""
+
+    export_json_clicked = Signal()
+    export_excel_clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(
+            FluentIcon.SAVE,
+            "导出数据",
+            "支持导出为 JSON 或 Excel 格式",
+            parent,
+        )
+
+        self.export_json_btn = PushButton("导出JSON")
+        self.export_json_btn.setFixedWidth(100)
+        self.export_json_btn.clicked.connect(self.export_json_clicked.emit)
+
+        self.export_excel_btn = PushButton("导出Excel")
+        self.export_excel_btn.setFixedWidth(100)
+        self.export_excel_btn.clicked.connect(self.export_excel_clicked.emit)
+
+        self.hBoxLayout.addWidget(self.export_excel_btn)
+        self.hBoxLayout.addSpacing(8)
+        self.hBoxLayout.addWidget(self.export_json_btn)
+        self.hBoxLayout.addSpacing(16)
 
 
 class SortSettingCard(SettingCard):
@@ -160,6 +186,125 @@ class GifFlyoutView(FlyoutViewBase):
         layout.addWidget(self._gif_label)
 
 
+class ShortcutEdit(QLineEdit):
+    """快捷键录制输入框"""
+
+    shortcut_changed = Signal(str)
+
+    def __init__(self, shortcut: str = "", parent=None):
+        super().__init__(parent)
+        self._shortcut = shortcut
+        self.setReadOnly(True)
+        self.setPlaceholderText("点击后按下快捷键...")
+        self.setText(shortcut)
+        self.setFixedWidth(180)
+        self._update_style(False)
+
+    def _update_style(self, recording: bool):
+        from qfluentwidgets import isDarkTheme
+        dark = isDarkTheme()
+        if recording:
+            text_color = "#FFF" if dark else "#000"
+            self.setStyleSheet(
+                f"border: 2px solid #0078D4; border-radius: 5px; padding: 4px 8px; color: {text_color};"
+            )
+        else:
+            border_color = "rgba(255,255,255,0.15)" if dark else "rgba(0,0,0,0.15)"
+            text_color = "#FFF" if dark else "#000"
+            bg_color = "rgba(255,255,255,0.05)" if dark else "#FFF"
+            self.setStyleSheet(
+                f"border: 1px solid {border_color}; border-radius: 5px; "
+                f"padding: 4px 8px; color: {text_color}; background: {bg_color};"
+            )
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_style(False)
+
+    def focusInEvent(self, event):
+        self._update_style(True)
+        self.setText("请按下快捷键...")
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        self._update_style(False)
+        self.setText(self._shortcut)
+        super().focusOutEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent):
+        key = event.key()
+        if key in (Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+            return
+        modifiers = event.modifiers()
+        if modifiers == Qt.KeyboardModifier.NoModifier:
+            if key == Qt.Key.Key_Escape:
+                self._shortcut = ""
+                self.setText("")
+                self.shortcut_changed.emit("")
+                self.clearFocus()
+                return
+            if key == Qt.Key.Key_Backspace:
+                self._shortcut = ""
+                self.setText("")
+                self.shortcut_changed.emit("")
+                self.clearFocus()
+                return
+            return
+        key_seq = QKeySequence(event.keyCombination())
+        key_str = key_seq.toString()
+        self._shortcut = key_str
+        self.setText(key_str)
+        self.shortcut_changed.emit(key_str)
+        self.clearFocus()
+
+    def get_shortcut(self) -> str:
+        return self._shortcut
+
+    def set_shortcut(self, shortcut: str):
+        self._shortcut = shortcut
+        self.setText(shortcut)
+
+
+class ShortcutSettingCard(SettingCard):
+    """新建任务快捷键设置卡"""
+
+    shortcut_changed = Signal(str)
+    reset_clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(
+            FluentIcon.ADD,
+            "快速新建任务",
+            "设置全局快捷键以快速打开新建任务对话框",
+            parent,
+        )
+
+        self.shortcut_edit = ShortcutEdit(settings.shortcut_new_task)
+        self.shortcut_edit.shortcut_changed.connect(self._on_shortcut_changed)
+        self.shortcut_edit.setFixedWidth(160)
+
+        self.reset_btn = PushButton("重置")
+        self.reset_btn.setFixedWidth(60)
+        self.reset_btn.clicked.connect(self._on_reset_clicked)
+
+        self.hBoxLayout.addWidget(self.reset_btn)
+        self.hBoxLayout.addSpacing(8)
+        self.hBoxLayout.addWidget(self.shortcut_edit)
+        self.hBoxLayout.addSpacing(16)
+
+    def _on_shortcut_changed(self, key_str: str):
+        if key_str != settings.shortcut_new_task:
+            settings.shortcut_new_task = key_str
+            self.shortcut_changed.emit(key_str)
+
+    def _on_reset_clicked(self):
+        self.shortcut_edit.set_shortcut("")
+        if "" != settings.shortcut_new_task:
+            settings.shortcut_new_task = ""
+            self.shortcut_changed.emit("")
+        self.reset_clicked.emit()
+
+
 class SettingsPage(QWidget):
     """设置页面"""
 
@@ -173,7 +318,10 @@ class SettingsPage(QWidget):
     floating_top_changed = Signal(bool)
     description_mode_changed = Signal(str)
     dialog_mode_changed = Signal(str)
+    shortcut_new_task_changed = Signal(str)
     manual_refresh_clicked = Signal()
+    export_json_clicked = Signal()
+    export_excel_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -235,6 +383,11 @@ class SettingsPage(QWidget):
 
         self.scroll_area.setWidget(self.scroll_widget)
         self.main_layout.addWidget(self.scroll_area, 1)
+
+        # 转发快捷键卡片信号
+        self.shortcut_new_task_card.shortcut_changed.connect(
+            self.shortcut_new_task_changed.emit
+        )
 
     # ================================================================
     #  设置组创建
@@ -334,6 +487,9 @@ class SettingsPage(QWidget):
         )
         group.addSettingCard(self.dialog_mode_card)
 
+        self.shortcut_new_task_card = ShortcutSettingCard(parent=group)
+        group.addSettingCard(self.shortcut_new_task_card)
+
         return group
 
     def _create_sort_group(self) -> SettingCardGroup:
@@ -412,13 +568,10 @@ class SettingsPage(QWidget):
         self.data_path_card.reset_clicked.connect(self._on_reset_data_path)
         group.addSettingCard(self.data_path_card)
 
-        self.export_btn = PushSettingCard(
-            "导出",
-            FluentIcon.SAVE,
-            "导出数据",
-            "将任务数据导出为 JSON 文件",
-        )
-        group.addSettingCard(self.export_btn)
+        self.export_data_card = _ExportDataCard()
+        self.export_data_card.export_json_clicked.connect(self.export_json_clicked.emit)
+        self.export_data_card.export_excel_clicked.connect(self.export_excel_clicked.emit)
+        group.addSettingCard(self.export_data_card)
 
         self.import_btn = PushSettingCard(
             "导入",
@@ -687,6 +840,25 @@ class SettingsPage(QWidget):
         card_layout.addWidget(copyright_label)
 
         return card
+    def _create_shortcut_new_task_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(12)
+
+        label = BodyLabel("快速新建任务")
+        label.setFixedWidth(90)
+        row.addWidget(label)
+
+        self.shortcut_new_task_edit = ShortcutEdit(settings.shortcut_new_task)
+        self.shortcut_new_task_edit.shortcut_changed.connect(self._on_shortcut_new_task_changed)
+        row.addWidget(self.shortcut_new_task_edit)
+
+        reset_btn = PushButton("重置")
+        reset_btn.setFixedWidth(60)
+        reset_btn.clicked.connect(self._on_reset_shortcut_new_task)
+        row.addWidget(reset_btn)
+
+        row.addStretch()
+        return row
 
     def _update_sort_ui(self, rules: list[str]):
         """外部更新排序 UI 状态"""

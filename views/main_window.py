@@ -12,6 +12,9 @@ from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QSystemTrayIcon, QMenu, QFileDialog, QApplication
 )
+
+import ctypes
+from ctypes import wintypes
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon, Theme,
     setTheme, InfoBar, InfoBarPosition, MessageBox, MessageBoxBase,
@@ -485,6 +488,7 @@ class MainWindow(FluentWindow):
 
     def _tray_quit(self):
         """从托盘退出应用"""
+        self._unregister_global_hotkey()
         settings.flush()
         self.tray_icon.hide()
         self.floating.close()
@@ -542,15 +546,113 @@ class MainWindow(FluentWindow):
         self.settings_page.sort_rule_changed.connect(self._on_sort_rule_changed)
         self.settings_page.floating_top_changed.connect(self._on_floating_top_changed)
         self.settings_page.manual_refresh_clicked.connect(self._manual_refresh)
-        self.settings_page.export_btn.clicked.connect(self._export_data)
+        self.settings_page.export_json_clicked.connect(self._export_json)
+        self.settings_page.export_excel_clicked.connect(self._export_excel)
         self.settings_page.import_btn.clicked.connect(self._import_data)
         # 分类变更走事件总线订阅，settings_page 自身不再需要 categories_changed 信号
+
+        # 快捷键
+        self._setup_shortcuts()
+        self.settings_page.shortcut_new_task_changed.connect(self.update_shortcut_new_task)
 
         # 导航切换时记录当前视图
         self.stackedWidget.currentChanged.connect(self._on_view_changed)
 
         self.resizeEvent = self._on_resize
         self.moveEvent = self._on_move
+
+    # ---- 全局热键常量 ----
+    _HOTKEY_ID_NEW_TASK = 1
+    _WM_HOTKEY = 0x0312
+
+    _MOD_MAP = {
+        "Ctrl": 0x0002,   # MOD_CONTROL
+        "Shift": 0x0004,  # MOD_SHIFT
+        "Alt": 0x0001,    # MOD_ALT
+    }
+
+    _KEY_MAP = {
+        "0": 0x30, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34,
+        "5": 0x35, "6": 0x36, "7": 0x37, "8": 0x38, "9": 0x39,
+        "A": 0x41, "B": 0x42, "C": 0x43, "D": 0x44, "E": 0x45,
+        "F": 0x46, "G": 0x47, "H": 0x48, "I": 0x49, "J": 0x4A,
+        "K": 0x4B, "L": 0x4C, "M": 0x4D, "N": 0x4E, "O": 0x4F,
+        "P": 0x50, "Q": 0x51, "R": 0x52, "S": 0x53, "T": 0x54,
+        "U": 0x55, "V": 0x56, "W": 0x57, "X": 0x58, "Y": 0x59,
+        "Z": 0x5A,
+        "F1": 0x70, "F2": 0x71, "F3": 0x72, "F4": 0x73,
+        "F5": 0x74, "F6": 0x75, "F7": 0x76, "F8": 0x77,
+        "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F12": 0x7B,
+        "Space": 0x20, "Return": 0x0D, "Backspace": 0x08,
+        "Tab": 0x09, "Escape": 0x1B, "Delete": 0x2E,
+        "Insert": 0x2D, "Home": 0x24, "End": 0x23,
+        "Page Up": 0x21, "Page Down": 0x22,
+        "Left": 0x25, "Up": 0x26, "Right": 0x27, "Down": 0x28,
+    }
+
+    @staticmethod
+    def _parse_shortcut(key_str: str):
+        """解析快捷键字符串为 (modifiers, vk) 元组"""
+        if not key_str:
+            return None, None
+        parts = key_str.split("+")
+        mods = 0
+        vk = None
+        for p in parts:
+            p = p.strip()
+            if p in MainWindow._MOD_MAP:
+                mods |= MainWindow._MOD_MAP[p]
+            else:
+                vk = MainWindow._KEY_MAP.get(p)
+        return mods, vk
+
+    def _setup_shortcuts(self):
+        """注册全局快捷键"""
+        self._register_global_hotkey()
+
+    def _register_global_hotkey(self):
+        """注册 Windows 全局热键"""
+        self._unregister_global_hotkey()
+        mods, vk = self._parse_shortcut(settings.shortcut_new_task)
+        if mods is None or vk is None:
+            return
+        try:
+            ctypes.windll.user32.RegisterHotKey(
+                int(self.winId()), self._HOTKEY_ID_NEW_TASK, mods, vk
+            )
+        except Exception:
+            pass
+
+    def _unregister_global_hotkey(self):
+        """注销 Windows 全局热键"""
+        try:
+            ctypes.windll.user32.UnregisterHotKey(
+                int(self.winId()), self._HOTKEY_ID_NEW_TASK
+            )
+        except Exception:
+            pass
+
+    def update_shortcut_new_task(self, key_str: str):
+        """更新新建任务快捷键"""
+        self._register_global_hotkey()
+
+    def nativeEvent(self, eventType, message):
+        """处理 Windows 原生消息，响应全局热键"""
+        if eventType == b"windows_generic_MSG":
+            msg = ctypes.wintypes.MSG.from_address(int(message))
+            if msg.message == self._WM_HOTKEY and msg.wParam == self._HOTKEY_ID_NEW_TASK:
+                self._on_hotkey_new_task()
+                return True, 0
+        return super().nativeEvent(eventType, message)
+
+    def _on_hotkey_new_task(self):
+        """全局热键触发：打开新建任务对话框"""
+        # 防止重复触发：如果已有对话框打开则激活它
+        if hasattr(self, '_todo_dialog') and self._todo_dialog is not None and self._todo_dialog.isVisible():
+            self._todo_dialog.raise_()
+            self._todo_dialog.activateWindow()
+            return
+        self._open_todo_dialog()
 
     def _on_view_changed(self, index):
         """导航切换时记录当前视图，并按需加载未加载的视图"""
@@ -1298,7 +1400,14 @@ class MainWindow(FluentWindow):
         dialog = TodoDialog(todo_data=todo_data, parent=self,
                             edit_mode=edit_mode, template_data=template_data)
         dialog.todo_saved.connect(self._on_todo_saved)
+        # 置顶并保持在最前
+        dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self._todo_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
         dialog.exec()
+        self._todo_dialog = None
 
     def _on_todo_saved(self, data: dict):
         temp_files = data.pop("temp_files", [])
@@ -1615,13 +1724,15 @@ class MainWindow(FluentWindow):
 
     # ---- 导入导出 ----
 
-    def _export_data(self):
-        """导出数据"""
+    def _export_json(self):
+        """导出JSON（支持恢复数据）"""
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出数据", "easy_todo_backup.json", "JSON 文件 (*.json)"
+            self, "导出JSON", "easy_todo_backup.json", "JSON 文件 (*.json)"
         )
         if not path:
             return
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             from services.import_export_service import ImportExportService
             service = ImportExportService(self.todo_service, self.category_service)
@@ -1634,6 +1745,29 @@ class MainWindow(FluentWindow):
         except Exception as e:
             InfoBar.error(title="导出失败", content=str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=3000)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _export_excel(self):
+        """导出Excel（仅用于查看，不支持恢复）"""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出Excel", "easy_todo_data.xlsx", "Excel 文件 (*.xlsx)"
+        )
+        if not path:
+            return
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            from services.import_export_service import ImportExportService
+            service = ImportExportService(self.todo_service, self.category_service)
+            count = service.export_to_excel(path)
+            InfoBar.success(title="导出成功", content=f"已导出 {count} 个任务", parent=self,
+                            position=InfoBarPosition.TOP, duration=2000)
+        except Exception as e:
+            InfoBar.error(title="导出失败", content=str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=3000)
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def _import_data(self):
         """导入数据"""

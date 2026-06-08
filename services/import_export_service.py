@@ -9,6 +9,8 @@ from services.category_service import CategoryService
 from models.todo import Todo
 from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED
 
+STATUS_LABELS = {STATUS_TODO: "未完成", STATUS_DONE: "已完成", STATUS_ARCHIVED: "已归档"}
+
 
 EXPORT_VERSION = "2.0"
 
@@ -62,6 +64,91 @@ class ImportExportService:
             "categories": cat_list,
             "todos": todo_list,
         }
+
+    def export_to_excel(self, path: str) -> int:
+        """导出数据到 Excel 文件，返回导出的任务数量"""
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+        from openpyxl.utils import get_column_letter
+
+        all_todos = self.todo_service.get_all_including_archived()
+
+        children_map: dict[int, list[Todo]] = {}
+        for t in all_todos:
+            if t.pid is not None:
+                children_map.setdefault(t.pid, []).append(t)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "任务数据"
+
+        headers = ["任务名称", "详情", "开始时间", "完成时间", "创建时间", "更新时间", "分类", "状态", "任务类型"]
+        ws.append(headers)
+
+        header_fill = PatternFill(start_color="0078D4", end_color="0078D4", fill_type="solid")
+        header_font_white = Font(bold=True, size=11, color="FFFFFF")
+        thin_border = Border(
+            left=Side(style="thin", color="D0D0D0"),
+            right=Side(style="thin", color="D0D0D0"),
+            top=Side(style="thin", color="D0D0D0"),
+            bottom=Side(style="thin", color="D0D0D0"),
+        )
+        wrap_alignment = Alignment(wrap_text=True, vertical="top")
+
+        for col_idx, _ in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = header_font_white
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = thin_border
+
+        row_idx = 2
+        exported_count = 0
+
+        for t in all_todos:
+            if t.pid is not None:
+                continue
+            is_recurring = bool(t.recurrence_type)
+            task_type = "重复任务" if is_recurring else "普通任务"
+            status_label = STATUS_LABELS.get(t.status, "未完成")
+            cat_name = t.category.name if t.category else ""
+
+            row_data = [
+                t.title or "",
+                t.description or "",
+                t.start_date.isoformat() if t.start_date else "",
+                t.completed_at.strftime("%Y-%m-%d %H:%M:%S") if t.completed_at else "",
+                t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else "",
+                t.updated_at.strftime("%Y-%m-%d %H:%M:%S") if t.updated_at else "",
+                cat_name,
+                status_label,
+                task_type,
+            ]
+            ws.append(row_data)
+            for col_idx in range(1, len(headers) + 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.border = thin_border
+                cell.alignment = wrap_alignment
+            row_idx += 1
+            exported_count += 1
+
+            children = sorted(children_map.get(t.id, []), key=lambda x: x.sort_order)
+            for child in children:
+                child_row = [child.title or "", "", "", "", "", "", "", "", ""]
+                ws.append(child_row)
+                for col_idx in range(1, len(headers) + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cell.border = thin_border
+                    cell.alignment = wrap_alignment
+                    cell.font = Font(color="666666")
+                row_idx += 1
+
+        col_widths = [30, 40, 16, 20, 20, 20, 12, 10, 12]
+        for i, width in enumerate(col_widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = width
+
+        wb.save(path)
+        return exported_count
 
     def _build_export_tree(self, todos: list[Todo]) -> list[dict]:
         id_to_todo = {t.id: t for t in todos}
