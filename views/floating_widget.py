@@ -23,6 +23,9 @@ class FloatingWidget(QWidget):
     EDGE_SIZE = 5
     MIN_WIDTH = 240
     MIN_HEIGHT = 160
+    SNAP_THRESHOLD = 20
+    COLLAPSED_STRIP = 6
+    COLLAPSE_DELAY = 400
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,6 +54,15 @@ class FloatingWidget(QWidget):
         self._closing = False
         self._page_size = 20
         self._current_page = 0
+        self._snap_anim: QPropertyAnimation | None = None
+        self._snapped_edges = 0       # 贴边方向位掩码: 上1 下2 左4 右8
+        self._collapsed = False
+        self._edge_animating = False
+        self._expanded_pos = QPoint()
+        self._collapse_timer = QTimer(self)
+        self._collapse_timer.setSingleShot(True)
+        self._collapse_timer.setInterval(self.COLLAPSE_DELAY)
+        self._collapse_timer.timeout.connect(self._do_collapse)
 
         self._setup_ui()
         self._apply_theme()
@@ -335,6 +347,15 @@ class FloatingWidget(QWidget):
         self.pin_btn.setIconSize(QSize(12, 12))
         self.pin_btn.setToolTip("取消固定" if pinned else "固定浮窗")
         self._update_pin_mask()
+        # 固定时展开并清除贴边状态
+        if pinned and (self._collapsed or self._snapped_edges):
+            self._collapse_timer.stop()
+            if self._snap_anim is not None:
+                self._snap_anim.stop()
+                self._edge_animating = False
+            self._snapped_edges = 0
+            self._collapsed = False
+            self.move(self._expanded_pos)
 
     def _toggle_pin(self):
         """切换固定状态"""
@@ -499,7 +520,9 @@ class FloatingWidget(QWidget):
             h_layout.setContentsMargins(8, 0, 6, 0)
         h_layout.setSpacing(0)
 
-        title_label = BodyLabel(todo.get("title", ""))
+        title = todo.get("title", "")
+        title_label = BodyLabel(title)
+        title_label.setToolTip(title)
         font_size = "13px" if is_child else "15px"
         title_label.setStyleSheet(f"font-size: {font_size}; {text_style} border: none;")
         h_layout.addWidget(title_label, 1)
@@ -571,6 +594,9 @@ class FloatingWidget(QWidget):
     # ---- 鼠标事件 ----
 
     def mousePressEvent(self, event: QMouseEvent):
+        if self._collapsed:
+            self._do_expand()
+            return
         if event.button() == Qt.LeftButton:
             edge = self._detect_edge(event.pos())
             if edge and not self._pinned:
@@ -582,10 +608,19 @@ class FloatingWidget(QWidget):
             if self.title_bar.underMouse() and not self._pinned:
                 self._dragging = True
                 self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                # 拖拽开始时重置贴边状态
+                self._collapse_timer.stop()
+                if self._snapped_edges:
+                    self._snapped_edges = 0
+                    self._collapsed = False
                 return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        if self._collapsed or self._edge_animating:
+            super().mouseMoveEvent(event)
+            return
+
         if self._dragging and event.buttons() & Qt.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             return
@@ -648,10 +683,147 @@ class FloatingWidget(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        was_dragging = self._dragging
         self._dragging = False
         self._resizing = False
         self._resize_edge = 0
+        if was_dragging:
+            self._snap_to_edge()
         super().mouseReleaseEvent(event)
+
+    def enterEvent(self, event):
+        if self._collapsed and self._snapped_edges and not self._edge_animating:
+            self._do_expand()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if (not self._collapsed and self._snapped_edges
+                and not self._edge_animating
+                and not self._dragging and not self._resizing
+                and not self.quick_overlay.isVisible()):
+            self._collapse_timer.start()
+        super().leaveEvent(event)
+
+    def _snap_to_edge(self):
+        """拖拽结束"""
+        if self._pinned:
+            return
+
+        screen = QApplication.screenAt(self.geometry().center())
+        if not screen:
+            screen = QApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.availableGeometry()
+        threshold = self.SNAP_THRESHOLD
+
+        pos = self.pos()
+        target_x, target_y = pos.x(), pos.y()
+        edges = 0
+
+        # 左右贴边
+        if pos.x() - geo.left() <= threshold:
+            target_x = geo.left()
+            edges |= 4  # 左
+        elif geo.right() - (pos.x() + self.width()) <= threshold:
+            target_x = geo.right() - self.width()
+            edges |= 8  # 右
+
+        # 上下贴边
+        if pos.y() - geo.top() <= threshold:
+            target_y = geo.top()
+            edges |= 1  # 上
+        elif geo.bottom() - (pos.y() + self.height()) <= threshold:
+            target_y = geo.bottom() - self.height()
+            edges |= 2  # 下
+
+        if edges == 0:
+            return  # 无需吸附
+
+        # 记录展开位置和贴边方向
+        self._expanded_pos = QPoint(target_x, target_y)
+        self._snapped_edges = edges
+
+        collapsed_pos = self._calc_collapsed_pos(geo)
+        self._start_edge_anim(pos, collapsed_pos, on_done=self._on_snap_done)
+
+    def _calc_collapsed_pos(self, screen_geo=None):
+        """根据贴边方向计算收起位置"""
+        if screen_geo is None:
+            screen = QApplication.screenAt(self.geometry().center())
+            if not screen:
+                screen = QApplication.primaryScreen()
+            if not screen:
+                return self._expanded_pos
+            screen_geo = screen.availableGeometry()
+
+        x, y = self._expanded_pos.x(), self._expanded_pos.y()
+        strip = self.COLLAPSED_STRIP
+
+        if self._snapped_edges & 4:   # 左
+            x = screen_geo.left() - (self.width() - strip)
+        elif self._snapped_edges & 8: # 右
+            x = screen_geo.right() - strip
+
+        if self._snapped_edges & 1:   # 上
+            y = screen_geo.top() - (self.height() - strip)
+        elif self._snapped_edges & 2: # 下
+            y = screen_geo.bottom() - strip
+
+        return QPoint(x, y)
+
+    def _start_edge_anim(self, start: QPoint, end: QPoint, on_done=None):
+        if self._snap_anim is not None:
+            self._snap_anim.stop()
+
+        self._edge_animating = True
+        self._snap_anim = QPropertyAnimation(self, b"pos")
+        self._snap_anim.setDuration(200)
+        self._snap_anim.setStartValue(start)
+        self._snap_anim.setEndValue(end)
+        self._snap_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        if on_done:
+            self._snap_anim.finished.connect(on_done)
+        self._snap_anim.start()
+
+    def _on_snap_done(self):
+        self._collapsed = True
+        self._edge_animating = False
+
+    # ---- 收起 / 展开 ----
+
+    def _do_collapse(self):
+        """收起浮窗到贴边条带"""
+        if self._collapsed or self._edge_animating or self._snapped_edges == 0:
+            return
+        if self.quick_overlay.isVisible():
+            self._collapse_timer.start()
+            return
+
+        screen = QApplication.screenAt(self.geometry().center())
+        if not screen:
+            screen = QApplication.primaryScreen()
+        if not screen:
+            return
+
+        collapsed_pos = self._calc_collapsed_pos(screen.availableGeometry())
+        self._start_edge_anim(self.pos(), collapsed_pos, on_done=self._on_collapse_done)
+
+    def _on_collapse_done(self):
+        self._collapsed = True
+        self._edge_animating = False
+
+    def _do_expand(self):
+        """展开浮窗到贴边位置"""
+        if not self._collapsed or self._edge_animating:
+            return
+
+        self._collapse_timer.stop()
+        self._start_edge_anim(self.pos(), self._expanded_pos, on_done=self._on_expand_done)
+
+    def _on_expand_done(self):
+        self._collapsed = False
+        self._edge_animating = False
 
     def show(self):
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)

@@ -146,12 +146,20 @@ class _LoadTodosWorker(QRunnable):
             # ---- 最近待办 ----
             if view_keys is None or 'recent' in view_keys:
                 due_start, due_end = p.get('recent_due_start'), p.get('recent_due_end')
-                recent_todos, recent_total = svc.get_all_including_done_with_count(
-                    sort_rules=sort_rules,
-                    page=0, page_size=0,
-                    due_start=due_start, due_end=due_end,
-                    dedup_recurrence=True,
-                )
+                if show_done:
+                    recent_todos, recent_total = svc.get_all_including_done_with_count(
+                        sort_rules=sort_rules,
+                        page=0, page_size=0,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
+                else:
+                    recent_todos, recent_total = svc.get_all_with_count(
+                        status=STATUS_TODO, sort_rules=sort_rules,
+                        page=0, page_size=0,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
                 recent_tree = _build_todo_tree(recent_todos, truncate_desc=True)
                 _inject_completed_flags(recent_tree)
                 result['recent'] = {'tree': recent_tree, 'total': recent_total}
@@ -275,6 +283,14 @@ class MainWindow(FluentWindow):
 
         # 分类导航项缓存 {category_id: (interface, name)}
         self._category_nav_items: dict[int, tuple] = {}
+
+        # 防抖定时器：避免开关快速切换时重复触发重操作
+        self._refresh_debounce_timer = QTimer(self)
+        self._refresh_debounce_timer.setSingleShot(True)
+        self._refresh_debounce_timer.setInterval(150)  # 150ms 防抖
+        self._refresh_debounce_timer.timeout.connect(self._do_debounced_refresh)
+
+        self._debounced_refresh_pending: str | None = None  # "all" | "current"
 
         self._setup_ui()
         self._setup_navigation()
@@ -589,12 +605,20 @@ class MainWindow(FluentWindow):
     def _update_floating_data(self, view_key: str):
         """根据视图标识更新浮窗数据"""
         self.todo_service.session.expire_all()
+
+        view = self._get_view_by_key(view_key)
+        filter_key = view.current_time_filter() if view else "all"
+        due_start, due_end = self._get_date_range(filter_key, view) if view else (None, None)
+
         # 处理分类视图
         if view_key.startswith("cat_"):
             cat_id = int(view_key.split("_")[1])
             cat_name = self._category_nav_items.get(cat_id, (None, "任务列表"))[1]
             self.floating.title_label.setText(cat_name)
-            todos = self.todo_service.get_by_category(cat_id, dedup_recurrence=True)
+            todos = self.todo_service.get_by_category(
+                cat_id, dedup_recurrence=True,
+                due_start=due_start, due_end=due_end,
+            )
             tree = self._build_todo_tree(todos, truncate_desc=True)
             self._inject_completed_dates(tree)
             self.floating.set_todos(tree)
@@ -605,7 +629,10 @@ class MainWindow(FluentWindow):
         self.floating.title_label.setText(title_map.get(view_key, "任务列表"))
 
         if view_key == "done":
-            done_todos = self.todo_service.get_all(status=STATUS_DONE)
+            done_filter = getattr(self, '_done_filter', 'done')
+            done_todos = self.todo_service.get_all(
+                status=STATUS_ARCHIVED if done_filter == 'archived' else STATUS_DONE,
+            )
             todos = done_todos
         elif view_key == "today":
             if settings.show_done_tasks:
@@ -617,22 +644,35 @@ class MainWindow(FluentWindow):
                     status=STATUS_TODO, sort_rules=settings.sort_rules
                 )
         elif view_key == "important":
-            todos = self.todo_service.get_high_priority(dedup_recurrence=True)
-        elif view_key == "recent":
-            todos = self.todo_service.get_all_including_done(
-                sort_rules=settings.sort_rules,
+            todos = self.todo_service.get_high_priority(
                 dedup_recurrence=True,
+                due_start=due_start, due_end=due_end,
             )
-        else:
+        elif view_key == "recent":
             if settings.show_done_tasks:
                 todos = self.todo_service.get_all_including_done(
                     sort_rules=settings.sort_rules,
                     dedup_recurrence=True,
+                    due_start=due_start, due_end=due_end,
                 )
             else:
                 todos = self.todo_service.get_all(
                     status=STATUS_TODO, sort_rules=settings.sort_rules,
                     dedup_recurrence=True,
+                    due_start=due_start, due_end=due_end,
+                )
+        else:
+            if settings.show_done_tasks:
+                todos = self.todo_service.get_all_including_done(
+                    sort_rules=settings.sort_rules,
+                    dedup_recurrence=True,
+                    due_start=due_start, due_end=due_end,
+                )
+            else:
+                todos = self.todo_service.get_all(
+                    status=STATUS_TODO, sort_rules=settings.sort_rules,
+                    dedup_recurrence=True,
+                    due_start=due_start, due_end=due_end,
                 )
 
         tree = self._build_todo_tree(todos, truncate_desc=True)
@@ -823,12 +863,20 @@ class MainWindow(FluentWindow):
         elif view_key == "recent":
             due_start, due_end = self._get_date_range(
                 view.current_time_filter(), view)
-            recent_todos, recent_total = self.todo_service.get_all_including_done_with_count(
-                sort_rules=sort_rules,
-                page=0, page_size=0,
-                due_start=due_start, due_end=due_end,
-                dedup_recurrence=True,
-            )
+            if show_done:
+                recent_todos, recent_total = self.todo_service.get_all_including_done_with_count(
+                    sort_rules=sort_rules,
+                    page=0, page_size=0,
+                    due_start=due_start, due_end=due_end,
+                    dedup_recurrence=True,
+                )
+            else:
+                recent_todos, recent_total = self.todo_service.get_all_with_count(
+                    status=STATUS_TODO, sort_rules=sort_rules,
+                    page=0, page_size=0,
+                    due_start=due_start, due_end=due_end,
+                    dedup_recurrence=True,
+                )
             recent_tree = self._build_todo_tree(recent_todos, truncate_desc=True)
             self._inject_completed_dates(recent_tree)
             view.set_todos(recent_tree, total_count=recent_total)
@@ -942,20 +990,36 @@ class MainWindow(FluentWindow):
 
         elif view_key == "recent":
             due_start, due_end = self._get_date_range(view.current_time_filter(), view)
-            def query():
-                svc = TodoService()
-                try:
-                    todos, total = svc.get_all_including_done_with_count(
-                        sort_rules=sort_rules,
-                        page=0, page_size=0,
-                        due_start=due_start, due_end=due_end,
-                        dedup_recurrence=True,
-                    )
-                    tree = _build_todo_tree(todos, truncate_desc=True)
-                    _inject_completed_flags(tree)
-                    return tree, total
-                finally:
-                    svc.close()
+            if show_done:
+                def query():
+                    svc = TodoService()
+                    try:
+                        todos, total = svc.get_all_including_done_with_count(
+                            sort_rules=sort_rules,
+                            page=0, page_size=0,
+                            due_start=due_start, due_end=due_end,
+                            dedup_recurrence=True,
+                        )
+                        tree = _build_todo_tree(todos, truncate_desc=True)
+                        _inject_completed_flags(tree)
+                        return tree, total
+                    finally:
+                        svc.close()
+            else:
+                def query():
+                    svc = TodoService()
+                    try:
+                        todos, total = svc.get_all_with_count(
+                            status=STATUS_TODO, sort_rules=sort_rules,
+                            page=0, page_size=0,
+                            due_start=due_start, due_end=due_end,
+                            dedup_recurrence=True,
+                        )
+                        tree = _build_todo_tree(todos, truncate_desc=True)
+                        _inject_completed_flags(tree)
+                        return tree, total
+                    finally:
+                        svc.close()
 
         elif view_key == "today":
             if show_done:
@@ -1062,18 +1126,44 @@ class MainWindow(FluentWindow):
 
     def _refresh_current_view(self):
         """只刷新当前可见的视图"""
-        current = self._current_view_key
-        # 其他已加载的视图标记为过期，切换时重新加载
-        self._loaded_views.clear()
-        self._load_view(current)
-        # 浮窗如果可见，也需要刷新
-        if self.floating.isVisible():
-            self._update_floating_data(self._floating_view_key)
+        self._schedule_debounced_refresh("current")
 
     def _refresh_all_views(self):
         """刷新所有视图"""
+        self._schedule_debounced_refresh("all")
+
+    def _schedule_debounced_refresh(self, level: str):
+        if self._debounced_refresh_pending == "all" and level == "current":
+            return
+        self._debounced_refresh_pending = level
+        self._refresh_debounce_timer.start()
+
+    def _do_debounced_refresh(self):
+        """执行防抖后的实际刷新"""
+        level = self._debounced_refresh_pending
+        self._debounced_refresh_pending = None
+        if level == "all":
+            self._loaded_views.clear()
+            self._load_todos()
+        elif level == "current":
+            current = self._current_view_key
+            self._loaded_views.clear()
+            self._load_view(current)
+            if self.floating.isVisible():
+                self._update_floating_data(self._floating_view_key)
+
+    def _refresh_all_views_immediate(self):
+        """立即刷新所有视图"""
         self._loaded_views.clear()
         self._load_todos()
+
+    def _refresh_current_view_immediate(self):
+        """立即刷新当前视图"""
+        current = self._current_view_key
+        self._loaded_views.clear()
+        self._load_view(current)
+        if self.floating.isVisible():
+            self._update_floating_data(self._floating_view_key)
 
     def _collect_load_params(self):
         """收集查询参数"""
@@ -1240,7 +1330,7 @@ class MainWindow(FluentWindow):
                     print(f"保存文件失败: {e}")
 
         if todo:
-            self._refresh_current_view()
+            self._refresh_current_view_immediate()
             InfoBar.success(title="成功", content="任务已保存", parent=self,
                             position=InfoBarPosition.TOP, duration=2000)
 
@@ -1257,7 +1347,7 @@ class MainWindow(FluentWindow):
                     for aid in affected_ids:
                         self.file_service.delete_task_folder(aid)
                 self.todo_service.delete_instance(todo_id, mode=mode)
-                self._refresh_current_view()
+                self._refresh_current_view_immediate()
                 InfoBar.success(title="已删除", content="任务已删除", parent=self,
                                 position=InfoBarPosition.TOP, duration=2000)
             return
@@ -1267,13 +1357,13 @@ class MainWindow(FluentWindow):
             if self.todo_service.delete(todo_id):
                 if dlg.delete_files:
                     self.file_service.delete_task_folder(todo_id)
-                self._refresh_current_view()
+                self._refresh_current_view_immediate()
                 InfoBar.success(title="已删除", content="任务已删除", parent=self,
                                 position=InfoBarPosition.TOP, duration=2000)
 
     def _toggle_todo_done(self, todo_id: int):
         if self.todo_service.toggle_done(todo_id):
-            self._refresh_current_view()
+            self._refresh_current_view_immediate()
 
     def _archive_todo(self, todo_id: int):
         msg = MessageBox("确认归档", "确定要归档这个任务吗？归档后可在「已完成」页面筛选查看。", self)
@@ -1281,7 +1371,7 @@ class MainWindow(FluentWindow):
         msg.cancelButton.setText("取消")
         if msg.exec():
             self.todo_service.update(todo_id, status=STATUS_ARCHIVED)
-            self._refresh_current_view()
+            self._refresh_current_view_immediate()
             InfoBar.success(title="已归档", content="任务已归档", parent=self,
                             position=InfoBarPosition.TOP, duration=2000)
 
@@ -1295,7 +1385,7 @@ class MainWindow(FluentWindow):
                             confirm_text="全部归档", cancel_text="取消", parent=self)
         if dlg.exec():
             count = self.todo_service.archive_all_done()
-            self._refresh_current_view()
+            self._refresh_current_view_immediate()
             InfoBar.success(title="已归档", content=f"已归档 {count} 个任务", parent=self,
                             position=InfoBarPosition.TOP, duration=2000)
 
@@ -1384,12 +1474,20 @@ class MainWindow(FluentWindow):
             view.set_todos(tree, total_count=total)
 
         elif view_key == "recent":
-            recent_todos, recent_total = self.todo_service.get_all_including_done_with_count(
-                sort_rules=sort_rules,
-                page=0, page_size=0,
-                due_start=due_start, due_end=due_end,
-                dedup_recurrence=True,
-            )
+            if settings.show_done_tasks:
+                recent_todos, recent_total = self.todo_service.get_all_including_done_with_count(
+                    sort_rules=sort_rules,
+                    page=0, page_size=0,
+                    due_start=due_start, due_end=due_end,
+                    dedup_recurrence=True,
+                )
+            else:
+                recent_todos, recent_total = self.todo_service.get_all_with_count(
+                    status=STATUS_TODO, sort_rules=sort_rules,
+                    page=0, page_size=0,
+                    due_start=due_start, due_end=due_end,
+                    dedup_recurrence=True,
+                )
             recent_tree = self._build_todo_tree(recent_todos, truncate_desc=True)
             self._inject_completed_dates(recent_tree)
             view.set_todos(recent_tree, total_count=recent_total)
@@ -1513,7 +1611,7 @@ class MainWindow(FluentWindow):
         # 更新排序
         self.todo_service.reorder(todo_ids)
 
-        self._refresh_current_view()
+        self._refresh_current_view_immediate()
 
     # ---- 导入导出 ----
 
@@ -1562,7 +1660,7 @@ class MainWindow(FluentWindow):
 
             mode = dlg.selected_mode
             result = service.import_data(data, mode=mode)
-            self._refresh_all_views()
+            self._refresh_all_views_immediate()
 
             total = result.get("imported", 0)
             cats = result.get("categories", 0)
@@ -1613,7 +1711,7 @@ class MainWindow(FluentWindow):
         self.floating.set_always_on_top(enabled)
 
     def _setup_category_navigation(self):
-        """启动时一次性建立分类导航（增量事件订阅 + 初始数据加载）"""
+        """启动时一次性建立分类导航"""
         bus = category_event_bus()
         bus.created.connect(self._on_category_created)
         bus.updated.connect(self._on_category_updated)
@@ -1625,12 +1723,6 @@ class MainWindow(FluentWindow):
                 self._add_category_nav_item(cat)
 
     def _add_category_nav_item(self, cat):
-        """新增一个分类的导航项与对应视图。
-
-        显式将 parent 传为 self（主窗口），
-        避免在 addSubInterface 之前的极短时间窗内 view 因无 parent
-        被 Qt 当作顶层窗口，导致多分类时出现"空窗口一闪而过"。
-        """
         view = TodoListView(parent=self, view_name=cat.name)
         view.setObjectName(f"categoryView_{cat.id}")
         view.set_time_filter_visible(True)
@@ -1660,17 +1752,14 @@ class MainWindow(FluentWindow):
 
     # ---- 分类变更增量处理（订阅事件总线）----
     def _on_category_created(self, category_id: int):
-        """新建分类：仅插入一个导航项，不动其它分类"""
         if category_id in self._category_nav_items:
             return
         cat = self.category_service.get_by_id(category_id)
         if not cat or cat.is_system:
             return
         self._add_category_nav_item(cat)
-        # 新分类的视图当前未加载数据，等用户切换过去时由 _on_view_changed 懒加载
 
     def _on_category_updated(self, category_id: int):
-        """分类重命名：只更新导航项的文字"""
         item = self._category_nav_items.get(category_id)
         if not item:
             return
@@ -1685,21 +1774,16 @@ class MainWindow(FluentWindow):
         self._category_nav_items[category_id] = (view, cat.name)
 
     def _on_category_deleted(self, category_id: int):
-        """删除分类：仅移除对应的导航项与视图，不动其它分类"""
         item = self._category_nav_items.pop(category_id, None)
         if not item:
             return
         view, _ = item
         cat_key = f"cat_{category_id}"
 
-        # 如果当前正显示这个被删分类的视图，先显式切到"全部任务"，
-        # 避免 removeInterface 让 QStackedWidget 自动选一个我们不期望的 widget。
         if self.stackedWidget.currentWidget() is view:
             self.stackedWidget.setCurrentWidget(self.todo_list_view)
 
         try:
-            # removeInterface 内部会从 stackedWidget 摘除并 hide，
-            # 配合 isDelete=True 让框架完成 deleteLater，避免上层手动调度删除时机
             self.removeInterface(view, isDelete=True)
         except Exception:
             try:
@@ -1713,17 +1797,13 @@ class MainWindow(FluentWindow):
             self._current_view_key = "all"
 
     def _on_category_reordered(self):
-        """分类顺序变化：刷新所有分类导航的内部顺序。
-
-        qfluentwidgets 的导航接口不直接暴露"指定插入位置"，
-        这里采用最简方式：读最新顺序、对比缓存，对位置不对的项进行 remove + re-add。
-        实际操作中 reorder 仅在管理弹窗中触发，开销可接受。
-        """
+        """分类顺序变化：仅调整导航项顺序，复用已有视图避免泄漏"""
         ordered_ids = [c.id for c in self.category_service.get_all() if not c.is_system]
         cached_ids = list(self._category_nav_items.keys())
         if ordered_ids == cached_ids:
             return
-        # 如果只是子集调整（新增/删除），增量处理已覆盖；这里兜底处理"位置"变化
+
+        # 从导航中移除所有分类项（不删除视图对象）
         for cat_id in cached_ids:
             item = self._category_nav_items.get(cat_id)
             if not item:
@@ -1733,10 +1813,19 @@ class MainWindow(FluentWindow):
                 self.removeInterface(view, isDelete=False)
             except Exception:
                 pass
+
+        # 按新顺序重新添加已有视图到导航（不创建新视图）
         for cat_id in ordered_ids:
-            cat = self.category_service.get_by_id(cat_id)
-            if cat:
-                self._add_category_nav_item(cat)
+            item = self._category_nav_items.get(cat_id)
+            if not item:
+                # 新分类（兜底，理论上已被 _on_category_created 处理）
+                cat = self.category_service.get_by_id(cat_id)
+                if cat:
+                    self._add_category_nav_item(cat)
+                continue
+            view, name = item
+            self.addSubInterface(view, FluentIcon.BOOK_SHELF, name,
+                                 position=NavigationItemPosition.SCROLL)
 
     def _on_floating_pin_changed(self, pinned: bool):
         """浮窗固定状态变更"""
@@ -1755,7 +1844,7 @@ class MainWindow(FluentWindow):
     def _on_floating_quick_add(self, title: str):
         """浮窗快速新建任务"""
         self.todo_service.create(title=title)
-        self._refresh_current_view()
+        self._refresh_current_view_immediate()
 
     def _on_auto_start_changed(self, enabled: bool):
         """设置开机自启"""

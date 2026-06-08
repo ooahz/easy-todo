@@ -271,8 +271,6 @@ class SettingsPage(QWidget):
             "在任务列表中显示已完成的任务",
             configItem=self.show_done_cfg,
         )
-        self.show_done_card.switchButton.setOnText("开")
-        self.show_done_card.switchButton.setOffText("关")
         self.show_done_card.checkedChanged.connect(self._on_show_done_changed)
         group.addSettingCard(self.show_done_card)
 
@@ -285,8 +283,6 @@ class SettingsPage(QWidget):
             "在任务列表显示周视图",
             configItem=self.show_week_view_cfg,
         )
-        self.show_week_view_card.switchButton.setOnText("开")
-        self.show_week_view_card.switchButton.setOffText("关")
         self.show_week_view_card.checkedChanged.connect(self._on_show_week_view_changed)
         group.addSettingCard(self.show_week_view_card)
 
@@ -389,8 +385,6 @@ class SettingsPage(QWidget):
             "使浮窗始终保持在其他窗口之上",
             configItem=self.floating_top_cfg,
         )
-        self.floating_top_card.switchButton.setOnText("开")
-        self.floating_top_card.switchButton.setOffText("关")
         self.floating_top_card.checkedChanged.connect(self._on_floating_top_changed)
         group.addSettingCard(self.floating_top_card)
 
@@ -403,8 +397,6 @@ class SettingsPage(QWidget):
             "在浮窗中显示任务的子任务列表",
             configItem=self.floating_subtasks_cfg,
         )
-        self.floating_subtasks_card.switchButton.setOnText("开")
-        self.floating_subtasks_card.switchButton.setOffText("关")
         self.floating_subtasks_card.checkedChanged.connect(
             self._on_floating_show_subtasks_changed
         )
