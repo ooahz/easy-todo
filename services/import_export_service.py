@@ -527,8 +527,16 @@ class ImportExportService:
             "recurrence_template_id": template_id,
             "is_exception": node.get("is_exception", False),
             "is_recurrence_template": False,
-            "completed_at": node.get("completed_at"),
         }
+
+        completed = node.get("completed_at")
+        if isinstance(completed, str) and completed:
+            try:
+                params["completed_at"] = datetime.fromisoformat(completed)
+            except Exception:
+                params["completed_at"] = None
+        elif completed is not None:
+            params["completed_at"] = completed
 
         status = node.get("status")
         if status is not None:
