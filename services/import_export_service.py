@@ -65,8 +65,22 @@ class ImportExportService:
             "todos": todo_list,
         }
 
-    def export_to_excel(self, path: str) -> int:
-        """导出数据到 Excel 文件，返回导出的任务数量"""
+    def export_to_excel(
+        self,
+        path: str,
+        date_field: Optional[str] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> int:
+        """导出数据到 Excel 文件，返回导出的任务数量
+
+        :param path: 导出文件路径
+        :param date_field: 时间筛选字段，支持
+            start_date / due_date / completed_at / created_at；
+            为 None 或空字符串表示不按时间筛选，导出全部
+        :param start_date: 起始日期（含），None 表示不限
+        :param end_date: 结束日期（含），None 表示不限
+        """
         from openpyxl import Workbook
         from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
         from openpyxl.utils import get_column_letter
@@ -77,6 +91,22 @@ class ImportExportService:
         for t in all_todos:
             if t.pid is not None:
                 children_map.setdefault(t.pid, []).append(t)
+
+        def _matches_filter(t: Todo) -> bool:
+            if not date_field:
+                return True
+            value = getattr(t, date_field, None)
+            if value is None:
+                return False
+            if isinstance(value, datetime):
+                cmp_value = value.date()
+            else:
+                cmp_value = value
+            if start_date and cmp_value < start_date:
+                return False
+            if end_date and cmp_value > end_date:
+                return False
+            return True
 
         wb = Workbook()
         ws = wb.active
@@ -107,6 +137,8 @@ class ImportExportService:
 
         for t in all_todos:
             if t.pid is not None:
+                continue
+            if not _matches_filter(t):
                 continue
             is_recurring = bool(t.recurrence_type)
             task_type = "重复任务" if is_recurring else "普通任务"
@@ -466,11 +498,20 @@ class ImportExportService:
             "title", "description", "priority", "status", "color_tag",
             "auto_postpone", "sort_order",
             "recurrence_type", "recurrence_interval",
-            "recurrence_day", "completed_at",
+            "recurrence_day",
         ]
         for field in simple_fields:
             if field in node:
                 params[field] = node[field]
+
+        completed = node.get("completed_at")
+        if isinstance(completed, str) and completed:
+            try:
+                params["completed_at"] = datetime.fromisoformat(completed)
+            except Exception:
+                params["completed_at"] = None
+        elif completed is not None:
+            params["completed_at"] = completed
 
         if pid is not None:
             params["pid"] = pid

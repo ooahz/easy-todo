@@ -41,6 +41,7 @@ class Settings:
         "todo_dialog_height": None,
         "system_view_order": ["recent", "today", "important", "all", "done"],
         "shortcut_new_task": "",
+        "holiday_source": "default",  # none / default
     }
 
     def __init__(self):
@@ -327,6 +328,16 @@ class Settings:
     @shortcut_new_task.setter
     def shortcut_new_task(self, value: str):
         self._data["shortcut_new_task"] = value
+        self.save()
+
+    @property
+    def holiday_source(self) -> str:
+        """节日数据来源：none / default"""
+        return self._data.get("holiday_source", "default")
+
+    @holiday_source.setter
+    def holiday_source(self, value: str):
+        self._data["holiday_source"] = value
         self.save()
 
 

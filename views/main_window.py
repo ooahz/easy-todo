@@ -1724,6 +1724,16 @@ class MainWindow(FluentWindow):
 
     # ---- 导入导出 ----
 
+    def _set_io_buttons_enabled(self, enabled: bool):
+        """启用/禁用导入导出相关按钮"""
+        buttons = [
+            self.settings_page.import_btn,
+            self.settings_page.export_data_card.export_json_btn,
+            self.settings_page.export_data_card.export_excel_btn,
+        ]
+        for btn in buttons:
+            btn.setEnabled(enabled)
+
     def _export_json(self):
         """导出JSON（支持恢复数据）"""
         path, _ = QFileDialog.getSaveFileName(
@@ -1732,6 +1742,7 @@ class MainWindow(FluentWindow):
         if not path:
             return
 
+        self._set_io_buttons_enabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             from services.import_export_service import ImportExportService
@@ -1747,27 +1758,45 @@ class MainWindow(FluentWindow):
                           position=InfoBarPosition.TOP, duration=3000)
         finally:
             QApplication.restoreOverrideCursor()
+            self._set_io_buttons_enabled(True)
 
     def _export_excel(self):
         """导出Excel（仅用于查看，不支持恢复）"""
+        from views.excel_export_filter_dialog import ExcelExportFilterDialog
+
+        dlg = ExcelExportFilterDialog(parent=self)
+        if not dlg.exec():
+            return
+
         path, _ = QFileDialog.getSaveFileName(
             self, "导出Excel", "easy_todo_data.xlsx", "Excel 文件 (*.xlsx)"
         )
         if not path:
             return
 
+        self._set_io_buttons_enabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             from services.import_export_service import ImportExportService
             service = ImportExportService(self.todo_service, self.category_service)
-            count = service.export_to_excel(path)
-            InfoBar.success(title="导出成功", content=f"已导出 {count} 个任务", parent=self,
+            count = service.export_to_excel(
+                path,
+                date_field=dlg.date_field or None,
+                start_date=dlg.start_date,
+                end_date=dlg.end_date,
+            )
+            if dlg.date_field:
+                content = f"按 {dlg.date_field_label} 筛选，已导出 {count} 个任务"
+            else:
+                content = f"已导出 {count} 个任务"
+            InfoBar.success(title="导出成功", content=content, parent=self,
                             position=InfoBarPosition.TOP, duration=2000)
         except Exception as e:
             InfoBar.error(title="导出失败", content=str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=3000)
         finally:
             QApplication.restoreOverrideCursor()
+            self._set_io_buttons_enabled(True)
 
     def _import_data(self):
         """导入数据"""
@@ -1776,6 +1805,8 @@ class MainWindow(FluentWindow):
         )
         if not path:
             return
+        self._set_io_buttons_enabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -1806,6 +1837,9 @@ class MainWindow(FluentWindow):
         except Exception as e:
             InfoBar.error(title="导入失败", content=str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=3000)
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._set_io_buttons_enabled(True)
 
     # ---- 设置回调 ----
 

@@ -313,6 +313,7 @@ class SettingsPage(QWidget):
     show_done_changed = Signal(bool)
     show_week_view_changed = Signal(bool)
     auto_start_changed = Signal(bool)
+    holiday_source_changed = Signal(str)
     sort_rule_changed = Signal(str)
     sort_rules_changed = Signal(list)
     floating_top_changed = Signal(bool)
@@ -449,6 +450,22 @@ class SettingsPage(QWidget):
         group.addSettingCard(self.refresh_card)
 
         self.manual_refresh_btn = self.refresh_card.button
+
+        self.holiday_source_cfg = OptionsConfigItem(
+            "TaskList", "HolidaySource", settings.holiday_source,
+            OptionsValidator(["none", "default"]),
+        )
+        self.holiday_source_card = ComboBoxSettingCard(
+            self.holiday_source_cfg,
+            FluentIcon.CALENDAR,
+            "节日数据来源",
+            "在日程视图中显示中国法定节假日信息",
+            texts=["无", "默认"],
+        )
+        self.holiday_source_card.comboBox.currentIndexChanged.connect(
+            self._on_holiday_source_changed
+        )
+        group.addSettingCard(self.holiday_source_card)
 
         return group
 
@@ -653,6 +670,11 @@ class SettingsPage(QWidget):
     def _on_show_week_view_changed(self, checked: bool):
         settings.show_week_view = checked
         self.show_week_view_changed.emit(checked)
+
+    def _on_holiday_source_changed(self, index: int):
+        source = "none" if index == 0 else "default"
+        settings.holiday_source = source
+        self.holiday_source_changed.emit(source)
 
     def _on_description_mode_changed(self, index: int):
         mode = "default" if index == 0 else "markdown"

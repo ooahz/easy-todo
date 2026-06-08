@@ -16,6 +16,8 @@ from qfluentwidgets import (
     TransparentToolButton
 )
 
+from config.settings import settings
+
 
 class WeekView(QWidget):
     """周视图组件"""
@@ -324,6 +326,8 @@ class CalendarDialog(QDialog):
 
         self._current_date = date.today()
         self._todos = todos
+        self._holidays: dict[str, dict] = {}  # key: "2026-01-01", value: {"name": ..., "isOffDay": ...}
+        self._load_holidays()
         self._setup_ui()
         self.refresh_calendar()
         # 根据内容调整窗口大小
@@ -522,11 +526,26 @@ class CalendarDialog(QDialog):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(2)
 
+        # 日期行：日期数字 + 节假日角标
+        day_row = QHBoxLayout()
+        day_row.setContentsMargins(0, 0, 0, 0)
+        day_row.setSpacing(2)
+
         day_label = CaptionLabel()
-        day_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
+        day_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         day_label.setStyleSheet("font-weight: 500;")
         day_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        layout.addWidget(day_label)
+        day_row.addWidget(day_label)
+
+        # 节假日/调休角标（休/班），默认隐藏
+        holiday_badge = CaptionLabel()
+        holiday_badge.setAlignment(Qt.AlignCenter)
+        holiday_badge.setFixedSize(16, 16)
+        holiday_badge.hide()
+        day_row.addWidget(holiday_badge)
+
+        day_row.addStretch()
+        layout.addLayout(day_row)
 
         tasks_widget = QWidget()
         tasks_layout = QVBoxLayout(tasks_widget)
@@ -535,6 +554,7 @@ class CalendarDialog(QDialog):
         layout.addWidget(tasks_widget, 1)
 
         cell.day_label = day_label
+        cell.holiday_badge = holiday_badge
         cell.tasks_widget = tasks_widget
         cell.tasks_layout = tasks_layout
         cell.setProperty("date", None)
@@ -556,6 +576,7 @@ class CalendarDialog(QDialog):
         else:
             month -= 1
         self._current_date = date(year, month, 1)
+        self._load_holidays()
         self._update_month_label()
         self.refresh_calendar()
 
@@ -569,6 +590,7 @@ class CalendarDialog(QDialog):
         else:
             month += 1
         self._current_date = date(year, month, 1)
+        self._load_holidays()
         self._update_month_label()
         self.refresh_calendar()
 
@@ -577,6 +599,21 @@ class CalendarDialog(QDialog):
         self._current_date = date.today()
         self._update_month_label()
         self.refresh_calendar()
+
+    def _load_holidays(self):
+        """加载节日数据"""
+        if settings.holiday_source == "none":
+            return
+        from services.holiday_service import holiday_service
+        # 加载当前月和前后月可能涉及的年份
+        year = self._current_date.year
+        holiday_service.load_year(year)
+        # 如果当前是1月或12月，可能需要加载相邻年份
+        if self._current_date.month == 1:
+            holiday_service.load_year(year - 1)
+        elif self._current_date.month == 12:
+            holiday_service.load_year(year + 1)
+        self._holidays = holiday_service._data
 
     def refresh_calendar(self):
         """刷新日历显示"""
@@ -619,16 +656,36 @@ class CalendarDialog(QDialog):
                 is_today = (cell_date == today)
                 cell.setProperty("is_today", is_today)
 
+                # 获取节日信息
+                holiday = self._holidays.get(cell_date.isoformat()) if self._holidays else None
+
                 if is_current_month:
-                    day_label_style = self._get_day_label_style(is_today, col)
+                    day_label_style = self._get_day_label_style(is_today, col, holiday)
                 else:
                     day_label_style = self._get_day_label_style_dim(col)
                 cell.day_label.setStyleSheet(day_label_style)
                 cell.day_label.setText(str(cell_date.day))
 
-                day_tasks = self._get_tasks_for_date(cell_date)
+                # 节假日/调休角标
+                if holiday and is_current_month:
+                    is_off = holiday.get("isOffDay", True)
+                    badge_text = "休" if is_off else "班"
+                    cell.holiday_badge.setText(badge_text)
+                    cell.holiday_badge.setStyleSheet(self._get_holiday_badge_style(is_off))
+                    cell.holiday_badge.show()
+                else:
+                    cell.holiday_badge.hide()
 
-                for task in day_tasks[:4]:
+                # 显示节日名称
+                if holiday and is_current_month:
+                    holiday_label = CaptionLabel(holiday["name"])
+                    holiday_label.setStyleSheet(self._get_holiday_label_style(holiday))
+                    cell.tasks_layout.addWidget(holiday_label)
+
+                day_tasks = self._get_tasks_for_date(cell_date)
+                max_tasks = 3 if holiday else 4
+
+                for task in day_tasks[:max_tasks]:
                     title = task["title"]
                     if task.get("_is_virtual"):
                         title = "🔁 " + title
@@ -638,13 +695,13 @@ class CalendarDialog(QDialog):
                     task_label.setToolTip(task["title"])
                     cell.tasks_layout.addWidget(task_label)
 
-                if len(day_tasks) > 4:
-                    more_label = CaptionLabel(f"+{len(day_tasks) - 4}")
+                if len(day_tasks) > max_tasks:
+                    more_label = CaptionLabel(f"+{len(day_tasks) - max_tasks}")
                     more_label.setStyleSheet(self._get_more_style())
                     cell.tasks_layout.addWidget(more_label)
 
                 if is_current_month:
-                    cell.setStyleSheet(self._get_cell_style(is_today, len(day_tasks) > 0, col))
+                    cell.setStyleSheet(self._get_cell_style(is_today, len(day_tasks) > 0, col, holiday))
                 else:
                     cell.setStyleSheet(self._get_cell_style_dim(col))
 
@@ -703,10 +760,10 @@ class CalendarDialog(QDialog):
 
         return tasks
 
-    def _get_day_label_style(self, is_today: bool, col: int) -> str:
+    def _get_day_label_style(self, is_today: bool, col: int, holiday: dict = None) -> str:
         dark = isDarkTheme()
         is_weekend = col == 5 or col == 6  # 周六、周日
-        
+
         if is_today:
             return """
                 QLabel {
@@ -719,12 +776,16 @@ class CalendarDialog(QDialog):
                     min-height: 20px;
                 }
             """
-        
+
+        # 调休上班日特殊样式
+        if holiday and not holiday.get("isOffDay", True):
+            return "color: #FF6D00; font-size: 12px; font-weight: 600;"
+
         if dark:
             color = "#FF8A80" if is_weekend else "#E0E0E0"
         else:
             color = "#E53935" if is_weekend else "#424242"
-        
+
         return f"color: {color}; font-size: 12px; font-weight: {'600' if is_weekend else '500'};"
 
     def _get_day_label_style_dim(self, col: int) -> str:
@@ -753,15 +814,23 @@ class CalendarDialog(QDialog):
             }}
         """
 
-    def _get_cell_style(self, is_today: bool, has_tasks: bool, col: int) -> str:
+    def _get_cell_style(self, is_today: bool, has_tasks: bool, col: int, holiday: dict = None) -> str:
         """获取单元格样式"""
         dark = isDarkTheme()
         is_weekend = col == 5 or col == 6  # 周六、周日
-        
+        is_holiday = holiday and holiday.get("isOffDay", False)
+        is_workday = holiday and not holiday.get("isOffDay", True)
+
         if dark:
             if is_today:
                 bg_color = "rgba(0, 120, 212, 0.15)"
                 border_color = "#0078D4"
+            elif is_holiday:
+                bg_color = "rgba(229, 57, 53, 0.08)"
+                border_color = "rgba(229, 57, 53, 0.2)"
+            elif is_workday:
+                bg_color = "rgba(255, 152, 0, 0.08)"
+                border_color = "rgba(255, 152, 0, 0.2)"
             elif has_tasks:
                 bg_color = "rgba(255, 255, 255, 0.05)"
                 border_color = "rgba(255, 255, 255, 0.08)"
@@ -775,6 +844,12 @@ class CalendarDialog(QDialog):
             if is_today:
                 bg_color = "rgba(0, 120, 212, 0.08)"
                 border_color = "#0078D4"
+            elif is_holiday:
+                bg_color = "rgba(229, 57, 53, 0.06)"
+                border_color = "rgba(229, 57, 53, 0.15)"
+            elif is_workday:
+                bg_color = "rgba(255, 152, 0, 0.06)"
+                border_color = "rgba(255, 152, 0, 0.15)"
             elif has_tasks:
                 bg_color = "rgba(0, 0, 0, 0.02)"
                 border_color = "rgba(0, 0, 0, 0.06)"
@@ -851,4 +926,36 @@ class CalendarDialog(QDialog):
             color: {color};
             font-size: 9px;
             padding: 1px 4px;
+        """
+
+    def _get_holiday_label_style(self, holiday: dict) -> str:
+        """获取节日标签样式"""
+        dark = isDarkTheme()
+        is_off = holiday.get("isOffDay", True)
+        if is_off:
+            color = "#EF5350" if dark else "#D32F2F"
+        else:
+            color = "#FFB74D" if dark else "#E65100"
+        return f"""
+            color: {color};
+            font-size: 9px;
+            font-weight: 600;
+            padding: 1px 3px;
+            border-radius: 2px;
+        """
+
+    def _get_holiday_badge_style(self, is_off: bool) -> str:
+        """获取节假日/调休角标样式"""
+        if is_off:
+            bg = "#D32F2F"
+            color = "#FFF"
+        else:
+            bg = "#FF8F00"
+            color = "#FFF"
+        return f"""
+            background-color: {bg};
+            color: {color};
+            font-size: 9px;
+            font-weight: bold;
+            border-radius: 8px;
         """
