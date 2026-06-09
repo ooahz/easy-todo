@@ -19,6 +19,7 @@ from config.constants import PRIORITY_MAP, PRIORITY_NONE, TODO_COLORS, RECURRENC
 from config.settings import settings
 from services.category_service import CategoryService
 from services.file_service import FileService
+from services.holiday_service import holiday_service
 from views.markdown_editor import MarkdownEditor
 
 
@@ -43,6 +44,7 @@ class TodoDialog(QDialog):
         self._file_service = FileService()
         self._temp_files = []
         self._is_widescreen = (settings.dialog_mode == "widescreen")
+        self._task_mode = "default"  # "default" 或 "recurrence"
 
         if self._pid is not None:
             self.setFixedSize(400, 160)
@@ -228,6 +230,8 @@ class TodoDialog(QDialog):
         panel_title = SubtitleLabel("编辑任务" if self._is_edit else "新建任务")
         panel_title.setStyleSheet("font-weight: bold;")
         top_bar.addWidget(panel_title, 1)
+        self._mode_combo = self._create_mode_combo()
+        top_bar.addWidget(self._mode_combo)
         close_btn = TransparentToolButton(FluentIcon.CLOSE)
         close_btn.setFixedSize(28, 28)
         close_btn.clicked.connect(self.reject)
@@ -275,6 +279,8 @@ class TodoDialog(QDialog):
         panel_title = SubtitleLabel("编辑任务" if self._is_edit else "新建任务")
         panel_title.setStyleSheet("font-weight: bold;")
         top_bar.addWidget(panel_title, 1)
+        self._mode_combo = self._create_mode_combo()
+        top_bar.addWidget(self._mode_combo)
         close_btn = TransparentToolButton(FluentIcon.CLOSE)
         close_btn.setFixedSize(28, 28)
         close_btn.clicked.connect(self.reject)
@@ -380,7 +386,11 @@ class TodoDialog(QDialog):
         self.recurrence_combo = ComboBox()
         self.recurrence_combo.setToolTip("任务重复设置")
         self.recurrence_combo.addItem("不重复", userData=None)
+        # 检查节日数据是否可用，决定是否显示"工作日"选项
+        self._workday_available = self._check_workday_available()
         for key, label in RECURRENCE_TYPES.items():
+            if key == "workday" and not self._workday_available:
+                continue
             self.recurrence_combo.addItem(label, userData=key)
 
         self.recurrence_interval_spin = CompactSpinBox()
@@ -473,6 +483,52 @@ class TodoDialog(QDialog):
 
         self.recurrence_combo.currentIndexChanged.connect(self._on_recurrence_changed)
 
+    def _create_mode_combo(self) -> ComboBox:
+        """创建任务模式下拉框（默认任务 / 重复任务）"""
+        combo = ComboBox()
+        combo.addItem("默认任务", userData="default")
+        combo.addItem("重复任务", userData="recurrence")
+        combo.setCurrentIndex(0)
+        combo.setFixedWidth(110)
+        combo.currentIndexChanged.connect(self._on_mode_combo_changed)
+        return combo
+
+    def _on_mode_combo_changed(self, index: int):
+        """下拉框切换时更新任务模式"""
+        mode = self._mode_combo.currentData()
+        if mode:
+            self._on_task_mode_changed(mode)
+
+    def _on_task_mode_changed(self, mode: str):
+        """切换任务模式（默认任务 / 重复任务）"""
+        if self._task_mode == mode:
+            return
+        self._task_mode = mode
+        is_recurrence = mode == "recurrence"
+
+        # 同步下拉框选中状态
+        for i in range(self._mode_combo.count()):
+            if self._mode_combo.itemData(i) == mode:
+                self._mode_combo.setCurrentIndex(i)
+                break
+
+        # 显示/隐藏截止日期区域
+        self._due_section.setVisible(not is_recurrence)
+
+        # 显示/隐藏重复任务区域
+        self._recurrence_section.setVisible(is_recurrence)
+
+        if is_recurrence:
+            # 切换到重复任务时，如果当前是"不重复"，自动选择第一个重复类型
+            if self.recurrence_combo.currentData() is None and self.recurrence_combo.count() > 1:
+                self.recurrence_combo.setCurrentIndex(1)
+            else:
+                # 触发一次刷新，确保子组件可见性正确
+                self._on_recurrence_changed(self.recurrence_combo.currentIndex())
+        else:
+            # 切换到默认任务时，重置重复设置为"不重复"
+            self.recurrence_combo.setCurrentIndex(0)
+
     def _layout_meta_default(self, layout):
         row1 = QHBoxLayout()
         row1.setSpacing(20)
@@ -483,6 +539,12 @@ class TodoDialog(QDialog):
         row1.addStretch()
         layout.addLayout(row1)
 
+        # 截止日期区域
+        self._due_section = QWidget()
+        due_section_layout = QVBoxLayout(self._due_section)
+        due_section_layout.setContentsMargins(0, 0, 0, 0)
+        due_section_layout.setSpacing(0)
+
         due_row = QHBoxLayout()
         due_row.setSpacing(20)
         self.due_container.setFixedWidth(240)
@@ -490,7 +552,15 @@ class TodoDialog(QDialog):
         due_row.addWidget(self.due_container)
         due_row.addWidget(self.auto_postpone_cb)
         due_row.addStretch()
-        layout.addLayout(due_row)
+        due_section_layout.addLayout(due_row)
+
+        layout.addWidget(self._due_section)
+
+        # 重复任务区域
+        self._recurrence_section = QWidget()
+        rec_section_layout = QVBoxLayout(self._recurrence_section)
+        rec_section_layout.setContentsMargins(0, 0, 0, 0)
+        rec_section_layout.setSpacing(0)
 
         recurrence_row = QHBoxLayout()
         recurrence_row.setSpacing(10)
@@ -501,14 +571,14 @@ class TodoDialog(QDialog):
         self.recurrence_day_spin.setFixedWidth(80)
         recurrence_row.addWidget(self.recurrence_day_spin)
         recurrence_row.addStretch()
-        layout.addLayout(recurrence_row)
+        rec_section_layout.addLayout(recurrence_row)
 
         # 周几选择行
         self.recurrence_day_row = QHBoxLayout()
         self.recurrence_day_row.setSpacing(10)
         self.recurrence_day_row.addWidget(self.weekday_container)
         self.recurrence_day_row.addStretch()
-        layout.addLayout(self.recurrence_day_row)
+        rec_section_layout.addLayout(self.recurrence_day_row)
 
         recurrence_date_row = QHBoxLayout()
         recurrence_date_row.setSpacing(10)
@@ -517,9 +587,14 @@ class TodoDialog(QDialog):
         self.recurrence_end_picker.setFixedWidth(130)
         recurrence_date_row.addWidget(self.recurrence_end_picker)
         recurrence_date_row.addStretch()
-        layout.addLayout(recurrence_date_row)
+        rec_section_layout.addLayout(recurrence_date_row)
 
-        layout.addWidget(self.recurrence_instance_label)
+        rec_section_layout.addWidget(self.recurrence_instance_label)
+
+        layout.addWidget(self._recurrence_section)
+
+        # 默认隐藏重复区域
+        self._recurrence_section.setVisible(False)
 
         color_row = QHBoxLayout()
         color_row.setSpacing(8)
@@ -543,39 +618,58 @@ class TodoDialog(QDialog):
         layout.addWidget(category_label)
         layout.addWidget(self.category_combo)
 
+        # 截止日期区域
+        self._due_section = QWidget()
+        due_section_layout = QVBoxLayout(self._due_section)
+        due_section_layout.setContentsMargins(0, 0, 0, 0)
+        due_section_layout.setSpacing(0)
+
         self.due_label = CaptionLabel("截止日期")
         self.due_label.setStyleSheet(lbl_style)
-        layout.addWidget(self.due_label)
-        layout.addWidget(self.due_container)
-        layout.addWidget(self.auto_postpone_cb)
+        due_section_layout.addWidget(self.due_label)
+        due_section_layout.addWidget(self.due_container)
+        due_section_layout.addWidget(self.auto_postpone_cb)
 
         sep1 = QFrame()
         sep1.setFixedHeight(1)
         sep1.setStyleSheet(f"background-color: {'#444' if isDarkTheme() else '#DDD'};")
-        layout.addWidget(sep1)
+        due_section_layout.addWidget(sep1)
+
+        layout.addWidget(self._due_section)
+
+        # 重复任务区域
+        self._recurrence_section = QWidget()
+        rec_section_layout = QVBoxLayout(self._recurrence_section)
+        rec_section_layout.setContentsMargins(0, 0, 0, 0)
+        rec_section_layout.setSpacing(0)
 
         recurrence_label = CaptionLabel("重复")
         recurrence_label.setStyleSheet(lbl_style)
-        layout.addWidget(recurrence_label)
-        layout.addWidget(self.recurrence_combo)
+        rec_section_layout.addWidget(recurrence_label)
+        rec_section_layout.addWidget(self.recurrence_combo)
         recurrence_spin_row = QHBoxLayout()
         recurrence_spin_row.setSpacing(6)
         self.recurrence_interval_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         recurrence_spin_row.addWidget(self.recurrence_interval_spin, 1)
         self.recurrence_day_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         recurrence_spin_row.addWidget(self.recurrence_day_spin, 1)
-        layout.addLayout(recurrence_spin_row)
-        layout.addWidget(self.weekday_container)
+        rec_section_layout.addLayout(recurrence_spin_row)
+        rec_section_layout.addWidget(self.weekday_container)
         self.recurrence_start_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self.recurrence_start_picker)
+        rec_section_layout.addWidget(self.recurrence_start_picker)
         self.recurrence_end_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self.recurrence_end_picker)
-        layout.addWidget(self.recurrence_instance_label)
+        rec_section_layout.addWidget(self.recurrence_end_picker)
+        rec_section_layout.addWidget(self.recurrence_instance_label)
 
         sep2 = QFrame()
         sep2.setFixedHeight(1)
         sep2.setStyleSheet(f"background-color: {'#444' if isDarkTheme() else '#DDD'};")
-        layout.addWidget(sep2)
+        rec_section_layout.addWidget(sep2)
+
+        layout.addWidget(self._recurrence_section)
+
+        # 默认隐藏重复区域
+        self._recurrence_section.setVisible(False)
 
         color_label = CaptionLabel("颜色标签")
         color_label.setStyleSheet(lbl_style)
@@ -643,6 +737,15 @@ class TodoDialog(QDialog):
                 cursor.movePosition(cursor.MoveOperation.End)
                 cursor.deletePreviousChar()
 
+    def _check_workday_available(self) -> bool:
+        """检查节日数据是否可用，用于决定是否显示"工作日"选项"""
+        if settings.holiday_source == "none":
+            return False
+        from datetime import date as pydate
+        today = pydate.today()
+        holiday_service.load_for_date(today)
+        return holiday_service.has_data_for_year(today.year)
+
     def _on_recurrence_changed(self, index: int):
         show = index > 0
         self.recurrence_start_picker.setVisible(show)
@@ -651,8 +754,9 @@ class TodoDialog(QDialog):
         recurrence_type = self.recurrence_combo.currentData()
         is_weekly = recurrence_type == "weekly"
         is_monthly = recurrence_type == "monthly"
+        is_workday = recurrence_type == "workday"
 
-        self.recurrence_interval_spin.setVisible(show)
+        self.recurrence_interval_spin.setVisible(show and not is_workday)
 
         self.weekday_container.setVisible(show and is_weekly)
         self.recurrence_day_spin.setVisible(show and is_monthly)
@@ -662,11 +766,6 @@ class TodoDialog(QDialog):
             self.recurrence_day_spin.setPrefix("")
             self.recurrence_day_spin.setSuffix(" 号")
             self.recurrence_day_spin.setValue(1)
-
-        self.due_container.setVisible(not show)
-        self.auto_postpone_cb.setVisible(not show)
-        if hasattr(self, 'due_label'):
-            self.due_label.setVisible(not show)
 
     def _on_clear_due_date(self):
         self.due_picker.setDate(QDate())
@@ -837,13 +936,21 @@ class TodoDialog(QDialog):
 
             is_instance = bool(data.get("recurrence_template_id")) and bool(data.get("recurrence_type"))
             if is_instance and self._edit_mode == "this_and_future":
-                self.due_container.setVisible(False)
-                self.auto_postpone_cb.setVisible(False)
+                # 编辑重复系列"此次及之后"，切换到重复任务模式
                 self.recurrence_instance_label.setVisible(False)
                 if self._template_data:
                     tpl = self._template_data
                     r_type = tpl.get("recurrence_type")
                     if r_type:
+                        # 如果是工作日类型但下拉框中没有该选项，动态添加
+                        if r_type == "workday":
+                            has_workday = False
+                            for i in range(self.recurrence_combo.count()):
+                                if self.recurrence_combo.itemData(i) == "workday":
+                                    has_workday = True
+                                    break
+                            if not has_workday:
+                                self.recurrence_combo.addItem("工作日", userData="workday")
                         for i in range(self.recurrence_combo.count()):
                             if self.recurrence_combo.itemData(i) == r_type:
                                 self.recurrence_combo.setCurrentIndex(i)
@@ -878,19 +985,34 @@ class TodoDialog(QDialog):
                                     self.recurrence_end_picker.setDate(QDate(end_str.year, end_str.month, end_str.day))
                             except Exception:
                                 pass
+                # 切换到重复任务模式
+                self._task_mode = "recurrence"
+                self._mode_combo.setCurrentIndex(1)
+                self._due_section.setVisible(False)
+                self._recurrence_section.setVisible(True)
             elif is_instance:
-                self.due_container.setVisible(False)
-                self.auto_postpone_cb.setVisible(False)
-                self.recurrence_combo.setVisible(False)
-                self.recurrence_interval_spin.setVisible(False)
-                self.weekday_container.setVisible(False)
-                self.recurrence_day_spin.setVisible(False)
-                self.recurrence_start_picker.setVisible(False)
-                self.recurrence_end_picker.setVisible(False)
+                # 编辑重复系列的单个实例，隐藏下拉框和两个区域
+                self._mode_combo.setVisible(False)
+                self._due_section.setVisible(False)
+                self._recurrence_section.setVisible(False)
                 self.recurrence_instance_label.setVisible(True)
+                # 将 instance_label 移到可见区域
+                if hasattr(self, '_due_section'):
+                    parent_layout = self._due_section.parent().layout()
+                    if parent_layout:
+                        parent_layout.addWidget(self.recurrence_instance_label)
             else:
                 recurrence_type = data.get("recurrence_type")
                 if recurrence_type:
+                    # 编辑有重复设置的任务，切换到重复任务模式
+                    if recurrence_type == "workday":
+                        has_workday = False
+                        for i in range(self.recurrence_combo.count()):
+                            if self.recurrence_combo.itemData(i) == "workday":
+                                has_workday = True
+                                break
+                        if not has_workday:
+                            self.recurrence_combo.addItem("工作日", userData="workday")
                     for i in range(self.recurrence_combo.count()):
                         if self.recurrence_combo.itemData(i) == recurrence_type:
                             self.recurrence_combo.setCurrentIndex(i)
@@ -924,6 +1046,11 @@ class TodoDialog(QDialog):
                                 self.recurrence_end_picker.setDate(QDate(end_str.year, end_str.month, end_str.day))
                         except Exception:
                             pass
+                    # 切换到重复任务模式
+                    self._task_mode = "recurrence"
+                    self._mode_combo.setCurrentIndex(1)
+                    self._due_section.setVisible(False)
+                    self._recurrence_section.setVisible(True)
 
     def _on_save(self):
         title = self.title_edit.text().strip()

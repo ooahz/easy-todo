@@ -2,17 +2,17 @@
 from __future__ import annotations
 from datetime import date, datetime
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtGui import QPainter, QColor, QPainterPath
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
     QSizePolicy, QScrollArea, QTextBrowser
 )
 
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, SubtitleLabel, TitleLabel,
     TransparentToolButton, FluentIcon, isDarkTheme, CheckBox,
-    ToolButton, PrimaryPushButton, PushButton, CardWidget, IconWidget,
-    MessageBoxBase
+    ToolButton, PrimaryPushButton, PushButton, CardWidget, IconWidget
 )
 
 from config.constants import PRIORITY_MAP, STATUS_MAP
@@ -288,15 +288,20 @@ class FileItem(CardWidget):
             pass
 
 
-class TodoDetailDialog(MessageBoxBase):
+class TodoDetailDialog(QDialog):
     edit_clicked = Signal(int)
     delete_clicked = Signal(int)
     toggle_done = Signal(int)
     subtask_toggle_done = Signal(int)
     archive_clicked = Signal(int)
 
+    _RESIZE_MARGIN = 6
+
     def __init__(self, todo_data: dict, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
         self._todo_data = todo_data
         self._file_service = FileService()
         self._current_todo_id = todo_data["id"]
@@ -304,17 +309,118 @@ class TodoDetailDialog(MessageBoxBase):
         self._is_widescreen = (settings.dialog_mode == "widescreen")
 
         if self._is_widescreen:
-            self.widget.setMinimumWidth(720)
-            self.widget.setMaximumWidth(880)
-            self.widget.setMinimumHeight(350)
+            self.setMinimumSize(720, 350)
         else:
-            self.widget.setMinimumWidth(480)
-            self.widget.setMaximumWidth(560)
+            self.setMinimumSize(480, 500)
+
+        self.setMouseTracking(True)
+        self._drag_pos = None
+        self._resize_edge = 0
+        self._resize_start_geo = None
+        self._resize_start_pos = None
 
         self._setup_content()
         self._rebuild_content()
 
+    def _detect_edge(self, pos) -> int:
+        m = self._RESIZE_MARGIN
+        edge = 0
+        if pos.x() < m:
+            edge |= 1
+        elif pos.x() > self.width() - m:
+            edge |= 2
+        if pos.y() < m:
+            edge |= 4
+        elif pos.y() > self.height() - m:
+            edge |= 8
+        return edge
+
+    @staticmethod
+    def _edge_cursor(edge) -> Qt.CursorShape:
+        cursor_map = {
+            1: Qt.CursorShape.SizeHorCursor,
+            2: Qt.CursorShape.SizeHorCursor,
+            4: Qt.CursorShape.SizeVerCursor,
+            8: Qt.CursorShape.SizeVerCursor,
+            5: Qt.CursorShape.SizeFDiagCursor,
+            6: Qt.CursorShape.SizeBDiagCursor,
+            9: Qt.CursorShape.SizeBDiagCursor,
+            10: Qt.CursorShape.SizeFDiagCursor,
+        }
+        return cursor_map.get(edge, Qt.CursorShape.ArrowCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            edge = self._detect_edge(event.position().toPoint())
+            if edge:
+                self._resize_edge = edge
+                self._resize_start_geo = self.geometry()
+                self._resize_start_pos = event.globalPosition().toPoint()
+            else:
+                self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            if self._resize_edge:
+                delta = event.globalPosition().toPoint() - self._resize_start_pos
+                geo = self._resize_start_geo
+                min_w = self.minimumWidth()
+                min_h = self.minimumHeight()
+
+                new_left = geo.left()
+                new_top = geo.top()
+                new_right = geo.right()
+                new_bottom = geo.bottom()
+
+                if self._resize_edge & 1:
+                    new_left = min(geo.left() + delta.x(), geo.right() - min_w)
+                if self._resize_edge & 2:
+                    new_right = max(geo.right() + delta.x(), geo.left() + min_w)
+                if self._resize_edge & 4:
+                    new_top = min(geo.top() + delta.y(), geo.bottom() - min_h)
+                if self._resize_edge & 8:
+                    new_bottom = max(geo.bottom() + delta.y(), geo.top() + min_h)
+
+                self.setGeometry(new_left, new_top, new_right - new_left, new_bottom - new_top)
+            elif self._drag_pos is not None:
+                self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            edge = self._detect_edge(event.position().toPoint())
+            self.setCursor(self._edge_cursor(edge))
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        self._resize_edge = 0
+        self._resize_start_geo = None
+        self._resize_start_pos = None
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        dark = isDarkTheme()
+        bg_color = QColor(43, 43, 43) if dark else QColor(249, 249, 249)
+        border_color = QColor(60, 60, 60) if dark else QColor(210, 210, 210)
+        path = QPainterPath()
+        path.addRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 10, 10)
+        painter.fillPath(path, bg_color)
+        painter.setPen(border_color)
+        painter.drawPath(path)
+        super().paintEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        saved_size = settings.detail_dialog_size
+        if saved_size:
+            self.resize(saved_size[0], saved_size[1])
+        screen = self.screen().availableGeometry()
+        x = screen.x() + (screen.width() - self.width()) // 2
+        y = screen.y() + (screen.height() - self.height()) // 2
+        self.move(x, y)
+
     def closeEvent(self, event):
+        settings.detail_dialog_size = (self.width(), self.height())
         if hasattr(self, '_file_service') and self._file_service:
             self._file_service.close()
         super().closeEvent(event)
@@ -322,71 +428,72 @@ class TodoDetailDialog(MessageBoxBase):
     def _setup_content(self):
         c = _tc()
 
-        self.yesButton.hide()
-        self.cancelButton.hide()
+        # 主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
+        # 内容区域
+        self._view_layout = QVBoxLayout()
+        self._view_layout.setSpacing(8)
+
+        # 按钮区域
+        self._button_layout = QHBoxLayout()
         if self._is_widescreen:
-            self.buttonGroup.setFixedHeight(52)
-            self.buttonLayout.setContentsMargins(24, 6, 24, 10)
-            self.buttonLayout.setSpacing(6)
+            self._button_layout.setContentsMargins(24, 6, 24, 10)
+            self._button_layout.setSpacing(6)
         else:
-            self.buttonGroup.setFixedHeight(64)
-            self.buttonLayout.setContentsMargins(20, 12, 20, 16)
-            self.buttonLayout.setSpacing(8)
-
-        while self.buttonLayout.count():
-            item = self.buttonLayout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            self._button_layout.setContentsMargins(20, 12, 20, 16)
+            self._button_layout.setSpacing(8)
 
         if self._is_widescreen:
             self.archive_btn = ToolButton(FluentIcon.FOLDER)
             self.archive_btn.setFixedSize(30, 30)
             self.archive_btn.setToolTip("归档")
             self.archive_btn.clicked.connect(self._on_archive)
-            self.buttonLayout.addWidget(self.archive_btn)
+            self._button_layout.addWidget(self.archive_btn)
 
             self.edit_btn = ToolButton(FluentIcon.EDIT)
             self.edit_btn.setFixedSize(30, 30)
             self.edit_btn.setToolTip("编辑")
             self.edit_btn.clicked.connect(self._on_edit)
-            self.buttonLayout.addWidget(self.edit_btn)
+            self._button_layout.addWidget(self.edit_btn)
 
             self.delete_btn = ToolButton(FluentIcon.DELETE)
             self.delete_btn.setFixedSize(30, 30)
             self.delete_btn.setToolTip("删除")
             self.delete_btn.clicked.connect(self._on_delete)
-            self.buttonLayout.addWidget(self.delete_btn)
+            self._button_layout.addWidget(self.delete_btn)
 
-            self.buttonLayout.addStretch(1)
+            self._button_layout.addStretch(1)
 
             self.done_btn = PrimaryPushButton(FluentIcon.COMPLETED, "标记完成")
             self.done_btn.setFixedHeight(30)
             self.done_btn.clicked.connect(self._on_toggle_done)
-            self.buttonLayout.addWidget(self.done_btn)
+            self._button_layout.addWidget(self.done_btn)
         else:
             self.done_btn = PrimaryPushButton(FluentIcon.COMPLETED, "标记完成")
             self.done_btn.setFixedHeight(32)
             self.done_btn.clicked.connect(self._on_toggle_done)
-            self.buttonLayout.addWidget(self.done_btn, 1)
+            self._button_layout.addWidget(self.done_btn, 1)
 
             self.archive_btn = ToolButton(FluentIcon.FOLDER)
             self.archive_btn.setFixedSize(28, 28)
             self.archive_btn.setToolTip("归档")
             self.archive_btn.clicked.connect(self._on_archive)
-            self.buttonLayout.addWidget(self.archive_btn)
+            self._button_layout.addWidget(self.archive_btn)
 
             self.edit_btn = ToolButton(FluentIcon.EDIT)
             self.edit_btn.setFixedSize(28, 28)
             self.edit_btn.setToolTip("编辑")
             self.edit_btn.clicked.connect(self._on_edit)
-            self.buttonLayout.addWidget(self.edit_btn)
+            self._button_layout.addWidget(self.edit_btn)
 
             self.delete_btn = ToolButton(FluentIcon.DELETE)
             self.delete_btn.setFixedSize(28, 28)
             self.delete_btn.setToolTip("删除")
             self.delete_btn.clicked.connect(self._on_delete)
-            self.buttonLayout.addWidget(self.delete_btn)
+            self._button_layout.addWidget(self.delete_btn)
 
         # ---- 顶部标题栏 ----
         top_bar = QHBoxLayout()
@@ -461,12 +568,12 @@ class TodoDetailDialog(MessageBoxBase):
         self.close_btn.clicked.connect(self.reject)
         top_bar.addWidget(self.close_btn)
 
-        self.viewLayout.addLayout(top_bar)
+        self._view_layout.addLayout(top_bar)
 
         divider = QFrame()
         divider.setFixedHeight(1)
         divider.setStyleSheet(f"background-color: {c['divider']};")
-        self.viewLayout.addWidget(divider)
+        self._view_layout.addWidget(divider)
 
         if self._is_widescreen:
             self._setup_widescreen_body()
@@ -474,16 +581,17 @@ class TodoDetailDialog(MessageBoxBase):
             self._setup_default_body()
 
         if self._is_widescreen:
-            self.viewLayout.setContentsMargins(24, 16, 24, 4)
+            self._view_layout.setContentsMargins(24, 16, 24, 4)
         else:
-            self.viewLayout.setContentsMargins(20, 16, 20, 8)
-        self.viewLayout.setSpacing(8)
+            self._view_layout.setContentsMargins(20, 16, 20, 8)
+
+        main_layout.addLayout(self._view_layout, 1)
+        main_layout.addLayout(self._button_layout)
 
     def _setup_default_body(self):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setMinimumHeight(300)
-        self.scroll.setMaximumHeight(500)
         self.scroll.setStyleSheet("""
             QScrollArea {
                 border: none;
@@ -499,7 +607,7 @@ class TodoDetailDialog(MessageBoxBase):
         self.content_layout.setSpacing(0)
 
         self.scroll.setWidget(self.content_widget)
-        self.viewLayout.addWidget(self.scroll, 1)
+        self._view_layout.addWidget(self.scroll, 1)
 
     def _setup_widescreen_body(self):
         self.body_layout = QHBoxLayout()
@@ -523,7 +631,7 @@ class TodoDetailDialog(MessageBoxBase):
         self.body_layout.addWidget(self.left_panel, 1)
         self.body_layout.addWidget(self.right_panel)
 
-        self.viewLayout.addLayout(self.body_layout, 1)
+        self._view_layout.addLayout(self.body_layout, 1)
 
     def _rebuild_content(self):
         c = _tc()

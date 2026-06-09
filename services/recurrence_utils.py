@@ -3,8 +3,19 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, timedelta
+from typing import Optional
 
 from config.constants import parse_recurrence_day
+
+
+def _is_workday(target_date: date) -> Optional[bool]:
+    """判断指定日期是否为工作日，使用节日数据
+
+    返回 None 表示无法判断（节日数据不可用）
+    """
+    from services.holiday_service import holiday_service
+    holiday_service.load_for_date(target_date)
+    return holiday_service.is_workday(target_date)
 
 
 def matches_recurrence(due_date: date, target_date: date,
@@ -51,6 +62,17 @@ def matches_recurrence(due_date: date, target_date: date,
         max_day = monthrange(target_date.year, target_date.month)[1]
         expected_day = min(due_date.day, max_day)
         return target_date.day == expected_day
+    elif recurrence_type == "workday":
+        if _is_workday(target_date) is not True:
+            return False
+        # 计算从 due_date 到 target_date 之间的工作日数
+        cursor = due_date
+        workday_count = 0
+        while cursor < target_date:
+            cursor += timedelta(days=1)
+            if _is_workday(cursor) is True:
+                workday_count += 1
+        return workday_count % interval == 0
     return False
 
 
@@ -134,5 +156,27 @@ def generate_occurrences(due_date: date, start: date, end: date,
             total_months = y * 12 + (m - 1) + interval
             y, m = divmod(total_months, 12)
             m += 1
+
+    elif recurrence_type == "workday":
+        # 工作日重复：逐日扫描，只保留工作日
+        cursor = max(due_date, start)
+        workday_count = 0
+        # 先计算从 due_date 到 start 之间已过的工作日数
+        if start > due_date:
+            tmp = due_date
+            while tmp < start:
+                tmp += timedelta(days=1)
+                if _is_workday(tmp) is True:
+                    workday_count += 1
+        while cursor <= actual_end:
+            is_wd = _is_workday(cursor)
+            if is_wd is None:
+                # 节日数据不可用，中止生成
+                break
+            if is_wd and workday_count % interval == 0:
+                results.append(cursor)
+            if is_wd:
+                workday_count += 1
+            cursor += timedelta(days=1)
 
     return results

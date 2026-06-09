@@ -293,6 +293,18 @@ class DateRangeButton(QPushButton):
         except Exception:
             pass
 
+        # 校验起始日期不能超过截止日期
+        if new_start and new_due and new_start > new_due:
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.warning(
+                title="日期无效",
+                content="起始日期不能超过截止日期",
+                parent=self.window(),
+                position=InfoBarPosition.TOP,
+                duration=3000,
+            )
+            return
+
         # 校验日期范围不超过一年
         if new_start and new_due:
             delta = (new_due - new_start).days

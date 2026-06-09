@@ -490,9 +490,9 @@ class CalendarDialog(QDialog):
             label.setFixedHeight(28)
             is_weekend = i == 5 or i == 6  # 周六、周日
             if dark:
-                color = "#FF6B6B" if is_weekend else "#AAA"
+                color = "#ffeb6b" if is_weekend else "#AAA"
             else:
-                color = "#E53935" if is_weekend else "#666"
+                color = "#e59935" if is_weekend else "#666"
             label.setStyleSheet(f"""
                 color: {color};
                 font-size: 13px;
@@ -777,16 +777,20 @@ class CalendarDialog(QDialog):
                 }
             """
 
-        # 调休上班日特殊样式
+        # 调休上班日
         if holiday and not holiday.get("isOffDay", True):
-            return "color: #FF6D00; font-size: 12px; font-weight: 600;"
+            return "color: #D32F2F; font-size: 12px; font-weight: 600;"
+
+        # 节假日
+        if holiday and holiday.get("isOffDay", False):
+            return "color: #2E7D32; font-size: 12px; font-weight: 600;"
 
         if dark:
-            color = "#FF8A80" if is_weekend else "#E0E0E0"
+            color = "#E0E0E0"
         else:
-            color = "#E53935" if is_weekend else "#424242"
+            color = "#424242"
 
-        return f"color: {color}; font-size: 12px; font-weight: {'600' if is_weekend else '500'};"
+        return f"color: {color}; font-size: 12px; font-weight: 500;"
 
     def _get_day_label_style_dim(self, col: int) -> str:
         """非当月日期的日期标签样式"""
@@ -826,17 +830,17 @@ class CalendarDialog(QDialog):
                 bg_color = "rgba(0, 120, 212, 0.15)"
                 border_color = "#0078D4"
             elif is_holiday:
-                bg_color = "rgba(229, 57, 53, 0.08)"
-                border_color = "rgba(229, 57, 53, 0.2)"
+                bg_color = "rgba(255, 235, 59, 0.10)"
+                border_color = "rgba(255, 235, 59, 0.25)"
             elif is_workday:
-                bg_color = "rgba(255, 152, 0, 0.08)"
-                border_color = "rgba(255, 152, 0, 0.2)"
+                bg_color = "rgba(255, 255, 255, 0.02)"
+                border_color = "rgba(255, 255, 255, 0.05)"
+            elif is_weekend:
+                bg_color = "rgba(255, 235, 59, 0.10)"
+                border_color = "rgba(255, 235, 59, 0.25)"
             elif has_tasks:
                 bg_color = "rgba(255, 255, 255, 0.05)"
                 border_color = "rgba(255, 255, 255, 0.08)"
-            elif is_weekend:
-                bg_color = "rgba(255, 107, 107, 0.05)"
-                border_color = "rgba(255, 255, 255, 0.05)"
             else:
                 bg_color = "rgba(255, 255, 255, 0.02)"
                 border_color = "rgba(255, 255, 255, 0.05)"
@@ -845,17 +849,17 @@ class CalendarDialog(QDialog):
                 bg_color = "rgba(0, 120, 212, 0.08)"
                 border_color = "#0078D4"
             elif is_holiday:
-                bg_color = "rgba(229, 57, 53, 0.06)"
-                border_color = "rgba(229, 57, 53, 0.15)"
+                bg_color = "rgba(255, 235, 59, 0.12)"
+                border_color = "rgba(255, 235, 59, 0.30)"
             elif is_workday:
-                bg_color = "rgba(255, 152, 0, 0.06)"
-                border_color = "rgba(255, 152, 0, 0.15)"
+                bg_color = "rgba(0, 0, 0, 0.01)"
+                border_color = "rgba(0, 0, 0, 0.04)"
+            elif is_weekend:
+                bg_color = "rgba(255, 235, 59, 0.12)"
+                border_color = "rgba(255, 235, 59, 0.30)"
             elif has_tasks:
                 bg_color = "rgba(0, 0, 0, 0.02)"
                 border_color = "rgba(0, 0, 0, 0.06)"
-            elif is_weekend:
-                bg_color = "rgba(229, 57, 53, 0.04)"
-                border_color = "rgba(0, 0, 0, 0.04)"
             else:
                 bg_color = "rgba(0, 0, 0, 0.01)"
                 border_color = "rgba(0, 0, 0, 0.04)"
@@ -930,12 +934,11 @@ class CalendarDialog(QDialog):
 
     def _get_holiday_label_style(self, holiday: dict) -> str:
         """获取节日标签样式"""
-        dark = isDarkTheme()
         is_off = holiday.get("isOffDay", True)
         if is_off:
-            color = "#EF5350" if dark else "#D32F2F"
+            color = "#2E7D32"
         else:
-            color = "#FFB74D" if dark else "#E65100"
+            color = "#D32F2F"
         return f"""
             color: {color};
             font-size: 9px;
@@ -947,10 +950,10 @@ class CalendarDialog(QDialog):
     def _get_holiday_badge_style(self, is_off: bool) -> str:
         """获取节假日/调休角标样式"""
         if is_off:
-            bg = "#D32F2F"
+            bg = "#2E7D32"
             color = "#FFF"
         else:
-            bg = "#FF8F00"
+            bg = "#D32F2F"
             color = "#FFF"
         return f"""
             background-color: {bg};

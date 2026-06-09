@@ -1,5 +1,6 @@
 """Todo 业务逻辑服务"""
 from __future__ import annotations
+import logging
 from datetime import datetime, date, timedelta
 from typing import Optional
 
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session, selectinload, joinedload
 from models.database import db
 from models.todo import Todo
 from config.constants import STATUS_TODO, STATUS_DONE, STATUS_ARCHIVED, PRIORITY_NONE
+
+logger = logging.getLogger(__name__)
 
 INSTANCE_WINDOW_DAYS = 14
 RECURRENCE_END_MAX_DAYS = 365
@@ -34,6 +37,34 @@ class TodoService:
             self.session.commit()
         except Exception:
             self.session.rollback()
+
+    @staticmethod
+    def _coerce_date(value, field_name: str):
+        """将各种日期输入统一转为 Python date/datetime 对象。
+
+        - QDate → date
+        - ISO 字符串 → date 或 datetime
+        - 已经是 date/datetime → 原样返回
+        - 其它类型 → None（避免写入非法值导致 SQLite 报错）
+        """
+        if value is None:
+            return None
+        if isinstance(value, (date, datetime)):
+            return value
+        if isinstance(value, str) and value:
+            try:
+                if 'completed_at' in field_name or 'created_at' in field_name or 'updated_at' in field_name:
+                    return datetime.fromisoformat(value)
+                return date.fromisoformat(value)
+            except (ValueError, TypeError):
+                return None
+        if hasattr(value, 'year') and callable(value.year):
+            from datetime import date as pydate
+            try:
+                return pydate(value.year(), value.month(), value.day())
+            except Exception:
+                return None
+        return None
 
     @staticmethod
     def _validate_recurrence_end_date(end_date):
@@ -114,30 +145,16 @@ class TodoService:
 
     def create_raw(self, **kwargs) -> Todo:
         """直接创建待办事项"""
-        if 'due_date' in kwargs and kwargs['due_date'] is not None and hasattr(kwargs['due_date'], 'year') and not isinstance(kwargs['due_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['due_date']
-            kwargs['due_date'] = pydate(qd.year(), qd.month(), qd.day())
+        # Date 类型字段转换
+        for key in ('due_date', 'start_date', 'recurrence_end_date',
+                     'recurrence_start_date', 'occurrence_date'):
+            if key in kwargs:
+                kwargs[key] = self._coerce_date(kwargs[key], key)
 
-        if 'start_date' in kwargs and kwargs['start_date'] is not None and hasattr(kwargs['start_date'], 'year') and not isinstance(kwargs['start_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['start_date']
-            kwargs['start_date'] = pydate(qd.year(), qd.month(), qd.day())
-
-        if 'recurrence_end_date' in kwargs and kwargs['recurrence_end_date'] is not None and hasattr(kwargs['recurrence_end_date'], 'year') and not isinstance(kwargs['recurrence_end_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['recurrence_end_date']
-            kwargs['recurrence_end_date'] = pydate(qd.year(), qd.month(), qd.day())
-
-        if 'recurrence_start_date' in kwargs and kwargs['recurrence_start_date'] is not None and hasattr(kwargs['recurrence_start_date'], 'year') and not isinstance(kwargs['recurrence_start_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['recurrence_start_date']
-            kwargs['recurrence_start_date'] = pydate(qd.year(), qd.month(), qd.day())
-
-        if 'occurrence_date' in kwargs and kwargs['occurrence_date'] is not None and hasattr(kwargs['occurrence_date'], 'year') and not isinstance(kwargs['occurrence_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['occurrence_date']
-            kwargs['occurrence_date'] = pydate(qd.year(), qd.month(), qd.day())
+        # DateTime 类型字段转换
+        for key in ('completed_at',):
+            if key in kwargs:
+                kwargs[key] = self._coerce_date(kwargs[key], key)
 
         if 'sort_order' not in kwargs:
             pid = kwargs.get('pid')
@@ -161,26 +178,16 @@ class TodoService:
         if not todo:
             return None
 
-        # 日期转换
-        if 'due_date' in kwargs and kwargs['due_date'] is not None and hasattr(kwargs['due_date'], 'year') and not isinstance(kwargs['due_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['due_date']
-            kwargs['due_date'] = pydate(qd.year(), qd.month(), qd.day())
+        # Date 类型字段转换
+        for key in ('due_date', 'start_date', 'recurrence_end_date',
+                     'recurrence_start_date'):
+            if key in kwargs:
+                kwargs[key] = self._coerce_date(kwargs[key], key)
 
-        if 'start_date' in kwargs and kwargs['start_date'] is not None and hasattr(kwargs['start_date'], 'year') and not isinstance(kwargs['start_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['start_date']
-            kwargs['start_date'] = pydate(qd.year(), qd.month(), qd.day())
-
-        if 'recurrence_end_date' in kwargs and kwargs['recurrence_end_date'] is not None and hasattr(kwargs['recurrence_end_date'], 'year') and not isinstance(kwargs['recurrence_end_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['recurrence_end_date']
-            kwargs['recurrence_end_date'] = pydate(qd.year(), qd.month(), qd.day())
-
-        if 'recurrence_start_date' in kwargs and kwargs['recurrence_start_date'] is not None and hasattr(kwargs['recurrence_start_date'], 'year') and not isinstance(kwargs['recurrence_start_date'], date):
-            from datetime import date as pydate
-            qd = kwargs['recurrence_start_date']
-            kwargs['recurrence_start_date'] = pydate(qd.year(), qd.month(), qd.day())
+        # DateTime 类型字段转换
+        for key in ('completed_at',):
+            if key in kwargs:
+                kwargs[key] = self._coerce_date(kwargs[key], key)
 
         if 'recurrence_end_date' in kwargs:
             self._validate_recurrence_end_date(kwargs['recurrence_end_date'])
@@ -852,6 +859,7 @@ class TodoService:
     def ensure_instances(self, template_id: int = None):
         """为模板生成 [today, today+14] 范围内缺失的实例"""
         from services.recurrence_utils import generate_occurrences
+        from services.holiday_service import holiday_service
         today = date.today()
         end = today + timedelta(days=INSTANCE_WINDOW_DAYS)
 
@@ -869,6 +877,12 @@ class TodoService:
         for tmpl in templates:
             if not tmpl.due_date or not tmpl.recurrence_type:
                 continue
+            # 工作日重复需要节日数据，如果获取不到则跳过此模板
+            if tmpl.recurrence_type == "workday":
+                holiday_service.load_for_date(today)
+                if not holiday_service.has_data_for_year(today.year):
+                    logger.warning(f"模板 {tmpl.id} 为工作日重复，但无法获取节日数据，跳过生成")
+                    continue
             # 重复序列起点：优先使用 recurrence_start_date，否则使用 due_date
             start_date = tmpl.recurrence_start_date or tmpl.due_date
             occurrences = generate_occurrences(
@@ -897,7 +911,7 @@ class TodoService:
             priority=template.priority,
             status=STATUS_TODO,
             color_tag=template.color_tag,
-            start_date=template.start_date,
+            start_date=self._coerce_date(template.start_date, 'start_date'),
             due_date=occurrence_date,
             auto_postpone=False,
             sort_order=template.sort_order,
@@ -905,8 +919,8 @@ class TodoService:
             recurrence_type=template.recurrence_type,
             recurrence_interval=template.recurrence_interval,
             recurrence_day=template.recurrence_day,
-            recurrence_start_date=template.recurrence_start_date,
-            recurrence_end_date=template.recurrence_end_date,
+            recurrence_start_date=self._coerce_date(template.recurrence_start_date, 'recurrence_start_date'),
+            recurrence_end_date=self._coerce_date(template.recurrence_end_date, 'recurrence_end_date'),
             is_recurrence_template=False,
             recurrence_template_id=template.id,
             occurrence_date=occurrence_date,
@@ -1079,7 +1093,7 @@ class TodoService:
             priority=kwargs.get("priority", old_template.priority),
             status=STATUS_TODO,
             color_tag=kwargs.get("color_tag", old_template.color_tag),
-            start_date=kwargs.get("start_date", old_template.start_date),
+            start_date=self._coerce_date(kwargs.get("start_date", old_template.start_date), 'start_date'),
             due_date=occ_date,
             auto_postpone=False,
             sort_order=old_template.sort_order,
@@ -1087,8 +1101,8 @@ class TodoService:
             recurrence_type=kwargs.get("recurrence_type", old_template.recurrence_type),
             recurrence_interval=kwargs.get("recurrence_interval", old_template.recurrence_interval),
             recurrence_day=kwargs.get("recurrence_day", old_template.recurrence_day),
-            recurrence_start_date=kwargs.get("recurrence_start_date", old_template.recurrence_start_date),
-            recurrence_end_date=kwargs.get("recurrence_end_date", old_template.recurrence_end_date),
+            recurrence_start_date=self._coerce_date(kwargs.get("recurrence_start_date", old_template.recurrence_start_date), 'recurrence_start_date'),
+            recurrence_end_date=self._coerce_date(kwargs.get("recurrence_end_date", old_template.recurrence_end_date), 'recurrence_end_date'),
             is_recurrence_template=True,
         )
         self.session.add(new_template)

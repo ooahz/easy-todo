@@ -107,6 +107,38 @@ class HolidayService:
         if not any(k.startswith(key_prefix) for k in self._data):
             self.load_year(year)
 
+    def is_workday(self, target_date: date) -> bool | None:
+        """判断指定日期是否为工作日
+
+        根据节日数据判断：
+        - 节日数据中标记为非休息日(isOffDay=False)的周末 → 工作日（调休上班）
+        - 节日数据中标记为休息日(isOffDay=True)的工作日 → 非工作日（法定假日）
+        - 无节日数据时，周一至周五为工作日
+        - 无节日数据且未加载过该年数据时返回 None
+        """
+        year = target_date.year
+        key_prefix = f"{year}-"
+        has_year_data = any(k.startswith(key_prefix) for k in self._data)
+
+        holiday = self.get_holiday(target_date)
+        if holiday is not None:
+            # 有节日数据，按节日数据判断
+            if holiday["isOffDay"]:
+                return False  # 休息日（含法定假日和正常周末）
+            else:
+                return True   # 调休上班日
+        elif has_year_data:
+            # 该年数据已加载但此日无特殊标记，按正常周末判断
+            return target_date.weekday() < 5
+        else:
+            # 该年数据未加载
+            return None
+
+    def has_data_for_year(self, year: int) -> bool:
+        """检查指定年份的节日数据是否已加载"""
+        key_prefix = f"{year}-"
+        return any(k.startswith(key_prefix) for k in self._data)
+
     def clear_cache(self, year: Optional[int] = None):
         """清除本地缓存"""
         if year:

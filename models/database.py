@@ -79,6 +79,7 @@ class Database:
         self._migrate_add_start_date()
         self._init_default_categories()
         self._migrate_add_indexes()
+        self._migrate_cleanup_datetime_columns()
 
     def _migrate_add_category_id(self):
         """迁移：为 todos 表添加 category_id 列"""
@@ -242,6 +243,34 @@ class Database:
         with self.engine.connect() as conn:
             for _, ddl in indexes:
                 conn.execute(text(ddl))
+            conn.commit()
+
+    def _migrate_cleanup_datetime_columns(self):
+        """迁移：清理 DateTime 列中的非法字符串值，将其转为合法的 datetime 字符串或 NULL"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+
+        # 需要清理的 DateTime 列
+        datetime_cols = []
+        for col in ("created_at", "updated_at", "completed_at"):
+            if col in columns:
+                datetime_cols.append(col)
+
+        if not datetime_cols:
+            return
+
+        with self.engine.connect() as conn:
+            for col in datetime_cols:
+                # SQLite 的 datetime() 函数可以验证字符串是否为合法日期时间
+                # 将无法被 datetime() 解析的值设为 NULL
+                conn.execute(text(f"""
+                    UPDATE todos SET {col} = NULL
+                    WHERE {col} IS NOT NULL
+                      AND typeof({col}) = 'text'
+                      AND datetime({col}) IS NULL
+                """))
             conn.commit()
 
     def get_session(self):

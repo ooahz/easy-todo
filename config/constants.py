@@ -59,6 +59,7 @@ RECURRENCE_TYPES = {
     "daily": "每天",
     "weekly": "每周",
     "monthly": "每月",
+    "workday": "工作日",
 }
 
 # 星期名称映射（1=周一, 7=周日）

@@ -392,6 +392,8 @@ class ImportExportService:
                     item["due_date"] = date.fromisoformat(due)
                 except Exception:
                     item["due_date"] = None
+            elif not isinstance(due, date):
+                item["due_date"] = None
 
             for key in ("id", "pid", "created_at", "updated_at", "sort_order",
                         "children", "is_recurrence_template",
@@ -510,8 +512,10 @@ class ImportExportService:
                 params["completed_at"] = datetime.fromisoformat(completed)
             except Exception:
                 params["completed_at"] = None
-        elif completed is not None:
+        elif isinstance(completed, datetime):
             params["completed_at"] = completed
+        else:
+            params["completed_at"] = None
 
         if pid is not None:
             params["pid"] = pid
@@ -526,8 +530,10 @@ class ImportExportService:
                 params["due_date"] = date.fromisoformat(due)
             except Exception:
                 params["due_date"] = None
-        elif due is not None:
+        elif isinstance(due, date):
             params["due_date"] = due
+        else:
+            params["due_date"] = None
 
         start = node.get("start_date")
         if isinstance(start, str) and start:
@@ -535,8 +541,10 @@ class ImportExportService:
                 params["start_date"] = date.fromisoformat(start)
             except Exception:
                 params["start_date"] = None
-        elif start is not None:
+        elif isinstance(start, date):
             params["start_date"] = start
+        else:
+            params["start_date"] = None
 
         end_date = node.get("recurrence_end_date")
         if isinstance(end_date, str) and end_date:
@@ -544,8 +552,10 @@ class ImportExportService:
                 params["recurrence_end_date"] = date.fromisoformat(end_date)
             except Exception:
                 params["recurrence_end_date"] = None
-        elif end_date is not None:
+        elif isinstance(end_date, date):
             params["recurrence_end_date"] = end_date
+        else:
+            params["recurrence_end_date"] = None
 
         start_date = node.get("recurrence_start_date")
         if isinstance(start_date, str) and start_date:
@@ -553,8 +563,10 @@ class ImportExportService:
                 params["recurrence_start_date"] = date.fromisoformat(start_date)
             except Exception:
                 params["recurrence_start_date"] = None
-        elif start_date is not None:
+        elif isinstance(start_date, date):
             params["recurrence_start_date"] = start_date
+        else:
+            params["recurrence_start_date"] = None
 
         return params
 
@@ -576,8 +588,10 @@ class ImportExportService:
                 params["completed_at"] = datetime.fromisoformat(completed)
             except Exception:
                 params["completed_at"] = None
-        elif completed is not None:
+        elif isinstance(completed, datetime):
             params["completed_at"] = completed
+        else:
+            params["completed_at"] = None
 
         status = node.get("status")
         if status is not None:
@@ -593,8 +607,10 @@ class ImportExportService:
                 params["due_date"] = date.fromisoformat(due)
             except Exception:
                 params["due_date"] = None
-        elif due is not None:
+        elif isinstance(due, date):
             params["due_date"] = due
+        else:
+            params["due_date"] = None
 
         start = node.get("start_date")
         if isinstance(start, str) and start:
@@ -602,8 +618,10 @@ class ImportExportService:
                 params["start_date"] = date.fromisoformat(start)
             except Exception:
                 params["start_date"] = None
-        elif start is not None:
+        elif isinstance(start, date):
             params["start_date"] = start
+        else:
+            params["start_date"] = None
 
         occ = node.get("occurrence_date")
         if isinstance(occ, str) and occ:
@@ -611,8 +629,10 @@ class ImportExportService:
                 params["occurrence_date"] = date.fromisoformat(occ)
             except Exception:
                 params["occurrence_date"] = None
-        elif occ is not None:
+        elif isinstance(occ, date):
             params["occurrence_date"] = occ
+        else:
+            params["occurrence_date"] = None
 
         return params
 

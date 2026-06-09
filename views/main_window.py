@@ -1677,10 +1677,18 @@ class MainWindow(FluentWindow):
     def _show_calendar_view(self):
         """打开日程视图弹窗"""
         from views.calendar_view import CalendarDialog
-        todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
+        try:
+            todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
+        except Exception:
+            self.todo_service.reset_session()
+            todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
         tree = self._build_todo_tree(todos, truncate_desc=True)
         self._inject_completed_dates(tree)
-        templates = self.todo_service.get_all_templates()
+        try:
+            templates = self.todo_service.get_all_templates()
+        except Exception:
+            self.todo_service.reset_session()
+            templates = self.todo_service.get_all_templates()
         tpl_dicts = [t.to_dict(truncate_desc=True) for t in templates]
         dialog = CalendarDialog(tree + tpl_dicts, parent=self)
         dialog.exec()
