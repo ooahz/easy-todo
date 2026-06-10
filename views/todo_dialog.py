@@ -15,7 +15,7 @@ from qfluentwidgets import (
     InfoBar, InfoBarPosition, CaptionLabel
 )
 
-from config.constants import PRIORITY_MAP, PRIORITY_NONE, TODO_COLORS, RECURRENCE_TYPES, WEEKDAY_LABELS, parse_recurrence_day
+from config.constants import PRIORITY_MAP, PRIORITY_NONE, TODO_COLORS, RECURRENCE_TYPES, WEEKDAY_LABELS, TASK_TYPE_MAP, parse_recurrence_day
 from config.settings import settings
 from services.category_service import CategoryService
 from services.file_service import FileService
@@ -44,7 +44,7 @@ class TodoDialog(QDialog):
         self._file_service = FileService()
         self._temp_files = []
         self._is_widescreen = (settings.dialog_mode == "widescreen")
-        self._task_mode = "default"  # "default" 或 "recurrence"
+        self._task_mode = "default"  # "default" / "recurrence" / "periodic"
 
         if self._pid is not None:
             self.setFixedSize(400, 160)
@@ -484,10 +484,11 @@ class TodoDialog(QDialog):
         self.recurrence_combo.currentIndexChanged.connect(self._on_recurrence_changed)
 
     def _create_mode_combo(self) -> ComboBox:
-        """创建任务模式下拉框（默认任务 / 重复任务）"""
+        """创建任务模式下拉框（默认任务 / 重复任务 / 周期任务）"""
         combo = ComboBox()
         combo.addItem("默认任务", userData="default")
         combo.addItem("重复任务", userData="recurrence")
+        combo.addItem("周期任务", userData="periodic")
         combo.setCurrentIndex(0)
         combo.setFixedWidth(110)
         combo.currentIndexChanged.connect(self._on_mode_combo_changed)
@@ -500,11 +501,12 @@ class TodoDialog(QDialog):
             self._on_task_mode_changed(mode)
 
     def _on_task_mode_changed(self, mode: str):
-        """切换任务模式（默认任务 / 重复任务）"""
+        """切换任务模式（默认任务 / 重复任务 / 周期任务）"""
         if self._task_mode == mode:
             return
         self._task_mode = mode
         is_recurrence = mode == "recurrence"
+        is_periodic = mode == "periodic"
 
         # 同步下拉框选中状态
         for i in range(self._mode_combo.count()):
@@ -513,20 +515,23 @@ class TodoDialog(QDialog):
                 break
 
         # 显示/隐藏截止日期区域
-        self._due_section.setVisible(not is_recurrence)
+        self._due_section.setVisible(not is_recurrence and not is_periodic)
 
         # 显示/隐藏重复任务区域
         self._recurrence_section.setVisible(is_recurrence)
 
+        # 显示/隐藏周期任务区域
+        if hasattr(self, '_periodic_section'):
+            self._periodic_section.setVisible(is_periodic)
+
         if is_recurrence:
-            # 切换到重复任务时，如果当前是"不重复"，自动选择第一个重复类型
             if self.recurrence_combo.currentData() is None and self.recurrence_combo.count() > 1:
                 self.recurrence_combo.setCurrentIndex(1)
             else:
-                # 触发一次刷新，确保子组件可见性正确
                 self._on_recurrence_changed(self.recurrence_combo.currentIndex())
+        elif is_periodic:
+            self.auto_postpone_cb.setChecked(False)
         else:
-            # 切换到默认任务时，重置重复设置为"不重复"
             self.recurrence_combo.setCurrentIndex(0)
 
     def _layout_meta_default(self, layout):
@@ -595,6 +600,40 @@ class TodoDialog(QDialog):
 
         # 默认隐藏重复区域
         self._recurrence_section.setVisible(False)
+
+        # 周期任务区域
+        self._periodic_section = QWidget()
+        periodic_section_layout = QVBoxLayout(self._periodic_section)
+        periodic_section_layout.setContentsMargins(0, 0, 0, 0)
+        periodic_section_layout.setSpacing(0)
+
+        self.periodic_start_picker = FastCalendarPicker()
+        self.periodic_start_picker.setToolTip("生效开始日期（必填）")
+        self.periodic_start_picker.setFixedWidth(205)
+        try:
+            self.periodic_start_picker.setText("开始日期")
+        except Exception:
+            pass
+
+        self.periodic_end_picker = FastCalendarPicker()
+        self.periodic_end_picker.setToolTip("生效结束日期（必填）")
+        self.periodic_end_picker.setFixedWidth(205)
+        try:
+            self.periodic_end_picker.setText("结束日期")
+        except Exception:
+            pass
+
+        periodic_date_row = QHBoxLayout()
+        periodic_date_row.setSpacing(20)
+        periodic_date_row.addWidget(self.periodic_start_picker)
+        periodic_date_row.addWidget(self.periodic_end_picker)
+        periodic_date_row.addStretch()
+        periodic_section_layout.addLayout(periodic_date_row)
+
+        layout.addWidget(self._periodic_section)
+
+        # 默认隐藏周期区域
+        self._periodic_section.setVisible(False)
 
         color_row = QHBoxLayout()
         color_row.setSpacing(8)
@@ -670,6 +709,34 @@ class TodoDialog(QDialog):
 
         # 默认隐藏重复区域
         self._recurrence_section.setVisible(False)
+
+        # 周期任务区域
+        self._periodic_section = QWidget()
+        periodic_section_layout = QVBoxLayout(self._periodic_section)
+        periodic_section_layout.setContentsMargins(0, 0, 0, 0)
+        periodic_section_layout.setSpacing(0)
+
+        periodic_label = CaptionLabel("生效期间")
+        periodic_label.setStyleSheet(lbl_style)
+        periodic_section_layout.addWidget(periodic_label)
+        self.periodic_start_picker = FastCalendarPicker()
+        self.periodic_start_picker.setToolTip("生效开始日期（必填）")
+        self.periodic_start_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        periodic_section_layout.addWidget(self.periodic_start_picker)
+        self.periodic_end_picker = FastCalendarPicker()
+        self.periodic_end_picker.setToolTip("生效结束日期（必填）")
+        self.periodic_end_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        periodic_section_layout.addWidget(self.periodic_end_picker)
+
+        sep_p = QFrame()
+        sep_p.setFixedHeight(1)
+        sep_p.setStyleSheet(f"background-color: {'#444' if isDarkTheme() else '#DDD'};")
+        periodic_section_layout.addWidget(sep_p)
+
+        layout.addWidget(self._periodic_section)
+
+        # 默认隐藏周期区域
+        self._periodic_section.setVisible(False)
 
         color_label = CaptionLabel("颜色标签")
         color_label.setStyleSheet(lbl_style)
@@ -1003,7 +1070,35 @@ class TodoDialog(QDialog):
                         parent_layout.addWidget(self.recurrence_instance_label)
             else:
                 recurrence_type = data.get("recurrence_type")
-                if recurrence_type:
+                task_type = data.get("task_type", "default")
+                if task_type == "periodic":
+                    # 编辑周期任务，切换到周期任务模式
+                    start_str = data.get("start_date")
+                    if start_str:
+                        try:
+                            if isinstance(start_str, str):
+                                pyd = date.fromisoformat(start_str)
+                                self.periodic_start_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
+                            else:
+                                self.periodic_start_picker.setDate(QDate(start_str.year, start_str.month, start_str.day))
+                        except Exception:
+                            pass
+                    end_str = data.get("due_date")
+                    if end_str:
+                        try:
+                            if isinstance(end_str, str):
+                                pyd = date.fromisoformat(end_str)
+                                self.periodic_end_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
+                            else:
+                                self.periodic_end_picker.setDate(QDate(end_str.year, end_str.month, end_str.day))
+                        except Exception:
+                            pass
+                    self._task_mode = "periodic"
+                    self._mode_combo.setCurrentIndex(2)
+                    self._due_section.setVisible(False)
+                    self._recurrence_section.setVisible(False)
+                    self._periodic_section.setVisible(True)
+                elif recurrence_type:
                     # 编辑有重复设置的任务，切换到重复任务模式
                     if recurrence_type == "workday":
                         has_workday = False
@@ -1152,67 +1247,110 @@ class TodoDialog(QDialog):
             elif is_instance:
                 data["edit_mode"] = "this"
             elif not is_instance:
-                data["recurrence_type"] = self.recurrence_combo.currentData() if hasattr(self,
-                                                                                         'recurrence_combo') else None
-                data["recurrence_interval"] = self.recurrence_interval_spin.value() if hasattr(self,
-                                                                                               'recurrence_interval_spin') else 1
-                recurrence_type = data.get("recurrence_type")
-                if recurrence_type == "weekly" and hasattr(self, 'weekday_btns'):
-                    data["recurrence_day"] = self._get_weekday_value()
-                elif recurrence_type == "monthly" and hasattr(self, 'recurrence_day_spin'):
-                    data["recurrence_day"] = str(self.recurrence_day_spin.value())
-                else:
-                    data["recurrence_day"] = None
-
-                if recurrence_type:
+                # 周期任务处理
+                if self._task_mode == "periodic":
+                    data["task_type"] = "periodic"
                     data["auto_postpone"] = False
-                    # 重复任务未设置截止日期时，自动填充为一年后
-                    if data["due_date"] is None:
-                        data["due_date"] = date.today() + timedelta(days=365)
-                recurrence_start = None
-                if hasattr(self, 'recurrence_start_picker') and data.get("recurrence_type"):
-                    try:
-                        qdate = self.recurrence_start_picker.date
-                        if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
-                            recurrence_start = date(qdate.year(), qdate.month(), qdate.day())
-                    except Exception:
-                        pass
-                data["recurrence_start_date"] = recurrence_start
-                recurrence_end = None
-                if hasattr(self, 'recurrence_end_picker') and data.get("recurrence_type"):
-                    try:
-                        qdate = self.recurrence_end_picker.date
-                        if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
-                            recurrence_end = date(qdate.year(), qdate.month(), qdate.day())
-                    except Exception:
-                        pass
-                data["recurrence_end_date"] = recurrence_end
-                if recurrence_start is not None:
-                    today = date.today()
-                    if recurrence_start < today:
-                        InfoBar.error(title="日期无效", content="开始日期不能早于今日", parent=self,
+                    data["recurrence_type"] = None
+                    data["recurrence_interval"] = 1
+                    data["recurrence_day"] = None
+                    data["recurrence_start_date"] = None
+                    data["recurrence_end_date"] = None
+
+                    periodic_start = None
+                    if hasattr(self, 'periodic_start_picker'):
+                        try:
+                            qdate = self.periodic_start_picker.date
+                            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                                periodic_start = date(qdate.year(), qdate.month(), qdate.day())
+                        except Exception:
+                            pass
+                    periodic_end = None
+                    if hasattr(self, 'periodic_end_picker'):
+                        try:
+                            qdate = self.periodic_end_picker.date
+                            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                                periodic_end = date(qdate.year(), qdate.month(), qdate.day())
+                        except Exception:
+                            pass
+
+                    if not periodic_start:
+                        InfoBar.error(title="设置无效", content="周期任务必须选择开始日期", parent=self,
                                       position=InfoBarPosition.TOP, duration=3000)
                         return
-                if recurrence_end is not None:
-                    today = date.today()
-                    max_end = today + timedelta(days=365)
-                    if recurrence_end < today:
-                        InfoBar.error(title="日期无效", content="结束日期不能早于今日", parent=self,
+                    if not periodic_end:
+                        InfoBar.error(title="设置无效", content="周期任务必须选择结束日期", parent=self,
                                       position=InfoBarPosition.TOP, duration=3000)
                         return
-                    if recurrence_end > max_end:
-                        InfoBar.error(title="日期无效", content="结束日期不能超过一年", parent=self,
+                    if periodic_start > periodic_end:
+                        InfoBar.error(title="日期无效", content="开始日期不能晚于结束日期", parent=self,
                                       position=InfoBarPosition.TOP, duration=3000)
                         return
-                if recurrence_start and recurrence_end and recurrence_start > recurrence_end:
-                    InfoBar.error(title="日期无效", content="开始日期不能晚于结束日期", parent=self,
-                                  position=InfoBarPosition.TOP, duration=3000)
-                    return
-                # 周重复必须至少选择一天
-                if recurrence_type == "weekly" and not data.get("recurrence_day"):
-                    InfoBar.error(title="设置无效", content="周重复至少需要选择一天", parent=self,
-                                  position=InfoBarPosition.TOP, duration=3000)
-                    return
+
+                    data["start_date"] = periodic_start
+                    data["due_date"] = periodic_end
+                else:
+                    data["recurrence_type"] = self.recurrence_combo.currentData() if hasattr(self,
+                                                                                             'recurrence_combo') else None
+                    data["recurrence_interval"] = self.recurrence_interval_spin.value() if hasattr(self,
+                                                                                                   'recurrence_interval_spin') else 1
+                    recurrence_type = data.get("recurrence_type")
+                    if recurrence_type == "weekly" and hasattr(self, 'weekday_btns'):
+                        data["recurrence_day"] = self._get_weekday_value()
+                    elif recurrence_type == "monthly" and hasattr(self, 'recurrence_day_spin'):
+                        data["recurrence_day"] = str(self.recurrence_day_spin.value())
+                    else:
+                        data["recurrence_day"] = None
+
+                    if recurrence_type:
+                        data["auto_postpone"] = False
+                        # 重复任务未设置截止日期时，自动填充为一年后
+                        if data["due_date"] is None:
+                            data["due_date"] = date.today() + timedelta(days=365)
+                    recurrence_start = None
+                    if hasattr(self, 'recurrence_start_picker') and data.get("recurrence_type"):
+                        try:
+                            qdate = self.recurrence_start_picker.date
+                            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                                recurrence_start = date(qdate.year(), qdate.month(), qdate.day())
+                        except Exception:
+                            pass
+                    data["recurrence_start_date"] = recurrence_start
+                    recurrence_end = None
+                    if hasattr(self, 'recurrence_end_picker') and data.get("recurrence_type"):
+                        try:
+                            qdate = self.recurrence_end_picker.date
+                            if qdate is not None and hasattr(qdate, 'isValid') and qdate.isValid():
+                                recurrence_end = date(qdate.year(), qdate.month(), qdate.day())
+                        except Exception:
+                            pass
+                    data["recurrence_end_date"] = recurrence_end
+                    if recurrence_start is not None:
+                        today = date.today()
+                        if recurrence_start < today:
+                            InfoBar.error(title="日期无效", content="开始日期不能早于今日", parent=self,
+                                          position=InfoBarPosition.TOP, duration=3000)
+                            return
+                    if recurrence_end is not None:
+                        today = date.today()
+                        max_end = today + timedelta(days=365)
+                        if recurrence_end < today:
+                            InfoBar.error(title="日期无效", content="结束日期不能早于今日", parent=self,
+                                          position=InfoBarPosition.TOP, duration=3000)
+                            return
+                        if recurrence_end > max_end:
+                            InfoBar.error(title="日期无效", content="结束日期不能超过一年", parent=self,
+                                          position=InfoBarPosition.TOP, duration=3000)
+                            return
+                    if recurrence_start and recurrence_end and recurrence_start > recurrence_end:
+                        InfoBar.error(title="日期无效", content="开始日期不能晚于结束日期", parent=self,
+                                      position=InfoBarPosition.TOP, duration=3000)
+                        return
+                    # 周重复必须至少选择一天
+                    if recurrence_type == "weekly" and not data.get("recurrence_day"):
+                        InfoBar.error(title="设置无效", content="周重复至少需要选择一天", parent=self,
+                                      position=InfoBarPosition.TOP, duration=3000)
+                        return
         else:
             data["pid"] = self._pid
 

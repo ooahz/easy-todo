@@ -62,6 +62,13 @@ RECURRENCE_TYPES = {
     "workday": "工作日",
 }
 
+# 任务类型
+TASK_TYPE_MAP = {
+    "default": "默认任务",
+    "recurrence": "重复任务",
+    "periodic": "周期任务",
+}
+
 # 星期名称映射（1=周一, 7=周日）
 WEEKDAY_NAMES = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日"}
 WEEKDAY_LABELS = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}

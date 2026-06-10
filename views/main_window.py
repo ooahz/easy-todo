@@ -91,12 +91,19 @@ def _build_todo_tree(todos, truncate_desc=False):
 
 def _inject_completed_flags(tree):
     """为任务树设置完成/归档标志，已完成任务置底"""
+    from services.todo_service import TodoService
     for t in tree:
         t["_is_done"] = t.get("status", 0) == 1
         t["_is_archived"] = t.get("status", 0) == 2
+        # 周期任务状态标记
+        periodic_status = TodoService.get_periodic_status(t)
+        t["_is_not_started"] = periodic_status == "not_started"
+        t["_is_expired"] = periodic_status == "expired" and not t["_is_done"]
         for ch in t.get("children", []):
             ch["_is_done"] = ch.get("status", 0) == 1
             ch["_is_archived"] = ch.get("status", 0) == 2
+            ch["_is_not_started"] = False
+            ch["_is_expired"] = False
     tree.sort(key=lambda t: t.get("status", 0))
 
 

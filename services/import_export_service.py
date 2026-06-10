@@ -16,7 +16,7 @@ EXPORT_VERSION = "2.0"
 
 EXPORT_FIELDS_TODO = {
     "title", "description", "priority", "status", "color_tag",
-    "start_date", "due_date", "auto_postpone", "sort_order", "category_name",
+    "start_date", "due_date", "task_type", "auto_postpone", "sort_order", "category_name",
     "recurrence_type", "recurrence_interval", "recurrence_day",
     "recurrence_start_date", "recurrence_end_date", "is_recurrence_template",
     "occurrence_date", "is_exception", "completed_at",
@@ -140,8 +140,8 @@ class ImportExportService:
                 continue
             if not _matches_filter(t):
                 continue
-            is_recurring = bool(t.recurrence_type)
-            task_type = "重复任务" if is_recurring else "普通任务"
+            from config.constants import TASK_TYPE_MAP
+            task_type = TASK_TYPE_MAP.get(t.task_type or "default", "默认任务")
             status_label = STATUS_LABELS.get(t.status, "未完成")
             cat_name = t.category.name if t.category else ""
 
@@ -498,7 +498,7 @@ class ImportExportService:
 
         simple_fields = [
             "title", "description", "priority", "status", "color_tag",
-            "auto_postpone", "sort_order",
+            "task_type", "auto_postpone", "sort_order",
             "recurrence_type", "recurrence_interval",
             "recurrence_day",
         ]

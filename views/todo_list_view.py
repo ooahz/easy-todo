@@ -649,6 +649,7 @@ class TodoListView(QWidget):
     @staticmethod
     def _categorize_for_recent(todos: list[dict]) -> list[dict]:
         from datetime import date as _date
+        from services.todo_service import TodoService
         today = _date.today()
         groups = [
             {"key": "overdue", "title": "超期未完成", "color": "#D13438", "todos": []},
@@ -660,6 +661,17 @@ class TodoListView(QWidget):
             is_done = todo.get("_is_done", False) or todo.get("status", 0) == 1
             if is_done:
                 groups[3]["todos"].append(todo)
+                continue
+            # 周期任务按生效状态分组
+            task_type = todo.get("task_type", "default")
+            if task_type == "periodic":
+                periodic_status = TodoService.get_periodic_status(todo)
+                if periodic_status == "not_started":
+                    groups[2]["todos"].append(todo)  # 后续任务
+                elif periodic_status == "expired":
+                    groups[0]["todos"].append(todo)  # 超期未完成
+                else:
+                    groups[1]["todos"].append(todo)  # 今日任务（进行中）
                 continue
             due = todo.get("due_date")
             if due:
@@ -699,7 +711,8 @@ class TodoListView(QWidget):
         return groups
 
     def _filter_todos_by_date(self, todos: list[dict], target_date: date_type) -> list[dict]:
-        """根据截止日期过滤任务"""
+        """根据截止日期过滤任务，周期任务按生效期匹配"""
+        from services.todo_service import TodoService
         filtered = []
 
         for todo in todos:
@@ -714,15 +727,30 @@ class TodoListView(QWidget):
                     except (ValueError, TypeError):
                         pass
 
-            due_date = todo.get("due_date")
+            task_type = todo.get("task_type", "default")
             parent_match = False
-            if due_date:
-                try:
-                    task_date = date_type.fromisoformat(due_date)
-                    if task_date == target_date:
-                        parent_match = True
-                except (ValueError, TypeError):
-                    pass
+            if task_type == "periodic":
+                # 周期任务
+                periodic_status = TodoService.get_periodic_status(todo)
+                start_str = todo.get("start_date")
+                due_str = todo.get("due_date")
+                if start_str and due_str:
+                    try:
+                        start_date = date_type.fromisoformat(start_str)
+                        due_date = date_type.fromisoformat(due_str)
+                        if start_date <= target_date <= due_date:
+                            parent_match = True
+                    except (ValueError, TypeError):
+                        pass
+            else:
+                due_date = todo.get("due_date")
+                if due_date:
+                    try:
+                        task_date = date_type.fromisoformat(due_date)
+                        if task_date == target_date:
+                            parent_match = True
+                    except (ValueError, TypeError):
+                        pass
 
             if parent_match or filtered_children:
                 filtered_todo = todo.copy()

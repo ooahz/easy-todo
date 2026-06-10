@@ -274,6 +274,25 @@ class WeekView(QWidget):
             if todo.get("_is_archived", False):
                 continue
 
+            task_type = todo.get("task_type", "default")
+            if task_type == "periodic":
+                # 周期任务：[start_date, due_date] 范围内的每一天都标记
+                start_str = todo.get("start_date")
+                due_str = todo.get("due_date")
+                if start_str and due_str:
+                    try:
+                        start_d = date.fromisoformat(start_str)
+                        due_d = date.fromisoformat(due_str)
+                        # 只标记在可见周范围内的日期
+                        current = max(start_d, week_start)
+                        end = min(due_d, week_end)
+                        while current <= end:
+                            self._pending_dates.add(current)
+                            current += timedelta(days=1)
+                    except (ValueError, TypeError):
+                        pass
+                continue
+
             due_date_str = todo.get("due_date")
             if due_date_str:
                 try:
@@ -713,6 +732,20 @@ class CalendarDialog(QDialog):
 
         for todo in self._todos:
             if todo.get("is_recurrence_template"):
+                continue
+            task_type = todo.get("task_type", "default")
+            if task_type == "periodic":
+                # 周期任务：目标日期在生效期内即匹配
+                start_str = todo.get("start_date")
+                due_str = todo.get("due_date")
+                if start_str and due_str:
+                    try:
+                        start_d = date.fromisoformat(start_str)
+                        due_d = date.fromisoformat(due_str)
+                        if start_d <= target_date <= due_d:
+                            tasks.append(todo)
+                    except (ValueError, TypeError):
+                        pass
                 continue
             due_date_str = todo.get("due_date")
             if due_date_str:

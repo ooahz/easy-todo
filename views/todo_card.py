@@ -13,7 +13,7 @@ from qfluentwidgets import (
     FluentIcon, CardWidget, isDarkTheme
 )
 
-from config.constants import PRIORITY_MAP
+from config.constants import PRIORITY_MAP, TASK_TYPE_MAP
 from config.settings import settings
 
 
@@ -174,7 +174,19 @@ class TodoCard(CardWidget):
 
         start = self.todo_data.get("start_date")
         recurrence = self.todo_data.get("recurrence_type")
-        if not recurrence:
+        task_type = self.todo_data.get("task_type", "default")
+        if task_type == "periodic" and not recurrence:
+            # 周期任务：显示状态和日期范围
+            from services.todo_service import TodoService
+            periodic_status = TodoService.get_periodic_status(self.todo_data)
+            if periodic_status == "not_started":
+                status_text = f'<span style="color:#0078D4">未开始</span> ({start} ~ {due})'
+            elif periodic_status == "expired":
+                status_text = f'<span style="color:{settings.warning_color}">已过期</span> ({start} ~ {due})'
+            else:
+                status_text = f'进行中 ({start} ~ {due})'
+            info_parts.append(status_text)
+        elif not recurrence:
             if due:
                 due_date = date.fromisoformat(due)
                 today = date.today()
@@ -508,7 +520,19 @@ class TodoCard(CardWidget):
         due = self.todo_data.get("due_date", "")
         start = self.todo_data.get("start_date")
         recurrence = self.todo_data.get("recurrence_type")
-        if not recurrence:
+        task_type = self.todo_data.get("task_type", "default")
+        if task_type == "periodic" and not recurrence:
+            # 周期任务：显示状态和日期范围
+            from services.todo_service import TodoService
+            periodic_status = TodoService.get_periodic_status(self.todo_data)
+            if periodic_status == "not_started":
+                status_text = f'<span style="color:#0078D4">未开始</span> ({start} ~ {due})'
+            elif periodic_status == "expired":
+                status_text = f'<span style="color:{settings.warning_color}">已过期</span> ({start} ~ {due})'
+            else:
+                status_text = f'进行中 ({start} ~ {due})'
+            info_parts.append(status_text)
+        elif not recurrence:
             if due:
                 due_date = date.fromisoformat(due)
                 today = date.today()

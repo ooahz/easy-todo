@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, date, timedelta
 from typing import Optional
 
-from sqlalchemy import func, case, literal, and_
+from sqlalchemy import func, case, literal, and_, or_
 from sqlalchemy.orm import Session, selectinload, joinedload
 
 from models.database import db
@@ -89,7 +89,8 @@ class TodoService:
                recurrence_interval: int = 1,
                recurrence_day: Optional[str] = None,
                recurrence_start_date=None,
-               recurrence_end_date=None) -> Todo:
+               recurrence_end_date=None,
+               task_type: Optional[str] = None) -> Todo:
         """创建待办事项。有重复规则且为顶级任务时，创建模板+生成实例"""
         if due_date is not None and hasattr(due_date, 'year') and not isinstance(due_date, date):
             from datetime import date as pydate
@@ -109,6 +110,16 @@ class TodoService:
 
         self._validate_recurrence_end_date(recurrence_end_date)
 
+        # 周期任务：强制 auto_postpone=False，设置 task_type
+        if task_type == "periodic":
+            auto_postpone = False
+        # 根据 recurrence_type 自动设置 task_type
+        if task_type is None:
+            if recurrence_type:
+                task_type = "recurrence"
+            else:
+                task_type = "default"
+
         is_template = bool(recurrence_type and pid is None)
 
         max_order = self.session.query(Todo).filter(
@@ -123,6 +134,7 @@ class TodoService:
             color_tag=color_tag,
             start_date=start_date,
             due_date=due_date,
+            task_type=task_type,
             auto_postpone=auto_postpone,
             sort_order=max_order,
             category_id=category_id,
@@ -177,6 +189,11 @@ class TodoService:
         todo = self.session.query(Todo).filter(Todo.id == todo_id).first()
         if not todo:
             return None
+
+        # 周期任务不允许开启自动延期
+        task_type = kwargs.get("task_type") or todo.task_type or "default"
+        if task_type == "periodic" and kwargs.get("auto_postpone"):
+            kwargs["auto_postpone"] = False
 
         # Date 类型字段转换
         for key in ('due_date', 'start_date', 'recurrence_end_date',
@@ -312,7 +329,7 @@ class TodoService:
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:
-        """自动延期过期任务（排除模板和重复实例），并生成重复实例"""
+        """自动延期过期任务（排除模板、重复实例和周期任务），并生成重复实例"""
         today = date.today()
         count = self.session.query(Todo).filter(
             Todo.pid.is_(None),
@@ -321,6 +338,7 @@ class TodoService:
             Todo.due_date < today,
             Todo.is_recurrence_template == False,
             Todo.recurrence_type.is_(None),
+            or_(Todo.task_type != "periodic", Todo.task_type.is_(None)),
         ).update({Todo.due_date: today, Todo.updated_at: datetime.now()},
                  synchronize_session=False)
         self.session.commit()
@@ -361,6 +379,70 @@ class TodoService:
             (Todo.recurrence_template_id == None) | (Todo.id == best_id)
         )
 
+    def _apply_date_filter(self, query, due_start: date = None, due_end: date = None):
+        """应用日期过滤，周期任务按生效区间交集匹配，其他任务按 due_date 范围过滤"""
+        # 非周期任务：按 due_date 范围过滤
+        non_periodic_cond = []
+        if due_start is not None:
+            non_periodic_cond.append(Todo.due_date >= due_start)
+        if due_end is not None:
+            non_periodic_cond.append(Todo.due_date <= due_end)
+
+        # 周期任务：按生效区间与筛选范围的交集匹配
+        periodic_cond = []
+        if due_start is not None:
+            periodic_cond.append(Todo.due_date >= due_start)  # due_date 作为生效结束
+        if due_end is not None:
+            periodic_cond.append(Todo.start_date <= due_end)  # start_date 作为生效开始
+
+        if non_periodic_cond and periodic_cond:
+            query = query.filter(
+                or_(
+                    and_(Todo.task_type != "periodic", *non_periodic_cond),
+                    and_(Todo.task_type == "periodic", *periodic_cond),
+                )
+            )
+        elif non_periodic_cond:
+            query = query.filter(
+                or_(
+                    Todo.task_type == "periodic",
+                    and_(*non_periodic_cond),
+                )
+            )
+        return query
+
+    @staticmethod
+    def get_periodic_status(todo_or_dict) -> Optional[str]:
+        """判断周期任务状态，返回 "not_started" / "active" / "expired" / None"""
+        if isinstance(todo_or_dict, dict):
+            task_type = todo_or_dict.get("task_type", "default")
+            if task_type != "periodic":
+                return None
+            start_str = todo_or_dict.get("start_date")
+            due_str = todo_or_dict.get("due_date")
+            if not start_str or not due_str:
+                return None
+            try:
+                start_date = date.fromisoformat(start_str)
+                due_date = date.fromisoformat(due_str)
+            except (ValueError, TypeError):
+                return None
+        else:
+            if (todo_or_dict.task_type or "default") != "periodic":
+                return None
+            start_date = todo_or_dict.start_date
+            due_date = todo_or_dict.due_date
+            if not start_date or not due_date:
+                return None
+
+        today = date.today()
+        if today < start_date:
+            return "not_started"
+        elif today > due_date:
+            return "expired"
+        else:
+            return "active"
+
     def _build_get_all_query(self, status: int = STATUS_TODO,
                             priority: Optional[int] = None, color_tag: Optional[str] = None,
                             category_id: Optional[int] = None,
@@ -380,10 +462,8 @@ class TodoService:
             query = query.filter(Todo.color_tag == color_tag)
         if category_id is not None:
             query = query.filter(Todo.category_id == category_id)
-        if due_start is not None:
-            query = query.filter(Todo.due_date >= due_start)
-        if due_end is not None:
-            query = query.filter(Todo.due_date <= due_end)
+        if due_start is not None or due_end is not None:
+            query = self._apply_date_filter(query, due_start, due_end)
         if dedup_recurrence:
             query = self._apply_recurrence_dedup(query)
         return query
@@ -462,10 +542,8 @@ class TodoService:
             query = query.filter(Todo.color_tag == color_tag)
         if category_id is not None:
             query = query.filter(Todo.category_id == category_id)
-        if due_start is not None:
-            query = query.filter(Todo.due_date >= due_start)
-        if due_end is not None:
-            query = query.filter(Todo.due_date <= due_end)
+        if due_start is not None or due_end is not None:
+            query = self._apply_date_filter(query, due_start, due_end)
         if dedup_recurrence:
             query = self._apply_recurrence_dedup(query)
         return query
@@ -668,10 +746,8 @@ class TodoService:
             Todo.priority != PRIORITY_NONE,
             Todo.is_recurrence_template == False,
         )
-        if due_start is not None:
-            query = query.filter(Todo.due_date >= due_start)
-        if due_end is not None:
-            query = query.filter(Todo.due_date <= due_end)
+        if due_start is not None or due_end is not None:
+            query = self._apply_date_filter(query, due_start, due_end)
         if dedup_recurrence:
             query = self._apply_recurrence_dedup(query)
         return query
@@ -708,10 +784,8 @@ class TodoService:
             Todo.category_id == category_id,
             Todo.is_recurrence_template == False,
         )
-        if due_start is not None:
-            query = query.filter(Todo.due_date >= due_start)
-        if due_end is not None:
-            query = query.filter(Todo.due_date <= due_end)
+        if due_start is not None or due_end is not None:
+            query = self._apply_date_filter(query, due_start, due_end)
         if dedup_recurrence:
             query = self._apply_recurrence_dedup(query)
         return query
@@ -786,10 +860,8 @@ class TodoService:
             Todo.pid.is_(None),
             Todo.is_recurrence_template == False,
         )
-        if due_start is not None:
-            base = base.filter(Todo.due_date >= due_start)
-        if due_end is not None:
-            base = base.filter(Todo.due_date <= due_end)
+        if due_start is not None or due_end is not None:
+            base = self._apply_date_filter(base, due_start, due_end)
 
         all_count = base.filter(Todo.status.in_([STATUS_TODO, STATUS_DONE])).count()
         done_count = base.filter(Todo.status == STATUS_DONE).count()

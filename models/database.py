@@ -77,6 +77,7 @@ class Database:
         self._migrate_add_completed_at()
         self._migrate_add_recurrence_start_date()
         self._migrate_add_start_date()
+        self._migrate_add_task_type()
         self._init_default_categories()
         self._migrate_add_indexes()
         self._migrate_cleanup_datetime_columns()
@@ -200,6 +201,24 @@ class Database:
         if "start_date" not in columns:
             with self.engine.connect() as conn:
                 conn.execute(text("ALTER TABLE todos ADD COLUMN start_date DATE"))
+                conn.commit()
+
+    def _migrate_add_task_type(self):
+        """迁移：为 todos 表添加 task_type 列，并回填现有数据"""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        columns = [c["name"] for c in inspector.get_columns("todos")]
+        if "task_type" not in columns:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE todos ADD COLUMN task_type VARCHAR(20)"))
+                # 回填：有 recurrence_type 的设为 recurrence，其余设为 default
+                conn.execute(text(
+                    "UPDATE todos SET task_type = 'recurrence' WHERE recurrence_type IS NOT NULL"
+                ))
+                conn.execute(text(
+                    "UPDATE todos SET task_type = 'default' WHERE task_type IS NULL"
+                ))
                 conn.commit()
 
     def _init_default_categories(self):
