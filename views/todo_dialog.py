@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QFrame, QWidget, QSizePolicy, QGraphicsOpacityEffect, QApplication
 )
 from qfluentwidgets import (
-    LineEdit, TextEdit, ComboBox, FastCalendarPicker,
+    LineEdit, ComboBox, FastCalendarPicker,
     PrimaryPushButton, PushButton, SubtitleLabel, CheckBox,
     FluentIcon, isDarkTheme, BodyLabel, TransparentToolButton, CompactSpinBox,
     InfoBar, InfoBarPosition, CaptionLabel
@@ -51,7 +51,7 @@ class TodoDialog(QDialog):
         elif self._is_widescreen:
             self.setMinimumSize(810, 520)
         else:
-            self.setMinimumSize(480, 500)
+            self.setMinimumSize(410, 500)
 
         self._setup_ui()
         self._connect_signals()
@@ -251,14 +251,8 @@ class TodoDialog(QDialog):
         layout.addWidget(self.title_edit)
 
         if self._pid is None:
-            self._use_markdown = settings.description_mode == "markdown"
-            if self._use_markdown:
-                from views.markdown_editor import MarkdownEditor
-                self.desc_edit = MarkdownEditor()
-                self.desc_edit.setPlaceholderText("添加详细描述（支持Markdown语法）...")
-            else:
-                self.desc_edit = TextEdit()
-                self.desc_edit.setPlaceholderText("添加详细描述...")
+            self.desc_edit = MarkdownEditor()
+            self.desc_edit.setPlaceholderText("添加详细描述（支持Markdown语法）...")
             self.desc_edit.setMinimumHeight(72)
             self.desc_edit.setMaximumHeight(110)
             layout.addWidget(self.desc_edit)
@@ -536,10 +530,10 @@ class TodoDialog(QDialog):
 
     def _layout_meta_default(self, layout):
         row1 = QHBoxLayout()
-        row1.setSpacing(20)
-        self.priority_combo.setFixedWidth(205)
+        row1.setSpacing(10)
+        self.priority_combo.setFixedWidth(180)
         row1.addWidget(self.priority_combo)
-        self.category_combo.setFixedWidth(205)
+        self.category_combo.setFixedWidth(180)
         row1.addWidget(self.category_combo)
         row1.addStretch()
         layout.addLayout(row1)
@@ -551,9 +545,9 @@ class TodoDialog(QDialog):
         due_section_layout.setSpacing(0)
 
         due_row = QHBoxLayout()
-        due_row.setSpacing(20)
-        self.due_container.setFixedWidth(240)
-        self.due_picker.setFixedWidth(205)
+        due_row.setSpacing(10)
+        self.due_container.setFixedWidth(180)
+        self.due_picker.setFixedWidth(150)
         due_row.addWidget(self.due_container)
         due_row.addWidget(self.auto_postpone_cb)
         due_row.addStretch()
@@ -565,15 +559,15 @@ class TodoDialog(QDialog):
         self._recurrence_section = QWidget()
         rec_section_layout = QVBoxLayout(self._recurrence_section)
         rec_section_layout.setContentsMargins(0, 0, 0, 0)
-        rec_section_layout.setSpacing(0)
+        rec_section_layout.setSpacing(8)
 
         recurrence_row = QHBoxLayout()
         recurrence_row.setSpacing(10)
-        self.recurrence_combo.setFixedWidth(110)
+        self.recurrence_combo.setFixedWidth(180)
         recurrence_row.addWidget(self.recurrence_combo)
-        self.recurrence_interval_spin.setFixedWidth(80)
+        self.recurrence_interval_spin.setFixedWidth(85)
         recurrence_row.addWidget(self.recurrence_interval_spin)
-        self.recurrence_day_spin.setFixedWidth(80)
+        self.recurrence_day_spin.setFixedWidth(85)
         recurrence_row.addWidget(self.recurrence_day_spin)
         recurrence_row.addStretch()
         rec_section_layout.addLayout(recurrence_row)
@@ -587,9 +581,9 @@ class TodoDialog(QDialog):
 
         recurrence_date_row = QHBoxLayout()
         recurrence_date_row.setSpacing(10)
-        self.recurrence_start_picker.setFixedWidth(130)
+        self.recurrence_start_picker.setFixedWidth(180)
         recurrence_date_row.addWidget(self.recurrence_start_picker)
-        self.recurrence_end_picker.setFixedWidth(130)
+        self.recurrence_end_picker.setFixedWidth(180)
         recurrence_date_row.addWidget(self.recurrence_end_picker)
         recurrence_date_row.addStretch()
         rec_section_layout.addLayout(recurrence_date_row)
@@ -605,11 +599,11 @@ class TodoDialog(QDialog):
         self._periodic_section = QWidget()
         periodic_section_layout = QVBoxLayout(self._periodic_section)
         periodic_section_layout.setContentsMargins(0, 0, 0, 0)
-        periodic_section_layout.setSpacing(0)
+        periodic_section_layout.setSpacing(8)
 
         self.periodic_start_picker = FastCalendarPicker()
         self.periodic_start_picker.setToolTip("生效开始日期（必填）")
-        self.periodic_start_picker.setFixedWidth(205)
+        self.periodic_start_picker.setFixedWidth(180)
         try:
             self.periodic_start_picker.setText("开始日期")
         except Exception:
@@ -617,14 +611,14 @@ class TodoDialog(QDialog):
 
         self.periodic_end_picker = FastCalendarPicker()
         self.periodic_end_picker.setToolTip("生效结束日期（必填）")
-        self.periodic_end_picker.setFixedWidth(205)
+        self.periodic_end_picker.setFixedWidth(180)
         try:
             self.periodic_end_picker.setText("结束日期")
         except Exception:
             pass
 
         periodic_date_row = QHBoxLayout()
-        periodic_date_row.setSpacing(20)
+        periodic_date_row.setSpacing(10)
         periodic_date_row.addWidget(self.periodic_start_picker)
         periodic_date_row.addWidget(self.periodic_end_picker)
         periodic_date_row.addStretch()
@@ -661,7 +655,7 @@ class TodoDialog(QDialog):
         self._due_section = QWidget()
         due_section_layout = QVBoxLayout(self._due_section)
         due_section_layout.setContentsMargins(0, 0, 0, 0)
-        due_section_layout.setSpacing(0)
+        due_section_layout.setSpacing(6)
 
         self.due_label = CaptionLabel("截止日期")
         self.due_label.setStyleSheet(lbl_style)
@@ -680,7 +674,7 @@ class TodoDialog(QDialog):
         self._recurrence_section = QWidget()
         rec_section_layout = QVBoxLayout(self._recurrence_section)
         rec_section_layout.setContentsMargins(0, 0, 0, 0)
-        rec_section_layout.setSpacing(0)
+        rec_section_layout.setSpacing(6)
 
         recurrence_label = CaptionLabel("重复")
         recurrence_label.setStyleSheet(lbl_style)
@@ -714,17 +708,19 @@ class TodoDialog(QDialog):
         self._periodic_section = QWidget()
         periodic_section_layout = QVBoxLayout(self._periodic_section)
         periodic_section_layout.setContentsMargins(0, 0, 0, 0)
-        periodic_section_layout.setSpacing(0)
+        periodic_section_layout.setSpacing(6)
 
-        periodic_label = CaptionLabel("生效期间")
+        periodic_label = CaptionLabel("任务周期")
         periodic_label.setStyleSheet(lbl_style)
         periodic_section_layout.addWidget(periodic_label)
         self.periodic_start_picker = FastCalendarPicker()
-        self.periodic_start_picker.setToolTip("生效开始日期（必填）")
+        self.periodic_start_picker.setToolTip("周期开始日期（必填）")
+        self.periodic_start_picker.setText("开始日期")
         self.periodic_start_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         periodic_section_layout.addWidget(self.periodic_start_picker)
         self.periodic_end_picker = FastCalendarPicker()
-        self.periodic_end_picker.setToolTip("生效结束日期（必填）")
+        self.periodic_end_picker.setToolTip("周期结束日期（必填）")
+        self.periodic_end_picker.setText("结束日期")
         self.periodic_end_picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         periodic_section_layout.addWidget(self.periodic_end_picker)
 
@@ -784,25 +780,14 @@ class TodoDialog(QDialog):
     def _connect_signals(self):
         self.title_edit.returnPressed.connect(self._on_save)
         if hasattr(self, 'desc_edit') and self._pid is None:
-            if isinstance(self.desc_edit, MarkdownEditor):
-                self.desc_edit.textChanged.connect(self._on_desc_changed)
-            else:
-                self.desc_edit.textChanged.connect(self._on_desc_changed)
+            self.desc_edit.textChanged.connect(self._on_desc_changed)
 
     def _on_desc_changed(self):
-        if isinstance(self.desc_edit, MarkdownEditor):
-            text = self.desc_edit.toPlainText()
-        else:
-            text = self.desc_edit.toPlainText()
+        text = self.desc_edit.toPlainText()
         if len(text) > 1000:
-            if isinstance(self.desc_edit, MarkdownEditor):
-                cursor = self.desc_edit.textCursor()
-                cursor.movePosition(cursor.MoveOperation.End)
-                cursor.deletePreviousChar()
-            else:
-                cursor = self.desc_edit.textCursor()
-                cursor.movePosition(cursor.MoveOperation.End)
-                cursor.deletePreviousChar()
+            cursor = self.desc_edit.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            cursor.deletePreviousChar()
 
     def _check_workday_available(self) -> bool:
         """检查节日数据是否可用，用于决定是否显示"工作日"选项"""

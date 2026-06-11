@@ -96,5 +96,5 @@ def parse_recurrence_day(value) -> list[int]:
 
 # 应用信息
 APP_NAME = "Easy Todo"
-APP_VERSION = "1.1.0"
+APP_VERSION = "2.0.0"
 APP_ID = "com.easy.todo"

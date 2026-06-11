@@ -1,10 +1,10 @@
-"""Markdown 编辑器组件 - 支持编辑和预览切换"""
+"""Markdown 编辑器组件 - 支持编辑和预览切换（右键菜单）"""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QLabel
+    QWidget, QVBoxLayout, QTextBrowser, QMenu
 )
 
 from qfluentwidgets import (
@@ -12,60 +12,8 @@ from qfluentwidgets import (
 )
 
 
-class TabButton(QLabel):
-    """文字标签切换按钮"""
-
-    clicked = Signal()
-
-    def __init__(self, text: str, parent=None):
-        super().__init__(text, parent)
-        self._active = False
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(26)
-        self._update_style()
-
-    def set_active(self, active: bool):
-        self._active = active
-        self._update_style()
-
-    def _update_style(self):
-        dark = isDarkTheme()
-        if self._active:
-            color = "#0078D4"
-            bg = "rgba(0, 120, 212, 0.1)"
-            border = "rgba(0, 120, 212, 0.3)"
-            weight = "bold"
-        else:
-            color = "#888" if not dark else "#777"
-            bg = "transparent"
-            border = "transparent"
-            weight = "normal"
-
-        self.setStyleSheet(f"""
-            QLabel {{
-                color: {color};
-                background-color: {bg};
-                border: 1px solid {border};
-                border-radius: 4px;
-                padding: 2px 10px;
-                font-size: 12px;
-                font-weight: {weight};
-            }}
-            QLabel:hover {{
-                color: #0078D4;
-                background-color: rgba(0, 120, 212, 0.08);
-                border: 1px solid rgba(0, 120, 212, 0.2);
-            }}
-        """)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-
 class MarkdownEditor(QWidget):
-    """Markdown 编辑器，支持编辑/预览切换"""
+    """Markdown 编辑器，支持编辑/预览切换（右键菜单）"""
 
     textChanged = Signal()
 
@@ -79,41 +27,50 @@ class MarkdownEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 工具栏
-        toolbar = QHBoxLayout()
-        toolbar.setContentsMargins(0, 0, 0, 6)
-        toolbar.setSpacing(4)
-
-        self.edit_btn = TabButton("编辑")
-        self.edit_btn.clicked.connect(self._switch_to_edit)
-
-        self.preview_btn = TabButton("预览")
-        self.preview_btn.clicked.connect(self._switch_to_preview)
-
-        toolbar.addStretch()
-        toolbar.addWidget(self.edit_btn)
-        toolbar.addWidget(self.preview_btn)
-
-        layout.addLayout(toolbar)
-
         # 编辑器
         self.editor = TextEdit()
-        self.editor.setPlaceholderText("支持 Markdown 语法输入...")
+        self.editor.setPlaceholderText("支持 Markdown 语法输入（右键唤起菜单）")
         self.editor.textChanged.connect(self._on_text_changed)
+        self.editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.editor.customContextMenuRequested.connect(self._show_edit_menu)
         layout.addWidget(self.editor)
 
         # 预览器
         self.preview = QTextBrowser()
         self.preview.setOpenExternalLinks(True)
         self.preview.hide()
+        self.preview.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.preview.customContextMenuRequested.connect(self._show_preview_menu)
         layout.addWidget(self.preview)
 
-        self._update_toolbar_state()
+    def _show_edit_menu(self, pos):
+        """编辑模式下显示右键菜单"""
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-    def _update_toolbar_state(self):
-        """更新工具栏按钮状态"""
-        self.edit_btn.set_active(not self._is_preview)
-        self.preview_btn.set_active(self._is_preview)
+        preview_action = QAction("预览", self)
+        preview_action.triggered.connect(self._switch_to_preview)
+        menu.addAction(preview_action)
+
+        menu.addSeparator()
+
+        # 保留编辑器默认的右键操作
+        standard_menu = self.editor.createStandardContextMenu()
+        for action in standard_menu.actions():
+            menu.addAction(action)
+
+        menu.exec(QCursor.pos())
+
+    def _show_preview_menu(self, pos):
+        """预览模式下显示右键菜单"""
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        edit_action = QAction("编辑", self)
+        edit_action.triggered.connect(self._switch_to_edit)
+        menu.addAction(edit_action)
+
+        menu.exec(QCursor.pos())
 
     def _switch_to_edit(self):
         if not self._is_preview:
@@ -121,7 +78,6 @@ class MarkdownEditor(QWidget):
         self._is_preview = False
         self.preview.hide()
         self.editor.show()
-        self._update_toolbar_state()
 
     def _switch_to_preview(self):
         if self._is_preview:
@@ -131,7 +87,6 @@ class MarkdownEditor(QWidget):
         self._render_preview(md_text)
         self.editor.hide()
         self.preview.show()
-        self._update_toolbar_state()
 
     def _render_preview(self, text: str):
         """渲染 Markdown 预览"""

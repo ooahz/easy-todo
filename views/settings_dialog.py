@@ -317,7 +317,6 @@ class SettingsPage(QWidget):
     sort_rule_changed = Signal(str)
     sort_rules_changed = Signal(list)
     floating_top_changed = Signal(bool)
-    description_mode_changed = Signal(str)
     dialog_mode_changed = Signal(str)
     shortcut_new_task_changed = Signal(str)
     manual_refresh_clicked = Signal()
@@ -471,22 +470,6 @@ class SettingsPage(QWidget):
 
     def _create_editor_group(self) -> SettingCardGroup:
         group = SettingCardGroup("编辑器", self.scroll_widget)
-
-        self.desc_mode_cfg = OptionsConfigItem(
-            "Editor", "DescriptionMode", settings.description_mode,
-            OptionsValidator(["default", "markdown"]),
-        )
-        self.desc_mode_card = ComboBoxSettingCard(
-            self.desc_mode_cfg,
-            FluentIcon.EDIT,
-            "输入模式",
-            "选择任务描述的输入方式",
-            texts=["默认", "Markdown"],
-        )
-        self.desc_mode_card.comboBox.currentIndexChanged.connect(
-            self._on_description_mode_changed
-        )
-        group.addSettingCard(self.desc_mode_card)
 
         self.dialog_mode_cfg = OptionsConfigItem(
             "Editor", "DialogMode", settings.dialog_mode,
@@ -675,11 +658,6 @@ class SettingsPage(QWidget):
         source = "none" if index == 0 else "default"
         settings.holiday_source = source
         self.holiday_source_changed.emit(source)
-
-    def _on_description_mode_changed(self, index: int):
-        mode = "default" if index == 0 else "markdown"
-        settings.description_mode = mode
-        self.description_mode_changed.emit(mode)
 
     def _on_dialog_mode_changed(self, index: int):
         mode = "default" if index == 0 else "widescreen"

@@ -1387,6 +1387,12 @@ class MainWindow(FluentWindow):
         self._reload_view_with_time_filter(view_key, page=page)
 
     def _open_todo_dialog(self, todo_id: int = None):
+        # 防止重复点击：若已有任务弹窗打开，则激活现有窗口而不是新建
+        if hasattr(self, '_todo_dialog') and self._todo_dialog is not None and self._todo_dialog.isVisible():
+            self._todo_dialog.raise_()
+            self._todo_dialog.activateWindow()
+            return
+
         todo_data = None
         edit_mode = None
         template_data = None
@@ -1407,8 +1413,6 @@ class MainWindow(FluentWindow):
         dialog = TodoDialog(todo_data=todo_data, parent=self,
                             edit_mode=edit_mode, template_data=template_data)
         dialog.todo_saved.connect(self._on_todo_saved)
-        # 置顶并保持在最前
-        dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self._todo_dialog = dialog
         dialog.show()
         dialog.raise_()

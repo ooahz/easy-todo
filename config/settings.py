@@ -33,7 +33,6 @@ class Settings:
         "floating_view": "all",
         "floating_show_subtasks": True,  # 浮窗是否显示子任务
         "data_path": "",  # 数据保存路径，空则使用默认路径
-        "description_mode": "default",  # default / markdown
         "dialog_mode": "default",  # default / widescreen
         "detail_dialog_width": 480,
         "detail_dialog_height": 520,
@@ -41,7 +40,7 @@ class Settings:
         "todo_dialog_height": None,
         "system_view_order": ["recent", "today", "important", "all", "done"],
         "shortcut_new_task": "",
-        "holiday_source": "default",  # none / default
+        "holiday_source": "",  # none / default
     }
 
     def __init__(self):
@@ -266,16 +265,6 @@ class Settings:
         self.save()
 
     @property
-    def description_mode(self) -> str:
-        """描述输入模式：default / markdown"""
-        return self._data.get("description_mode", "default")
-
-    @description_mode.setter
-    def description_mode(self, value: str):
-        self._data["description_mode"] = value
-        self.save()
-
-    @property
     def dialog_mode(self) -> str:
         """对话框模式：default / widescreen"""
         return self._data.get("dialog_mode", "default")
@@ -333,7 +322,7 @@ class Settings:
     @property
     def holiday_source(self) -> str:
         """节日数据来源：none / default"""
-        return self._data.get("holiday_source", "default")
+        return self._data.get("holiday_source", "")
 
     @holiday_source.setter
     def holiday_source(self, value: str):
