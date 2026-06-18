@@ -32,6 +32,7 @@ class Settings:
         "floating_geometry": None,
         "floating_view": "all",
         "floating_show_subtasks": True,  # 浮窗是否显示子任务
+        "floating_show_due_date": True,  # 浮窗是否显示截止时间
         "data_path": "",  # 数据保存路径，空则使用默认路径
         "dialog_mode": "default",  # default / widescreen
         "detail_dialog_width": 480,
@@ -252,6 +253,15 @@ class Settings:
     @floating_show_subtasks.setter
     def floating_show_subtasks(self, value: bool):
         self._data["floating_show_subtasks"] = value
+        self.save()
+
+    @property
+    def floating_show_due_date(self) -> bool:
+        return self._data.get("floating_show_due_date", True)
+
+    @floating_show_due_date.setter
+    def floating_show_due_date(self, value: bool):
+        self._data["floating_show_due_date"] = value
         self.save()
 
     @property

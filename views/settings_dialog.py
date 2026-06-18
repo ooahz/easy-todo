@@ -558,6 +558,20 @@ class SettingsPage(QWidget):
         )
         group.addSettingCard(self.floating_subtasks_card)
 
+        self.floating_due_date_cfg = ConfigItem(
+            "Floating", "ShowDueDate", settings.floating_show_due_date, BoolValidator()
+        )
+        self.floating_due_date_card = SwitchSettingCard(
+            FluentIcon.CALENDAR,
+            "浮窗显示截止时间",
+            "在浮窗任务行中显示截止时间",
+            configItem=self.floating_due_date_cfg,
+        )
+        self.floating_due_date_card.checkedChanged.connect(
+            self._on_floating_show_due_date_changed
+        )
+        group.addSettingCard(self.floating_due_date_card)
+
         return group
 
     def _create_data_group(self) -> SettingCardGroup:
@@ -681,6 +695,9 @@ class SettingsPage(QWidget):
 
     def _on_floating_show_subtasks_changed(self, checked: bool):
         settings.floating_show_subtasks = checked
+
+    def _on_floating_show_due_date_changed(self, checked: bool):
+        settings.floating_show_due_date = checked
 
     def _on_auto_start_changed(self, checked: bool):
         settings.auto_start = checked

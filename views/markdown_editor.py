@@ -1,8 +1,8 @@
 """Markdown 编辑器组件 - 支持编辑和预览切换（右键菜单）"""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QCursor
+from PySide6.QtCore import Qt, Signal, QBuffer, QIODevice
+from PySide6.QtGui import QAction, QCursor, QImage
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTextBrowser, QMenu
 )
@@ -12,10 +12,44 @@ from qfluentwidgets import (
 )
 
 
+class PasteImageTextEdit(TextEdit):
+    """支持粘贴图片的 TextEdit：拦截 QMimeData.imageData，发送 imagePasted 信号。"""
+
+    imagePasted = Signal(str, bytes)
+
+    def canInsertFromMimeData(self, source):  # noqa: N802 (Qt API)
+        if source is not None and source.hasImage():
+            return True
+        return super().canInsertFromMimeData(source)
+
+    def insertFromMimeData(self, source):  # noqa: N802 (Qt API)
+        if source is not None and source.hasImage():
+            image: QImage = source.imageData()
+            if image is None or image.isNull():
+                return
+            buf = self._qimage_to_bytes(image, "PNG")
+            self.imagePasted.emit("png", buf)
+            return
+        super().insertFromMimeData(source)
+
+    @staticmethod
+    def _qimage_to_bytes(image: QImage, fmt: str = "PNG") -> bytes:
+        ba = QBuffer()
+        ba.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not image.save(ba, fmt):
+            ba.close()
+            return b""
+        data = bytes(ba.data())
+        ba.close()
+        return data
+
+
 class MarkdownEditor(QWidget):
     """Markdown 编辑器，支持编辑/预览切换（右键菜单）"""
 
     textChanged = Signal()
+    imagePasted = Signal(str, bytes)
+    """imagePasted(ext, data) - 剪贴板里有图片被粘贴时发出，由宿主保存到任务文件夹。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,11 +62,12 @@ class MarkdownEditor(QWidget):
         layout.setSpacing(0)
 
         # 编辑器
-        self.editor = TextEdit()
-        self.editor.setPlaceholderText("支持 Markdown 语法输入（右键唤起菜单）")
+        self.editor = PasteImageTextEdit()
+        self.editor.setPlaceholderText("支持 Markdown 语法输入（右键唤起菜单，可直接 Ctrl+V 粘贴图片）")
         self.editor.textChanged.connect(self._on_text_changed)
         self.editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.editor.customContextMenuRequested.connect(self._show_edit_menu)
+        self.editor.imagePasted.connect(self.imagePasted)
         layout.addWidget(self.editor)
 
         # 预览器
@@ -167,7 +202,8 @@ class MarkdownEditor(QWidget):
                 background-color: {code_bg};
             }}
             img {{
-                max-width: 100%;
+                max-width: 90%;
+                max-height: 300px;
             }}
         """
         self.preview.document().setDefaultStyleSheet(css)
@@ -199,3 +235,7 @@ class MarkdownEditor(QWidget):
 
     def textCursor(self):
         return self.editor.textCursor()
+
+    def setSearchPaths(self, paths):
+        """设置图片搜索路径（用于预览渲染时解析 markdown 里的相对图片引用）。"""
+        self.preview.setSearchPaths(paths or [])

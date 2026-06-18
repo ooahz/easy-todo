@@ -1,0 +1,253 @@
+/* 任务详情弹窗样式 - 双栏模式 (pywebview)
+ *
+ * 使用 CSS 自定义属性实现主题切换，主题色由程序动态注入 :root 变量。
+ * 用户可复制此文件到 ~/.com.easy.todo/css/detail.css 进行自定义覆盖。
+ */
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0; padding: 0;
+    background-color: var(--bg);
+    color: var(--body);
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    -webkit-user-select: text; user-select: text;
+}
+
+.page {
+    margin: 0 auto;
+    padding: 20px 24px 40px;
+}
+
+/* ---- 信息条 ---- */
+.info-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 16px;
+    margin-bottom: 14px;
+    font-size: 12px;
+}
+
+.info-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+}
+
+.info-item .label { color: var(--muted); }
+.info-item .value { color: var(--body); }
+.info-item .value.accent { color: var(--accent); }
+.info-item .value.overdue { color: var(--overdue); }
+.info-item .value.done { color: var(--done-green); }
+
+/* ---- 通用卡片区块 ---- */
+.section {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+}
+
+.section-header {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    letter-spacing: 0.5px;
+}
+
+.desc-empty {
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 24px 0;
+}
+
+/* ---- 子任务 ---- */
+.subtask-list { list-style: none; padding: 0; margin: 0; }
+
+.subtask-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--divider);
+    font-size: 13px;
+}
+
+.subtask-item:last-child { border-bottom: none; }
+
+.subtask-check {
+    width: 14px; height: 14px;
+    border: 1.5px solid var(--muted);
+    border-radius: 3px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--done-green);
+}
+
+.subtask-check.done {
+    border-color: var(--done-green);
+    background-color: var(--done-green);
+    color: white;
+}
+
+.subtask-title { color: var(--body); }
+
+.subtask-title.done {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+/* ---- 附件 ---- */
+.file-list { list-style: none; padding: 0; margin: 0; }
+
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--divider);
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.15s;
+}
+
+.file-item:hover {
+    background-color: var(--card-hover);
+}
+
+.file-item:last-child { border-bottom: none; }
+
+.file-name {
+    color: var(--accent);
+    flex: 1;
+    word-break: break-all;
+}
+
+.file-size {
+    color: var(--muted);
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.file-folder-btn {
+    cursor: pointer;
+    opacity: 0.4;
+    font-size: 14px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: opacity 0.15s, background-color 0.15s;
+    flex-shrink: 0;
+}
+
+.file-folder-btn:hover {
+    opacity: 1;
+    background-color: var(--tag-bg);
+}
+
+/* ---- Markdown 渲染 ---- */
+.markdown-body {
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--body);
+    background-color: transparent;
+    padding: 0;
+    margin: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+    margin: 12px 0 6px;
+    font-weight: bold;
+    color: var(--title);
+}
+
+.markdown-body h1 { font-size: 22px; }
+.markdown-body h2 { font-size: 18px; }
+.markdown-body h3 { font-size: 16px; }
+.markdown-body h4 { font-size: 14px; }
+
+.markdown-body p { margin: 6px 0; }
+
+.markdown-body code {
+    background-color: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 13px;
+}
+
+.markdown-body pre {
+    background-color: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+}
+
+.markdown-body pre code {
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+
+.markdown-body blockquote {
+    border-left: 3px solid var(--link-color);
+    margin: 8px 0;
+    padding: 4px 12px;
+    color: var(--blockquote-color);
+    background-color: var(--tag-bg);
+    border-radius: 0 4px 4px 0;
+}
+
+.markdown-body a {
+    color: var(--link-color);
+    text-decoration: none;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+    margin: 6px 0;
+    padding-left: 22px;
+}
+
+.markdown-body li { margin: 3px 0; }
+
+.markdown-body hr {
+    border: none;
+    border-top: 1px solid var(--code-border);
+    margin: 12px 0;
+}
+
+.markdown-body table { border-collapse: collapse; margin: 8px 0; }
+
+.markdown-body th,
+.markdown-body td {
+    border: 1px solid var(--code-border);
+    padding: 6px 10px;
+}
+
+.markdown-body th { background-color: var(--code-bg); }
+
+.markdown-body img {
+    max-width: 100%;
+    max-height: 480px;
+    border-radius: 4px;
+}

@@ -1,6 +1,7 @@
 """新建/编辑待办对话框"""
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
 
 from PySide6.QtCore import Signal, Qt, QDate, QSize, QPoint, QPropertyAnimation, QEasingCurve
@@ -45,6 +46,14 @@ class TodoDialog(QDialog):
         self._temp_files = []
         self._is_widescreen = (settings.dialog_mode == "widescreen")
         self._task_mode = "default"  # "default" / "recurrence" / "periodic"
+        # 粘贴图片暂存：新建任务没有 todo_id，先存到 .pending_pastes/{pending_id}/，保存时迁移
+        self._pending_paste_id = (
+            f"edit_{self.todo_data['id']}" if self._is_edit
+            else f"new_{uuid.uuid4().hex[:12]}"
+        )
+        self._pending_paste_dir = self._file_service.get_pending_folder(
+            self._pending_paste_id, create=True
+        )
 
         if self._pid is not None:
             self.setFixedSize(400, 160)
@@ -168,6 +177,12 @@ class TodoDialog(QDialog):
             self._category_service.close()
         if hasattr(self, '_file_service') and self._file_service:
             self._file_service.close()
+        # 用户取消 / 直接关闭时，清理粘贴图暂存目录（成功保存后 _pending_paste_finalized=True，跳过）
+        if not getattr(self, '_pending_paste_finalized', False):
+            try:
+                self._file_service.cleanup_pending(self._pending_paste_id)
+            except Exception:
+                pass
         super().closeEvent(event)
 
     def _setup_ui(self):
@@ -781,6 +796,9 @@ class TodoDialog(QDialog):
         self.title_edit.returnPressed.connect(self._on_save)
         if hasattr(self, 'desc_edit') and self._pid is None:
             self.desc_edit.textChanged.connect(self._on_desc_changed)
+            self.desc_edit.imagePasted.connect(self._on_image_pasted)
+            # 预览能找到粘贴的图片
+            self.desc_edit.setSearchPaths([str(self._pending_paste_dir)])
 
     def _on_desc_changed(self):
         text = self.desc_edit.toPlainText()
@@ -788,6 +806,23 @@ class TodoDialog(QDialog):
             cursor = self.desc_edit.textCursor()
             cursor.movePosition(cursor.MoveOperation.End)
             cursor.deletePreviousChar()
+
+    def _on_image_pasted(self, ext: str, data: bytes):
+        """MarkdownEditor 转发来的粘贴事件：把图片字节流落地到暂存目录，并在描述里插入引用。"""
+        if not data:
+            return
+        if not hasattr(self, 'desc_edit') or self._pid is not None:
+            return
+        try:
+            filename = self._file_service.save_paste_image(self._pending_paste_id, ext, data)
+        except Exception as e:
+            print(f"保存粘贴图片失败: {e}")
+            return
+        # 在光标位置插入 markdown 图片引用（仅文件名，描述始终保持纯净）
+        cursor = self.desc_edit.textCursor()
+        sep = "" if cursor.atBlockStart() else "\n"
+        cursor.insertText(f"{sep}![{filename}]({filename})\n")
+        self.desc_edit.setTextCursor(cursor)
 
     def _check_workday_available(self) -> bool:
         """检查节日数据是否可用，用于决定是否显示"工作日"选项"""
@@ -1143,6 +1178,7 @@ class TodoDialog(QDialog):
         data = {
             "title": title,
             "temp_files": self._temp_files,
+            "pending_paste_id": self._pending_paste_id if self._pid is None else None,
         }
 
         if self._pid is None:
@@ -1342,6 +1378,8 @@ class TodoDialog(QDialog):
         if self._is_edit:
             data["id"] = self.todo_data["id"]
 
+        # 标记成功路径：closeEvent 不会再清理暂存区（由 main_window 迁移到 task_{id}）
+        self._pending_paste_finalized = True
         self.todo_saved.emit(data)
         self.close()
 

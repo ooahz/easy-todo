@@ -471,8 +471,12 @@ class FloatingWidget(QWidget):
         self.list_layout.addStretch()
 
     def _create_todo_row(self, todo: dict, c: dict, is_child: bool = False) -> QWidget:
+        is_done = todo.get("_is_done", False)
+        due = todo.get("due_date")
+        has_due = settings.floating_show_due_date and due and not is_done
+
         row = QFrame()
-        row.setFixedHeight(26 if is_child else 30)
+        row.setFixedHeight(42 if (has_due and not is_child) else (36 if has_due else (26 if is_child else 30)))
         row.setCursor(Qt.PointingHandCursor)
 
         color_tag = todo.get("color_tag")
@@ -481,8 +485,6 @@ class FloatingWidget(QWidget):
         else:
             border_left = f"border-left: 3px solid {color_tag};" if color_tag else "border-left: 3px solid transparent;"
 
-        is_done = todo.get("_is_done", False)
-        due = todo.get("due_date")
         is_overdue = False
         if due and not is_done:
             try:
@@ -515,17 +517,43 @@ class FloatingWidget(QWidget):
 
         h_layout = QHBoxLayout(row)
         if is_child:
-            h_layout.setContentsMargins(20, 0, 6, 0)  # 子任务左侧缩进
+            h_layout.setContentsMargins(20, 2, 6, 2)
         else:
-            h_layout.setContentsMargins(8, 0, 6, 0)
+            h_layout.setContentsMargins(8, 2, 6, 2)
         h_layout.setSpacing(0)
 
         title = todo.get("title", "")
-        title_label = BodyLabel(title)
-        title_label.setToolTip(title)
         font_size = "13px" if is_child else "15px"
-        title_label.setStyleSheet(f"font-size: {font_size}; {text_style} border: none;")
-        h_layout.addWidget(title_label, 1)
+
+        if has_due:
+            try:
+                from datetime import date as pydate
+                due_date = pydate.fromisoformat(due)
+                today = pydate.today()
+                if due_date < today:
+                    due_text = "已过期"
+                    due_color = settings.warning_color
+                elif due_date == today:
+                    due_text = "今天"
+                    due_color = c['title']
+                else:
+                    due_text = due
+                    due_color = c['title']
+                display = (
+                    f'<span style="font-size:{font_size};{text_style}">{title}</span>'
+                    f'<br><span style="font-size:11px;color:{due_color};float:right;margin-top:2px">{due_text}</span>'
+                )
+            except:
+                display = f'<span style="font-size:{font_size};{text_style}">{title}</span>'
+        else:
+            display = f'<span style="font-size:{font_size};{text_style}">{title}</span>'
+
+        content_label = QLabel(display)
+        content_label.setToolTip(title)
+        content_label.setWordWrap(True)
+        content_label.setTextFormat(Qt.RichText)
+        content_label.setStyleSheet("border: none; background: transparent;")
+        h_layout.addWidget(content_label, 1)
 
         todo_id = todo["id"]
         row.mousePressEvent = lambda e, tid=todo_id: self._on_row_clicked(e, tid)

@@ -32,6 +32,7 @@ from views.recurrence_delete_dialog import RecurrenceDeleteDialog
 from views.recurrence_edit_dialog import RecurrenceEditDialog
 from views.settings_dialog import SettingsPage
 from views.todo_detail_panel import TodoDetailDialog
+from views.todo_detail_webview import TodoDetailWebView
 from views.todo_dialog import TodoDialog
 from views.todo_list_view import TodoListView
 
@@ -333,6 +334,11 @@ class MainWindow(FluentWindow):
         self.stackedWidget.setAnimationEnabled(True)
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
 
+        # 双栏模式：延迟预热 webview 子进程，让用户首次点击即可秒开
+        # 子进程在后台初始化 WebView2 引擎，不阻塞主界面
+        if settings.dialog_mode == "widescreen":
+            QTimer.singleShot(3000, self._prewarm_webview)
+
     def _setup_ui(self):
         """初始化窗口"""
         self.setWindowTitle(APP_NAME)
@@ -501,7 +507,21 @@ class MainWindow(FluentWindow):
         self.floating.close()
         self.todo_service.close()
         self.category_service.close()
+        # 关闭长驻 webview 子进程
+        try:
+            from views.todo_detail_webview import stop_webview
+            stop_webview()
+        except Exception:
+            pass
         QApplication.quit()
+
+    def _prewarm_webview(self):
+        """预热 webview 子进程：提前启动并初始化引擎，首次点击即可秒开。"""
+        try:
+            from views.todo_detail_webview import ensure_webview_running
+            ensure_webview_running()
+        except Exception:
+            pass
 
     def _connect_signals(self):
         """连接信号"""
@@ -1422,6 +1442,7 @@ class MainWindow(FluentWindow):
 
     def _on_todo_saved(self, data: dict):
         temp_files = data.pop("temp_files", [])
+        pending_paste_id = data.pop("pending_paste_id", None)
         edit_mode = data.pop("edit_mode", None)
 
         try:
@@ -1439,6 +1460,12 @@ class MainWindow(FluentWindow):
         except ValueError as e:
             InfoBar.error(title="保存失败", content=str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=3000)
+            # 任务创建失败，清理粘贴图暂存（避免遗留）
+            if pending_paste_id:
+                try:
+                    self.file_service.cleanup_pending(pending_paste_id)
+                except Exception:
+                    pass
             return
 
         # 保存关联文件
@@ -1448,6 +1475,13 @@ class MainWindow(FluentWindow):
                     self.file_service.save_file(todo.id, file_path)
                 except Exception as e:
                     print(f"保存文件失败: {e}")
+
+        # 迁移粘贴图暂存到 task_{todo_id}/（与新建任务上传文件路径完全一致）
+        if todo and pending_paste_id:
+            try:
+                self.file_service.save_paste_to_task(pending_paste_id, todo.id)
+            except Exception as e:
+                print(f"迁移粘贴图失败: {e}")
 
         if todo:
             self._refresh_current_view_immediate()
@@ -1646,27 +1680,68 @@ class MainWindow(FluentWindow):
                 return item[0]
         return None
 
+    def _calc_popup_position(self) -> tuple[int, int] | None:
+        """计算双栏模式任务详情弹窗的位置:紧贴主窗口右侧 10px,垂直居中。
+
+        若右侧放不下,回退到主窗口左侧;再放不下则夹回当前屏幕工作区。
+        """
+        try:
+            from PySide6.QtWidgets import QApplication
+            main_geo = self.frameGeometry()
+            screen = (
+                QApplication.screenAt(main_geo.center())
+                or QApplication.primaryScreen()
+            )
+            if screen is None:
+                return None
+            screen_geo = screen.availableGeometry()
+            popup_w, popup_h = 900, 720
+            # 优先:主窗口右侧 10px
+            x = main_geo.right() + 10
+            y = main_geo.top() + (main_geo.height() - popup_h) // 2
+            if x + popup_w > screen_geo.right():
+                # 右侧放不下,放到主窗口左侧
+                x = main_geo.left() - popup_w - 10
+            if x < screen_geo.left():
+                x = screen_geo.left()
+            if y + popup_h > screen_geo.bottom():
+                y = max(screen_geo.top(), screen_geo.bottom() - popup_h)
+            if y < screen_geo.top():
+                y = screen_geo.top()
+            return (int(x), int(y))
+        except Exception:
+            return None
+
     def _on_card_clicked(self, todo_id: int):
         """父任务卡片点击 - 弹出详情对话框"""
         todo = self.todo_service.get_by_id(todo_id)
         if todo:
             todo_tree = self._build_todo_tree([todo])
             self._inject_completed_dates(todo_tree)
-            if todo_tree:
-                dialog = TodoDetailDialog(todo_tree[0], parent=self)
-                dialog.exec()
-                if dialog._pending_action:
-                    action, tid = dialog._pending_action
-                    if action == "toggle_done":
-                        self._toggle_todo_done(tid)
-                    elif action == "edit":
-                        self._open_todo_dialog(tid)
-                    elif action == "delete":
-                        self._delete_todo(tid)
-                    elif action == "subtask_toggle_done":
-                        self._toggle_todo_done(tid)
-                    elif action == "archive":
-                        self._archive_todo(tid)
+            if not todo_tree:
+                return
+            node = todo_tree[0]
+            if settings.dialog_mode == "widescreen":
+                # 双栏模式:用 pywebview 子进程渲染只读预览
+                # webview 窗口在独立子进程中,关闭不影响主程序
+                popup_pos = self._calc_popup_position()
+                preview = TodoDetailWebView(node, todo_id=node["id"], popup_pos=popup_pos)
+                preview.show()
+                return
+            dialog = TodoDetailDialog(node, parent=self)
+            dialog.exec()
+            if dialog._pending_action:
+                action, tid = dialog._pending_action
+                if action == "toggle_done":
+                    self._toggle_todo_done(tid)
+                elif action == "edit":
+                    self._open_todo_dialog(tid)
+                elif action == "delete":
+                    self._delete_todo(tid)
+                elif action == "subtask_toggle_done":
+                    self._toggle_todo_done(tid)
+                elif action == "archive":
+                    self._archive_todo(tid)
 
     def _open_todo_dialog_for_subtask(self, parent_id: int):
         """为父任务新建子任务"""

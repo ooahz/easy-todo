@@ -10,6 +10,7 @@ a = Analysis(
         ('assets', 'assets'),
         ('config/config.json', 'config'),
         ('qss', 'qss'),
+        ('views/webview_runner.py', 'views'),
     ],
     hiddenimports=[
         'PySide6',
@@ -36,6 +37,10 @@ a = Analysis(
         'views.floating_widget',
         'views.settings_dialog',
         'views.style_sheet',
+        'views.webview_runner',
+        'webview',
+        'webview.platforms.winforms',
+        'webview.platforms.edgechromium',
     ],
     hookspath=[],
     hooksconfig={},

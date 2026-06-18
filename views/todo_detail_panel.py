@@ -1,9 +1,10 @@
 """任务详情对话框 - 支持单栏/分栏双模式"""
 from __future__ import annotations
+import os
 from datetime import date, datetime
 
-from PySide6.QtCore import Qt, Signal, QPoint
-from PySide6.QtGui import QPainter, QColor, QPainterPath
+from PySide6.QtCore import Qt, Signal, QPoint, QUrl
+from PySide6.QtGui import QPainter, QColor, QPainterPath, QTextCursor, QTextImageFormat
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
     QSizePolicy, QScrollArea, QTextBrowser
@@ -147,7 +148,8 @@ def _markdown_css(c: dict) -> str:
             background-color: {c['code_bg']};
         }}
         img {{
-            max-width: 100%;
+            max-width: 90%;
+            max-height: 300px;
             border-radius: 4px;
         }}
     """
@@ -179,6 +181,65 @@ class InfoRow(QWidget):
         value_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         value_w.setWordWrap(True)
         layout.addWidget(value_w, 1)
+
+
+class ClickableImageBrowser(QTextBrowser):
+    """QTextBrowser 扩展：点击图片时发送 imageClicked(file_path)。"""
+
+    imageClicked = Signal(str)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            anchor = self.anchorAt(event.position().toPoint())
+            if anchor:
+                self._handle_anchor(anchor)
+                super().mouseReleaseEvent(event)
+                return
+            # QTextBrowser.anchorAt 只覆盖 <a>，需要从光标位置拿图片
+            cursor = self.cursorForPosition(event.position().toPoint())
+            name = self._image_path_at_cursor(cursor)
+            if name:
+                self.imageClicked.emit(self._resolve_path(name))
+                return
+        super().mouseReleaseEvent(event)
+
+    def _resolve_path(self, name: str) -> str:
+        """把 setSearchPaths 没自动解析的相对名补成绝对路径。"""
+        if not name:
+            return name
+        if os.path.isabs(name):
+            return name
+        for p in self.searchPaths() or []:
+            candidate = os.path.join(p, name)
+            if os.path.exists(candidate):
+                return candidate
+        return name
+
+    @staticmethod
+    def _image_path_at_cursor(cursor: QTextCursor) -> str | None:
+        """判断光标位置是否命中图片，并返回该图片的本地路径。"""
+        if cursor is None:
+            return None
+        # charFormat() 拿当前字符格式（图片以 inline char 形式存在）
+        fmt = cursor.charFormat()
+        if not fmt.isImageFormat():
+            return None
+        img_fmt: QTextImageFormat = fmt.toImageFormat()
+        name = img_fmt.name()
+        if not name:
+            return None
+        if name.lower().startswith("file:"):
+            return QUrl(name).toLocalFile() or None
+        return name
+
+    def _handle_anchor(self, anchor: str):
+        if anchor.lower().startswith("file:"):
+            local = QUrl(anchor).toLocalFile()
+            if local:
+                self.imageClicked.emit(local)
+                return
+        # 非 file 协议，交给 QTextBrowser 默认行为
+        self.setSource(QUrl(anchor))
 
 
 class SubtaskItem(CardWidget):
@@ -731,12 +792,17 @@ class TodoDetailDialog(QDialog):
             desc_header.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
             desc_layout.addWidget(desc_header)
 
-            desc_body = QTextBrowser()
+            desc_body = ClickableImageBrowser()
             desc_body.setOpenExternalLinks(True)
+            desc_body.setOpenLinks(False)
+            desc_body.imageClicked.connect(self._open_desc_image)
             desc_body.document().setDefaultStyleSheet(_markdown_css(c))
             desc_body.setMarkdown(desc)
             desc_body.setReadOnly(True)
             desc_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            # 描述里的 ![name](name) 相对于 task_{id}/ 解析（文件最终落点）
+            task_folder = self._file_service._get_task_folder(self._current_todo_id)
+            desc_body.setSearchPaths([str(task_folder)])
             desc_body.setStyleSheet(f"""
                 QTextBrowser {{
                     background-color: transparent;
@@ -790,13 +856,17 @@ class TodoDetailDialog(QDialog):
         # 左侧：描述预览
         desc = todo.get("description", "")
         if desc:
-            desc_browser = QTextBrowser()
+            desc_browser = ClickableImageBrowser()
             desc_browser.setOpenExternalLinks(True)
+            desc_browser.setOpenLinks(False)
+            desc_browser.imageClicked.connect(self._open_desc_image)
             desc_browser.document().setDefaultStyleSheet(_markdown_css(c))
             desc_browser.setMarkdown(desc)
             desc_browser.setReadOnly(True)
             desc_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             desc_browser.setMinimumHeight(200)
+            task_folder = self._file_service._get_task_folder(self._current_todo_id)
+            desc_browser.setSearchPaths([str(task_folder)])
             desc_browser.setStyleSheet(f"""
                 QTextBrowser {{
                     background-color: {c['card_bg']};
@@ -1179,3 +1249,24 @@ class TodoDetailDialog(QDialog):
         template_id = self._todo_data.get("recurrence_template_id")
         if template_id and self._todo_data.get("recurrence_type"):
             self._file_service.open_folder(template_id)
+
+    def _open_desc_image(self, file_path: str):
+        """描述里被点击的图片：用系统默认程序打开源文件。"""
+        if not file_path:
+            return
+        if not os.path.isabs(file_path):
+            task_folder = self._file_service._get_task_folder(self._current_todo_id)
+            file_path = os.path.join(str(task_folder), file_path)
+        if not os.path.exists(file_path):
+            return
+        import platform
+        system = platform.system()
+        try:
+            if system == "Windows":
+                os.startfile(file_path)
+            elif system == "Darwin":
+                os.system(f'open "{file_path}"')
+            else:
+                os.system(f'xdg-open "{file_path}"')
+        except Exception:
+            pass

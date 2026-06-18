@@ -7,6 +7,8 @@ from typing import List, Optional
 
 from config.settings import settings
 
+PENDING_PASTES_DIR = ".pending_pastes"
+
 
 class FileService:
     """文件管理服务"""
@@ -33,6 +35,68 @@ class FileService:
         if create and not folder.exists():
             folder.mkdir(parents=True, exist_ok=True)
         return folder
+
+    # ---- 暂存区（粘贴图片专用） ----
+
+    @property
+    def pending_root(self) -> Path:
+        """粘贴图片暂存根目录"""
+        root = self.base_path / PENDING_PASTES_DIR
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def get_pending_folder(self, pending_id: str, create: bool = True) -> Path:
+        """获取/创建某个 dialog 维度的暂存目录"""
+        if not pending_id:
+            raise ValueError("pending_id 不能为空")
+        folder = self.pending_root / pending_id
+        if create and not folder.exists():
+            folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def save_paste_image(self, pending_id: str, ext: str, data: bytes) -> str:
+        """保存粘贴图片到暂存目录，返回存储的文件名（仅文件名，相对路径）"""
+        if not ext:
+            ext = "png"
+        ext = ext.lstrip(".").lower()
+        if ext not in {"png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"}:
+            ext = "png"
+        folder = self.get_pending_folder(pending_id, create=True)
+        filename = f"pasted_{uuid.uuid4().hex[:8]}.{ext}"
+        (folder / filename).write_bytes(data)
+        return filename
+
+    def save_paste_to_task(self, pending_id: str, todo_id: int) -> List[str]:
+        """把暂存目录里的所有图片 move 到 task_{todo_id}/，返回最终文件名列表"""
+        if not pending_id or todo_id is None:
+            return []
+        pending = self.pending_root / pending_id
+        if not pending.exists() or not pending.is_dir():
+            return []
+        task_folder = self._get_task_folder(todo_id, create=True)
+        moved: List[str] = []
+        try:
+            for f in pending.iterdir():
+                if not f.is_file():
+                    continue
+                dest = task_folder / f.name
+                if dest.exists():
+                    stem, suffix = f.stem, f.suffix
+                    dest = task_folder / f"{stem}_{uuid.uuid4().hex[:6]}{suffix}"
+                shutil.move(str(f), str(dest))
+                moved.append(dest.name)
+            shutil.rmtree(pending, ignore_errors=True)
+        except Exception:
+            pass
+        return moved
+
+    def cleanup_pending(self, pending_id: str):
+        """清理某个 dialog 的暂存目录（用户取消时调用）"""
+        if not pending_id:
+            return
+        pending = self.pending_root / pending_id
+        if pending.exists():
+            shutil.rmtree(pending, ignore_errors=True)
 
     def save_file(self, todo_id: int, source_path: str) -> str:
         source = Path(source_path)

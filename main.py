@@ -9,11 +9,21 @@ import sys
 import os
 import warnings
 
+# 在 import qtpy 之前设置 Qt 后端,让 pywebview 的 Qt 平台能找到 PySide6
+os.environ.setdefault("QT_API", "pyside6")
+
 # 将项目根目录加入 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # 抑制 PySide6 弃用警告
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# 打包模式下，通过 --webview-runner 标志启动长驻 webview 子进程，
+# 避免重新加载整个主程序。必须在 PySide6 等重模块 import 之前拦截。
+if "--webview-runner" in sys.argv:
+    from views.webview_runner import main as _runner_main
+    _runner_main()
+    sys.exit(0)
 
 from PySide6.QtCore import Qt, QSharedMemory
 from PySide6.QtWidgets import QApplication
