@@ -18,17 +18,11 @@ RECURRENCE_END_MAX_DAYS = 365
 
 
 class TodoService:
-    """待办事项业务逻辑（无状态，每次方法调用独立 session）"""
+    """待办事项业务逻辑"""
 
     @staticmethod
     def _coerce_date(value, field_name: str):
-        """将各种日期输入统一转为 Python date/datetime 对象。
-
-        - QDate → date
-        - ISO 字符串 → date 或 datetime
-        - 已经是 date/datetime → 原样返回
-        - 其它类型 → None（避免写入非法值导致 SQLite 报错）
-        """
+        """将各种日期输入统一转为 Python date/datetime 对象"""
         if value is None:
             return None
         if isinstance(value, (date, datetime)):
@@ -101,7 +95,7 @@ class TodoService:
 
         self._validate_recurrence_end_date(recurrence_end_date)
 
-        # 周期任务：强制 auto_postpone=False，设置 task_type
+        # 周期任务
         if task_type == "periodic":
             auto_postpone = False
         # 根据 recurrence_type 自动设置 task_type
@@ -148,7 +142,6 @@ class TodoService:
 
     def create_raw(self, **kwargs) -> Todo:
         """直接创建待办事项"""
-        # Date 类型字段转换
         for key in ('due_date', 'start_date', 'recurrence_end_date',
                      'recurrence_start_date', 'occurrence_date'):
             if key in kwargs:
@@ -320,7 +313,7 @@ class TodoService:
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:
-        """自动延期过期任务（排除模板、重复实例和周期任务），并生成重复实例"""
+        """自动延期过期任务"""
         today = date.today()
         with db.session_scope() as session:
             count = session.query(Todo).filter(
@@ -407,7 +400,7 @@ class TodoService:
 
     @staticmethod
     def get_periodic_status(todo_or_dict) -> Optional[str]:
-        """判断周期任务状态，返回 "not_started" / "active" / "expired" / None"""
+        """判断周期任务状态"""
         if isinstance(todo_or_dict, dict):
             task_type = todo_or_dict.get("task_type", "default")
             if task_type != "periodic":
@@ -684,7 +677,7 @@ class TodoService:
 
     @staticmethod
     def _build_sort_expr(sort_by: str, sort_order: str):
-        """构建排序表达式，主排序 + 副排序"""
+        """构建排序表达式"""
         if sort_by == "sort_order":
             if sort_order == "asc":
                 return [Todo.sort_order.asc(), Todo.created_at.desc()]

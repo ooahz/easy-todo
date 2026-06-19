@@ -236,6 +236,9 @@ class MarkdownEditor(QWidget):
     def textCursor(self):
         return self.editor.textCursor()
 
+    def setTextCursor(self, cursor):
+        self.editor.setTextCursor(cursor)
+
     def setSearchPaths(self, paths):
         """设置图片搜索路径（用于预览渲染时解析 markdown 里的相对图片引用）。"""
         self.preview.setSearchPaths(paths or [])

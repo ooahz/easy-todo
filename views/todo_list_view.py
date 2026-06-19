@@ -16,6 +16,7 @@ from qfluentwidgets import (
 
 from config.constants import PRIORITY_GROUP_COLORS, PRIORITY_MAP
 from config.settings import settings
+from config.theme_config import FontSize, palette, theme_colors, tooltip_style
 from views.calendar_view import WeekView
 from views.subtask_card import SubtaskCard
 from views.todo_card import TodoCard
@@ -39,13 +40,13 @@ class DateRangeButton(QPushButton):
         self.clicked.connect(self._open_drawer)
 
     def paintEvent(self, event):
-        dark = isDarkTheme()
+        c = palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        bg = QColor(43, 43, 43) if dark else QColor(255, 255, 255)
-        border = QColor(80, 80, 80) if dark else QColor(209, 209, 209)
-        text_color = QColor(205, 205, 205) if dark else QColor(51, 51, 51)
+        bg = QColor(c.INPUT_BG)
+        border = QColor(c.INPUT_BORDER)
+        text_color = QColor(c.SUBTITLE if isDarkTheme() else c.BODY_LIGHT)
 
         # 绘制背景
         painter.setPen(Qt.PenStyle.NoPen)
@@ -327,31 +328,6 @@ class DateRangeButton(QPushButton):
         self._drawer = None
 
 
-def _tooltip_style() -> str:
-    """获取 tooltip 样式"""
-    if isDarkTheme():
-        return """
-            QToolTip {
-                background-color: #3C3C3C;
-                color: #EEE;
-                border: 1px solid #555;
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-size: 12px;
-            }
-        """
-    return """
-        QToolTip {
-            background-color: #FFF;
-            color: #333;
-            border: 1px solid #DDD;
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 12px;
-        }
-    """
-
-
 class TodoListView(QWidget):
     """待办列表视图"""
 
@@ -520,7 +496,7 @@ class TodoListView(QWidget):
         self.main_layout.addWidget(self.empty_widget)
 
         # 设置 tooltip 样式
-        self.setStyleSheet(_tooltip_style())
+        self.setStyleSheet(tooltip_style())
 
     def set_todos(self, todos: list[dict], recurring_instances: list[dict] = None,
                   total_count: int = -1, stats: dict = None):
@@ -926,12 +902,12 @@ class TodoListView(QWidget):
             h_layout.addWidget(dot)
 
             title = BodyLabel(group["title"])
-            title_color = "#EEE" if isDarkTheme() else "#333"
-            title.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {title_color};")
+            title_color = palette().TITLE if isDarkTheme() else palette().BODY_LIGHT
+            title.setStyleSheet(f"font-weight: bold; font-size: {FontSize.BODY}px; color: {title_color};")
             h_layout.addWidget(title)
 
             count = CaptionLabel(str(len(group["todos"])))
-            count_color = "#AAA" if isDarkTheme() else "#888"
+            count_color = palette().DISABLED if isDarkTheme() else palette().MUTED_LIGHT
             count.setStyleSheet(f"color: {count_color};")
             h_layout.addWidget(count)
 
@@ -987,11 +963,11 @@ class TodoListView(QWidget):
                 else:
                     toggle_btn.setText(f"查看更多（剩余 {remaining} 条）")
                     toggle_btn.clicked.connect(lambda _, k=group_key: self._toggle_group(k, True))
-                btn_color = "#888" if isDarkTheme() else "#666"
-                btn_hover = "#AAA" if isDarkTheme() else "#444"
+                btn_color = palette().MUTED if isDarkTheme() else "#666"
+                btn_hover = palette().DISABLED if isDarkTheme() else "#444"
                 toggle_btn.setStyleSheet(
                     f"QPushButton {{ color: {btn_color}; background: transparent; border: none;"
-                    f" font-size: 12px; }}"
+                    f" font-size: {FontSize.SMALL}px; }}"
                     f"QPushButton:hover {{ color: {btn_hover}; }}"
                 )
                 self.list_layout.addWidget(toggle_btn, alignment=Qt.AlignCenter)

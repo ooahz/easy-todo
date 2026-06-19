@@ -26,7 +26,7 @@ class FileService:
             else:
                 # 默认路径：应用数据目录
                 from config.constants import APP_ID
-                self._base_path = Path.home() / f".{APP_ID}" / "files"
+                self._base_path = Path.home() / "Documents"/ "EasyTodo" / "files"
             self._base_path.mkdir(parents=True, exist_ok=True)
         return self._base_path
 

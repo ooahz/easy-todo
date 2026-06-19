@@ -86,7 +86,7 @@ class _OptionCard(CardWidget):
         self._apply_style()
 
     def _apply_style(self):
-        c = _colors()
+        c = theme_colors()
         if self._selected:
             self.setStyleSheet(f"""
                 _OptionCard {{
@@ -124,7 +124,7 @@ class RecurrenceEditDialog(MessageBoxBase):
         self.viewLayout.addWidget(hint)
 
         self._btn_group = QButtonGroup(self)
-        c = _colors()
+        c = theme_colors()
 
         options = [
             ("this", FluentIcon.CALENDAR, "仅修改当前任务",

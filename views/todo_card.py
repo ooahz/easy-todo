@@ -10,57 +10,14 @@ from PySide6.QtWidgets import (
 
 from qfluentwidgets import (
     CheckBox, TransparentToolButton, BodyLabel, CaptionLabel,
-    FluentIcon, CardWidget, isDarkTheme
+    FluentIcon, CardWidget,
 )
 
 from config.constants import PRIORITY_MAP, TASK_TYPE_MAP
 from config.settings import settings
-
-
-def _tc():
-    """根据主题返回颜色字典"""
-    if isDarkTheme():
-        return {
-            "hover_border": "rgba(255, 255, 255, 0.08)",
-            "hover_bg": "rgba(255, 255, 255, 0.04)",
-            "title": "#EEE",
-            "muted": "#888",
-            "done": "#666",
-            "info": "#999",
-        }
-    return {
-        "hover_border": "rgba(0, 0, 0, 0.06)",
-        "hover_bg": "rgba(0, 0, 0, 0.02)",
-        "title": "#222",
-        "muted": "#999",
-        "done": "gray",
-        "info": "#888",
-    }
-
-
-def _tooltip_style() -> str:
-    """获取 tooltip 样式"""
-    if isDarkTheme():
-        return """
-            QToolTip {
-                background-color: #3C3C3C;
-                color: #EEE;
-                border: 1px solid #555;
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-size: 12px;
-            }
-        """
-    return """
-        QToolTip {
-            background-color: #FFF;
-            color: #333;
-            border: 1px solid #DDD;
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 12px;
-        }
-    """
+from config.theme_config import (
+    FontSize, palette, theme_colors, tooltip_style, accent_color, pick,
+)
 
 
 class TodoCard(CardWidget):
@@ -142,8 +99,10 @@ class TodoCard(CardWidget):
 
         self.title_label = BodyLabel(self.todo_data["title"])
         self.title_label.setWordWrap(True)
+        # 使用 Ignored 策略：忽略 minimumSizeHint，允许标题收缩，
+        # 确保右侧操作区域始终在容器内
         self.title_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
         self._apply_title_style()
         self.title_row.addWidget(self.title_label, 1)
@@ -163,84 +122,7 @@ class TodoCard(CardWidget):
             self.content_layout.addWidget(self.desc_label)
 
         # 信息行
-        info_parts = []
-        priority = self.todo_data.get("priority", 0)
-        if priority in PRIORITY_MAP and priority > 0:
-            info_parts.append(PRIORITY_MAP[priority])
-
-        category = self.todo_data.get("category")
-        if category:
-            info_parts.append(category.get("name", ""))
-
-        start = self.todo_data.get("start_date")
-        recurrence = self.todo_data.get("recurrence_type")
-        task_type = self.todo_data.get("task_type", "default")
-        if task_type == "periodic" and not recurrence:
-            # 周期任务：显示状态和日期范围
-            from services.todo_service import TodoService
-            periodic_status = TodoService.get_periodic_status(self.todo_data)
-            if periodic_status == "not_started":
-                status_text = f'<span style="color:#0078D4">未开始</span> ({start} ~ {due})'
-            elif periodic_status == "expired":
-                status_text = f'<span style="color:{settings.warning_color}">已过期</span> ({start} ~ {due})'
-            else:
-                status_text = f'进行中 ({start} ~ {due})'
-            info_parts.append(status_text)
-        elif not recurrence:
-            if due:
-                due_date = date.fromisoformat(due)
-                today = date.today()
-                if due_date < today and not self._is_done:
-                    if start:
-                        info_parts.append(f'<span style="color:{settings.warning_color}">{start} ~ {due}（已过期）</span>')
-                    else:
-                        info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
-                elif due_date == today:
-                    if start:
-                        info_parts.append(f"{start} ~ 今天")
-                    else:
-                        info_parts.append("今天")
-                else:
-                    if start:
-                        info_parts.append(f"{start} ~ {due}")
-                    else:
-                        info_parts.append(f"{due}")
-            elif start:
-                info_parts.append(f"从 {start}")
-
-        if recurrence:
-            from config.constants import RECURRENCE_TYPES, WEEKDAY_NAMES, parse_recurrence_day
-            interval = self.todo_data.get("recurrence_interval", 1)
-            recurrence_day = self.todo_data.get("recurrence_day")
-            recurrence_start = self.todo_data.get("recurrence_start_date")
-            recurrence_end = self.todo_data.get("recurrence_end_date")
-            type_name = RECURRENCE_TYPES.get(recurrence, "")
-            if recurrence == "weekly" and recurrence_day:
-                days = parse_recurrence_day(recurrence_day)
-                day_names = "".join(WEEKDAY_NAMES.get(d, "") for d in sorted(days))
-                if interval > 1:
-                    info_parts.append(f"每{interval}周周{day_names}")
-                else:
-                    info_parts.append(f"每周{day_names}")
-            elif recurrence == "monthly" and recurrence_day:
-                day_list = parse_recurrence_day(recurrence_day)
-                day_val = day_list[0] if day_list else ""
-                if interval > 1:
-                    info_parts.append(f"每{interval}月{day_val}号")
-                else:
-                    info_parts.append(f"每月{day_val}号")
-            elif interval > 1:
-                unit = {"daily": "天", "weekly": "周", "monthly": "月"}.get(recurrence, "")
-                info_parts.append(f"每{interval}{unit}")
-            else:
-                info_parts.append(type_name)
-            # 显示开始-结束日期范围
-            if recurrence_start and recurrence_end:
-                info_parts.append(f"{recurrence_start} ~ {recurrence_end}")
-            elif recurrence_start:
-                info_parts.append(f"从 {recurrence_start}")
-            elif recurrence_end:
-                info_parts.append(f"至 {recurrence_end}")
+        info_parts = self._build_info_parts()
 
         if info_parts:
             self.info_label = CaptionLabel("  |  ".join(info_parts))
@@ -384,130 +266,8 @@ class TodoCard(CardWidget):
             }}
         """)
 
-    def _apply_title_style(self):
-        c = _tc()
-        if self._is_done:
-            self.title_label.setStyleSheet(f"""
-                BodyLabel {{
-                    text-decoration: line-through;
-                    color: {c['done']};
-                    font-size: 14px;
-                }}
-            """)
-        else:
-            self.title_label.setStyleSheet(f"""
-                BodyLabel {{
-                    color: {c['title']};
-                    font-size: 14px;
-                }}
-            """)
-
-    def _apply_info_style(self):
-        c = _tc()
-        if self._is_done:
-            self.info_label.setStyleSheet(f"""
-                CaptionLabel#infoLabel {{
-                    color: {c['done']};
-                    font-size: 12px;
-                }}
-            """)
-        else:
-            self.info_label.setStyleSheet(f"""
-                CaptionLabel#infoLabel {{
-                    color: {c['info']};
-                    font-size: 12px;
-                }}
-            """)
-
-    def _apply_desc_style(self):
-        c = _tc()
-        if self._is_done:
-            self.desc_label.setStyleSheet(f"""
-                CaptionLabel#descLabel {{
-                    color: {c['done']};
-                    font-size: 12px;
-                }}
-            """)
-        else:
-            self.desc_label.setStyleSheet(f"""
-                CaptionLabel#descLabel {{
-                    color: {c['muted']};
-                    font-size: 12px;
-                }}
-            """)
-
-    def _apply_styles(self):
-        c = _tc()
-        tooltip_style = _tooltip_style()
-        self.setStyleSheet(f"""
-            CardWidget {{
-                border: none;
-                border-radius: 8px;
-                background-color: transparent;
-            }}
-            CardWidget:hover {{
-                background-color: {c['hover_bg']};
-            }}
-            {tooltip_style}
-        """)
-
-    def update_data(self, todo_data: dict):
-        """更新卡片数据"""
-        self.todo_data = todo_data
-        self.todo_id = todo_data["id"]
-        self._is_done = todo_data.get("_is_done", False)
-        self._is_archived = todo_data.get("_is_archived", False)
-
-        self.checkbox.blockSignals(True)
-        self.checkbox.setChecked(self._is_done)
-        self.checkbox.blockSignals(False)
-        self.checkbox.setEnabled(not todo_data.get("_is_archived", False))
-
-        self.title_label.setText(todo_data["title"])
-        self._apply_title_style()
-        self._update_bar_color()
-
-        # 描述
-        desc = todo_data.get("description", "")
-        if desc:
-            if hasattr(self, "desc_label"):
-                self.desc_label.setText(desc)
-                self.desc_label.setVisible(True)
-                self._apply_desc_style()
-            else:
-                self.desc_label = CaptionLabel(desc)
-                self.desc_label.setObjectName("descLabel")
-                self.desc_label.setWordWrap(True)
-                self.desc_label.setMaximumHeight(36)
-                self._apply_desc_style()
-                # 插入到 info_label 之前，保持布局顺序：标题 → 描述 → 信息
-                if hasattr(self, "info_label"):
-                    idx = self.content_layout.indexOf(self.info_label)
-                    self.content_layout.insertWidget(idx, self.desc_label)
-                else:
-                    self.content_layout.addWidget(self.desc_label)
-        elif hasattr(self, "desc_label"):
-            self.desc_label.setVisible(False)
-
-        # 重建信息行
-        self._rebuild_info_label()
-
-        # 归档按钮可见性
-        if self._readonly:
-            self.archive_btn.setVisible(self._is_done)
-        else:
-            self.archive_btn.setVisible(self._is_done)
-
-        # 已完成或已归档时隐藏新建子任务按钮
-        self.add_subtask_btn.setVisible(not self._is_done and not self._is_archived)
-        # 已完成时隐藏编辑按钮
-        if not self._readonly:
-            self.edit_btn.setVisible(not self._is_done)
-
-        self._apply_styles()
-
-    def _rebuild_info_label(self):
-        """重建信息行内容"""
+    def _build_info_parts(self) -> list[str]:
+        """构建信息行内容列表"""
         info_parts = []
         priority = self.todo_data.get("priority", 0)
         if priority in PRIORITY_MAP and priority > 0:
@@ -522,7 +282,6 @@ class TodoCard(CardWidget):
         recurrence = self.todo_data.get("recurrence_type")
         task_type = self.todo_data.get("task_type", "default")
         if task_type == "periodic" and not recurrence:
-            # 周期任务：显示状态和日期范围
             from services.todo_service import TodoService
             periodic_status = TodoService.get_periodic_status(self.todo_data)
             if periodic_status == "not_started":
@@ -587,6 +346,133 @@ class TodoCard(CardWidget):
             elif recurrence_end:
                 info_parts.append(f"至 {recurrence_end}")
 
+        return info_parts
+
+    def _apply_title_style(self):
+        c = theme_colors()
+        if self._is_done:
+            self.title_label.setStyleSheet(f"""
+                BodyLabel {{
+                    text-decoration: line-through;
+                    color: {c['done']};
+                    font-size: {FontSize.MEDIUM}px;
+                }}
+            """)
+        else:
+            self.title_label.setStyleSheet(f"""
+                BodyLabel {{
+                    color: {c['title']};
+                    font-size: {FontSize.MEDIUM}px;
+                }}
+            """)
+
+    def _apply_info_style(self):
+        c = theme_colors()
+        if self._is_done:
+            self.info_label.setStyleSheet(f"""
+                CaptionLabel#infoLabel {{
+                    color: {c['done']};
+                    font-size: {FontSize.SMALL}px;
+                }}
+            """)
+        else:
+            self.info_label.setStyleSheet(f"""
+                CaptionLabel#infoLabel {{
+                    color: {c['info']};
+                    font-size: {FontSize.SMALL}px;
+                }}
+            """)
+
+    def _apply_desc_style(self):
+        c = theme_colors()
+        if self._is_done:
+            self.desc_label.setStyleSheet(f"""
+                CaptionLabel#descLabel {{
+                    color: {c['done']};
+                    font-size: {FontSize.SMALL}px;
+                }}
+            """)
+        else:
+            self.desc_label.setStyleSheet(f"""
+                CaptionLabel#descLabel {{
+                    color: {c['muted']};
+                    font-size: {FontSize.SMALL}px;
+                }}
+            """)
+
+    def _apply_styles(self):
+        c = theme_colors()
+        self.setStyleSheet(f"""
+            CardWidget {{
+                border: none;
+                border-radius: 8px;
+                background-color: transparent;
+            }}
+            CardWidget:hover {{
+                background-color: {c['hover_bg']};
+            }}
+            {tooltip_style()}
+        """)
+
+    def update_data(self, todo_data: dict):
+        """更新卡片数据"""
+        self.todo_data = todo_data
+        self.todo_id = todo_data["id"]
+        self._is_done = todo_data.get("_is_done", False)
+        self._is_archived = todo_data.get("_is_archived", False)
+
+        self.checkbox.blockSignals(True)
+        self.checkbox.setChecked(self._is_done)
+        self.checkbox.blockSignals(False)
+        self.checkbox.setEnabled(not todo_data.get("_is_archived", False))
+
+        self.title_label.setText(todo_data["title"])
+        self._apply_title_style()
+        self._update_bar_color()
+
+        # 描述
+        desc = todo_data.get("description", "")
+        if desc:
+            if hasattr(self, "desc_label"):
+                self.desc_label.setText(desc)
+                self.desc_label.setVisible(True)
+                self._apply_desc_style()
+            else:
+                self.desc_label = CaptionLabel(desc)
+                self.desc_label.setObjectName("descLabel")
+                self.desc_label.setWordWrap(True)
+                self.desc_label.setMaximumHeight(36)
+                self._apply_desc_style()
+                # 插入到 info_label 之前，保持布局顺序：标题 → 描述 → 信息
+                if hasattr(self, "info_label"):
+                    idx = self.content_layout.indexOf(self.info_label)
+                    self.content_layout.insertWidget(idx, self.desc_label)
+                else:
+                    self.content_layout.addWidget(self.desc_label)
+        elif hasattr(self, "desc_label"):
+            self.desc_label.setVisible(False)
+
+        # 重建信息行
+        self._rebuild_info_label()
+
+        # 归档按钮可见性
+        if self._readonly:
+            self.archive_btn.setVisible(self._is_done)
+        else:
+            self.archive_btn.setVisible(self._is_done)
+
+        # 已完成或已归档时隐藏新建子任务按钮
+        self.add_subtask_btn.setVisible(not self._is_done and not self._is_archived)
+        # 已完成时隐藏编辑按钮
+        if not self._readonly:
+            self.edit_btn.setVisible(not self._is_done)
+
+        self._apply_styles()
+
+    def _rebuild_info_label(self):
+        """重建信息行内容"""
+        info_parts = self._build_info_parts()
+
         if info_parts:
             if hasattr(self, "info_label"):
                 self.info_label.setText("  |  ".join(info_parts))
@@ -602,12 +488,13 @@ class TodoCard(CardWidget):
     def set_selected(self, selected: bool):
         self._is_selected = selected
         if selected:
-            self.setStyleSheet("""
-                CardWidget {
-                    border: 2px solid #0078D4;
+            accent = accent_color()
+            self.setStyleSheet(f"""
+                CardWidget {{
+                    border: 2px solid {accent};
                     border-radius: 8px;
-                    background-color: rgba(0, 120, 212, 0.05);
-                }
+                    background-color: {palette().HOVER_BG_SOFT};
+                }}
             """)
         else:
             self._apply_styles()

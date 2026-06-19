@@ -1691,10 +1691,11 @@ class MainWindow(FluentWindow):
                 return item[0]
         return None
 
-    def _calc_popup_position(self) -> tuple[int, int] | None:
+    def _calc_popup_position(self, popup_w: int = 900, popup_h: int = 720) -> tuple[int, int] | None:
         """计算双栏模式任务详情弹窗的位置:紧贴主窗口右侧 10px,垂直居中。
 
         若右侧放不下,回退到主窗口左侧;再放不下则夹回当前屏幕工作区。
+        位置预算基于传入的 popup_w/popup_h,需与 webview 实际尺寸一致(否则贴边/避让会算偏)。
         """
         try:
             from PySide6.QtWidgets import QApplication
@@ -1706,7 +1707,6 @@ class MainWindow(FluentWindow):
             if screen is None:
                 return None
             screen_geo = screen.availableGeometry()
-            popup_w, popup_h = 900, 720
             # 优先:主窗口右侧 10px
             x = main_geo.right() + 10
             y = main_geo.top() + (main_geo.height() - popup_h) // 2
@@ -1723,6 +1723,26 @@ class MainWindow(FluentWindow):
         except Exception:
             return None
 
+    def _load_webview_popup_size(self) -> tuple[int, int]:
+        """读取 webview 子进程持久化的弹窗尺寸(默认 900x720)。
+
+        用于在主进程侧把位置预算与 webview 真实尺寸对齐,避免贴边/避让算偏。
+        文件路径与 webview_runner.py 里的 _WEBVIEW_SIZE_PATH 保持一致。
+        """
+        from config.constants import APP_ID
+        from pathlib import Path
+        size_file = Path.home() / f".{APP_ID}" / "webview_size.json"
+        try:
+            if size_file.exists():
+                data = json.loads(size_file.read_text(encoding="utf-8"))
+                w = int(data.get("width", 900))
+                h = int(data.get("height", 720))
+                if w >= 400 and h >= 300:
+                    return (w, h)
+        except Exception:
+            pass
+        return (900, 720)
+
     def _on_card_clicked(self, todo_id: int):
         """父任务卡片点击 - 弹出详情对话框"""
         todo = self.todo_service.get_by_id(todo_id)
@@ -1735,7 +1755,9 @@ class MainWindow(FluentWindow):
             if settings.dialog_mode == "widescreen":
                 # 双栏模式:用 pywebview 子进程渲染只读预览
                 # webview 窗口在独立子进程中,关闭不影响主程序
-                popup_pos = self._calc_popup_position()
+                # 位置预算要用真实弹窗尺寸(支持用户上次手动调整的尺寸持久化)
+                saved_w, saved_h = self._load_webview_popup_size()
+                popup_pos = self._calc_popup_position(saved_w, saved_h)
                 preview = TodoDetailWebView(node, todo_id=node["id"], popup_pos=popup_pos)
                 preview.show()
                 return

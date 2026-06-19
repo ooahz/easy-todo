@@ -18,6 +18,7 @@ from qfluentwidgets import (
 
 from config.constants import PRIORITY_MAP, PRIORITY_NONE, TODO_COLORS, RECURRENCE_TYPES, WEEKDAY_LABELS, TASK_TYPE_MAP, parse_recurrence_day
 from config.settings import settings
+from config.theme_config import FontSize, accent_color, is_dark, palette, theme_colors
 from services.category_service import CategoryService
 from services.file_service import FileService
 from services.holiday_service import holiday_service
@@ -160,9 +161,15 @@ class TodoDialog(QDialog):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        dark = isDarkTheme()
-        bg_color = QColor(43, 43, 43) if dark else QColor(249, 249, 249)
-        border_color = QColor(60, 60, 60) if dark else QColor(210, 210, 210)
+        c = palette()
+        if is_dark():
+            bg_rgb = c.CARD_BG
+            border_rgb = "#3C3C3C"
+        else:
+            bg_rgb = c.BG
+            border_rgb = "#D2D2D2"
+        bg_color = QColor(bg_rgb)
+        border_color = QColor(border_rgb)
         path = QPainterPath()
         path.addRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 10, 10)
         painter.fillPath(path, bg_color)
@@ -362,11 +369,10 @@ class TodoDialog(QDialog):
                 pass
         due_container_layout.addWidget(self.due_picker)
 
-        dark = isDarkTheme()
-        btn_bg = "rgba(255,255,255,1)" if dark else "rgba(0,0,0,0.04)"
-        btn_hover = "rgba(255,255,255,0.5)" if dark else "rgba(0,0,0,0.08)"
-        btn_border = "#555" if dark else "#ccc"
-        icon_color = "#aaa" if dark else "#888"
+        btn_bg = palette().CARD_BG
+        btn_hover = palette().HOVER_BG_STRONG
+        btn_border = palette().CODE_BG if is_dark() else "#ccc"
+        icon_color = "#aaa" if is_dark() else palette().MUTED_LIGHT
 
         self._clear_due_btn = TransparentToolButton(FluentIcon.CLOSE)
         self._clear_due_btn.setFixedSize(30, 30)
@@ -452,8 +458,8 @@ class TodoDialog(QDialog):
             btn = QPushButton()
             btn.setFixedSize(24, 24)
             btn.setCheckable(True)
-            checked_border = "border: 2px solid #AAA;" if dark else "border: 2px solid #333;"
-            hover_border = "border: 2px solid #888;" if dark else "border: 2px solid #666;"
+            checked_border = f"border: 2px solid {palette().MUTED_LIGHT};" if is_dark() else "border: 2px solid #333;"
+            hover_border = f"border: 2px solid {palette().MUTED};" if is_dark() else "border: 2px solid #666;"
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {color};
@@ -476,12 +482,12 @@ class TodoDialog(QDialog):
         self.drop_area = QLabel("📎 点击选择 或拖拽文件到此")
         self.drop_area.setFixedHeight(36)
         self.drop_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.drop_area.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #888;
+        self.drop_area.setStyleSheet(f"""
+            QLabel {{
+                border: 2px dashed {palette().MUTED_LIGHT};
                 border-radius: 6px;
-                color: #888;
-            }
+                color: {palette().MUTED_LIGHT};
+            }}
         """)
         self.drop_area.setCursor(Qt.PointingHandCursor)
         self.drop_area.mousePressEvent = lambda e: self._on_select_file()
@@ -650,7 +656,7 @@ class TodoDialog(QDialog):
         layout.addWidget(self.drop_area)
 
     def _layout_meta_widescreen(self, layout):
-        lbl_style = "color: #888; font-size: 11px; font-weight: bold;"
+        lbl_style = f"color: {palette().MUTED_LIGHT}; font-size: {FontSize.CAPTION}px; font-weight: bold;"
 
         priority_label = CaptionLabel("优先级")
         priority_label.setStyleSheet(lbl_style)
@@ -676,7 +682,7 @@ class TodoDialog(QDialog):
 
         sep1 = QFrame()
         sep1.setFixedHeight(1)
-        sep1.setStyleSheet(f"background-color: {'#444' if isDarkTheme() else '#DDD'};")
+        sep1.setStyleSheet(f"background-color: {palette().DIVIDER};")
         due_section_layout.addWidget(sep1)
 
         layout.addWidget(self._due_section)
@@ -758,7 +764,7 @@ class TodoDialog(QDialog):
 
         sep3 = QFrame()
         sep3.setFixedHeight(1)
-        sep3.setStyleSheet(f"background-color: {'#444' if isDarkTheme() else '#DDD'};")
+        sep3.setStyleSheet(f"background-color: {palette().DIVIDER};")
         layout.addWidget(sep3)
 
         layout.addWidget(self.drop_area)
@@ -793,8 +799,22 @@ class TodoDialog(QDialog):
         if hasattr(self, 'desc_edit') and self._pid is None:
             self.desc_edit.textChanged.connect(self._on_desc_changed)
             self.desc_edit.imagePasted.connect(self._on_image_pasted)
-            # 预览能找到粘贴的图片
-            self.desc_edit.setSearchPaths([str(self._pending_paste_dir)])
+            # 预览能找到图片：暂存区（新粘贴的）+ task 文件夹（已保存的）
+            self._update_editor_search_paths()
+
+    def _update_editor_search_paths(self):
+        """更新 MarkdownEditor 的图片搜索路径 """
+        if not hasattr(self, 'desc_edit'):
+            return
+        paths = [str(self._pending_paste_dir)]
+        if self._is_edit and self.todo_data and self.todo_data.get("id"):
+            try:
+                task_folder = self._file_service._get_task_folder(self.todo_data["id"])
+                if str(task_folder) not in paths:
+                    paths.append(str(task_folder))
+            except Exception:
+                pass
+        self.desc_edit.setSearchPaths(paths)
 
     def _on_desc_changed(self):
         text = self.desc_edit.toPlainText()
@@ -870,52 +890,32 @@ class TodoDialog(QDialog):
 
     def _apply_weekday_btn_style(self):
         """应用星期按钮样式"""
-        dark = isDarkTheme()
+        c = theme_colors()
+        btn_color = c['body']
+        bg = c['card_hover']
+        border = c['divider']
         for btn in self.weekday_btns.values():
-            if dark:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #3C3C3C;
-                        color: #CCC;
-                        border: 1px solid #555;
-                        border-radius: 13px;
-                        font-size: 12px;
-                        font-weight: bold;
-                    }
-                    QPushButton:checked {
-                        background-color: #0078D4;
-                        color: #FFF;
-                        border: 1px solid #0078D4;
-                    }
-                    QPushButton:hover {
-                        border: 1px solid #888;
-                    }
-                    QPushButton:checked:hover {
-                        border: 1px solid #006CBD;
-                    }
-                """)
-            else:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #F5F5F5;
-                        color: #666;
-                        border: 1px solid #DDD;
-                        border-radius: 13px;
-                        font-size: 12px;
-                        font-weight: bold;
-                    }
-                    QPushButton:checked {
-                        background-color: #0078D4;
-                        color: #FFF;
-                        border: 1px solid #0078D4;
-                    }
-                    QPushButton:hover {
-                        border: 1px solid #BBB;
-                    }
-                    QPushButton:checked:hover {
-                        border: 1px solid #006CBD;
-                    }
-                """)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {bg};
+                    color: {btn_color};
+                    border: 1px solid {border};
+                    border-radius: 13px;
+                    font-size: {FontSize.SMALL}px;
+                    font-weight: bold;
+                }}
+                QPushButton:checked {{
+                    background-color: {c['accent']};
+                    color: #FFF;
+                    border: 1px solid {c['accent']};
+                }}
+                QPushButton:hover {{
+                    border: 1px solid {c['muted']};
+                }}
+                QPushButton:checked:hover {{
+                    border: 1px solid {c['accent']};
+                }}
+            """)
 
     def _on_color_clicked(self, color: str, btn: QPushButton):
         if self._selected_color == color:
@@ -1167,7 +1167,7 @@ class TodoDialog(QDialog):
         title = self.title_edit.text().strip()
         if not title:
             self.title_edit.setStyleSheet(
-                "LineEdit { border: 2px solid #D13438; border-radius: 6px; }"
+                f"LineEdit {{ border: 2px solid {palette().DANGER}; border-radius: 6px; }}"
             )
             return
 
@@ -1390,33 +1390,34 @@ class TodoDialog(QDialog):
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls() and hasattr(self, 'drop_area'):
             event.acceptProposedAction()
-            self.drop_area.setStyleSheet("""
-                QLabel {
-                    border: 2px dashed #0078D4;
+            accent = accent_color()
+            self.drop_area.setStyleSheet(f"""
+                QLabel {{
+                    border: 2px dashed {accent};
                     border-radius: 6px;
-                    color: #0078D4;
-                    background-color: rgba(0, 120, 212, 0.1);
-                }
+                    color: {accent};
+                    background-color: {palette().DROP_BG};
+                }}
             """)
 
     def dragLeaveEvent(self, event):
         if hasattr(self, 'drop_area'):
-            self.drop_area.setStyleSheet("""
-                QLabel {
-                    border: 2px dashed #888;
+            self.drop_area.setStyleSheet(f"""
+                QLabel {{
+                    border: 2px dashed {palette().MUTED_LIGHT};
                     border-radius: 6px;
-                    color: #888;
-                }
+                    color: {palette().MUTED_LIGHT};
+                }}
             """)
 
     def dropEvent(self, event):
         if hasattr(self, 'drop_area'):
-            self.drop_area.setStyleSheet("""
-                QLabel {
-                    border: 2px dashed #888;
+            self.drop_area.setStyleSheet(f"""
+                QLabel {{
+                    border: 2px dashed {palette().MUTED_LIGHT};
                     border-radius: 6px;
-                    color: #888;
-                }
+                    color: {palette().MUTED_LIGHT};
+                }}
             """)
             urls = event.mimeData().urls()
             for url in urls:
@@ -1439,20 +1440,20 @@ class TodoDialog(QDialog):
         if hasattr(self, 'weekday_btns'):
             self._apply_weekday_btn_style()
 
-        dark = isDarkTheme()
-        if dark:
-            base_style = """
-                QDialog {
+        c = palette()
+        if is_dark():
+            base_style = f"""
+                QDialog {{
                     background-color: transparent;
-                }
-                SubtitleLabel { color: #EEE; }
-                QLabel { color: #DDD; }
-                LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
-                TextEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
-                QTextEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
-                QTextBrowser { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
-                CheckBox { color: #DDD; }
-                CompactSpinBox { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+                }}
+                SubtitleLabel {{ color: {c.TITLE}; }}
+                QLabel {{ color: {c.BODY_LIGHT}; }}
+                LineEdit {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
+                TextEdit {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
+                QTextEdit {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
+                QTextBrowser {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
+                CheckBox {{ color: {c.BODY_LIGHT}; }}
+                CompactSpinBox {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
             """
             if self._is_widescreen:
                 base_style += """
@@ -1464,18 +1465,18 @@ class TodoDialog(QDialog):
                 """
             self.setStyleSheet(base_style)
         else:
-            base_style = """
-                QDialog {
+            base_style = f"""
+                QDialog {{
                     background-color: transparent;
-                }
-                SubtitleLabel { color: #111; }
-                QLabel { color: #333; }
-                LineEdit { background-color: #FFF; color: #333; }
-                TextEdit { background-color: #FFF; color: #333; }
-                QTextEdit { background-color: #FFF; color: #333; border: 1px solid #DDD; border-radius: 6px; }
-                QTextBrowser { background-color: #FFF; color: #333; border: 1px solid #DDD; border-radius: 6px; }
-                CheckBox { color: #333; }
-                CompactSpinBox { background-color: #FFF; color: #333; }
+                }}
+                SubtitleLabel {{ color: #111; }}
+                QLabel {{ color: {c.BODY_LIGHT}; }}
+                LineEdit {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; }}
+                TextEdit {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; }}
+                QTextEdit {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; border: 1px solid {c.DIVIDER}; border-radius: 6px; }}
+                QTextBrowser {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; border: 1px solid {c.DIVIDER}; border-radius: 6px; }}
+                CheckBox {{ color: {c.BODY_LIGHT}; }}
+                CompactSpinBox {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; }}
             """
             if self._is_widescreen:
                 base_style += """

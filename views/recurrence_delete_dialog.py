@@ -6,35 +6,11 @@ from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QButtonGroup
 
 from qfluentwidgets import (
     MessageBoxBase, SubtitleLabel, BodyLabel, CaptionLabel,
-    RadioButton, CheckBox, IconWidget, FluentIcon, isDarkTheme,
+    RadioButton, CheckBox, IconWidget, FluentIcon,
     CardWidget,
 )
 
-
-def _colors():
-    if isDarkTheme():
-        return {
-            "option_bg": "#2D2D2D",
-            "option_selected_bg": "rgba(96, 205, 255, 0.08)",
-            "option_selected_border": "rgba(96, 205, 255, 0.3)",
-            "border": "rgba(255, 255, 255, 0.06)",
-            "muted": "#999",
-            "body": "#BBB",
-            "accent": "#60CDFF",
-            "danger": "#FF6B6B",
-            "warning": "#FFB347",
-        }
-    return {
-        "option_bg": "#FFFFFF",
-        "option_selected_bg": "rgba(0, 120, 212, 0.05)",
-        "option_selected_border": "rgba(0, 120, 212, 0.3)",
-        "border": "rgba(0, 0, 0, 0.06)",
-        "muted": "#999",
-        "body": "#555",
-        "accent": "#0078D4",
-        "danger": "#D13438",
-        "warning": "#FF8C00",
-    }
+from config.theme_config import FontSize, theme_colors
 
 
 class _OptionCard(CardWidget):
@@ -46,7 +22,7 @@ class _OptionCard(CardWidget):
         self._selected = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(64)
-        c = _colors()
+        c = theme_colors()
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
@@ -62,11 +38,11 @@ class _OptionCard(CardWidget):
         text_layout.setSpacing(1)
 
         title_label = BodyLabel(title)
-        title_label.setStyleSheet(f"color: {c['body']}; font-size: 13px; font-weight: 500;")
+        title_label.setStyleSheet(f"color: {c['body']}; font-size: {FontSize.BODY}px; font-weight: 500;")
         text_layout.addWidget(title_label)
 
         desc_label = CaptionLabel(desc)
-        desc_label.setStyleSheet(f"color: {c['muted']}; font-size: 11px;")
+        desc_label.setStyleSheet(f"color: {c['muted']}; font-size: {FontSize.CAPTION}px;")
         desc_label.setWordWrap(True)
         text_layout.addWidget(desc_label)
 
@@ -129,7 +105,7 @@ class RecurrenceDeleteDialog(MessageBoxBase):
         self.viewLayout.addWidget(hint)
 
         self._btn_group = QButtonGroup(self)
-        c = _colors()
+        c = theme_colors()
 
         options = [
             ("this", FluentIcon.CALENDAR, "仅删除此次",

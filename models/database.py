@@ -2,7 +2,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from config.constants import APP_ID
@@ -69,6 +69,13 @@ class Database:
         from models.recurrence_completion import RecurrenceCompletion  # noqa: F401
 
         Base.metadata.create_all(self.engine)
+
+        # 通过 VersionService 检查是否需要执行迁移
+        from services.version_service import VersionService
+        version_svc = VersionService(self.engine)
+        if not version_svc.needs_migration():
+            return
+
         self._migrate_add_category_id()
         self._migrate_add_pid()
         self._migrate_add_recurrence()
@@ -82,6 +89,9 @@ class Database:
         self._init_default_categories()
         self._migrate_add_indexes()
         self._migrate_cleanup_datetime_columns()
+
+        # 迁移完成后记录版本号
+        version_svc.mark_migrated()
 
     def _migrate_add_category_id(self):
         """迁移：为 todos 表添加 category_id 列"""

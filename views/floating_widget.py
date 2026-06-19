@@ -3,13 +3,14 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup, QParallelAnimationGroup, QSize, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGraphicsOpacityEffect,
-    QApplication, QGraphicsScale,
+    QApplication, QGraphicsScale, QSizePolicy,
 )
 from PySide6.QtGui import QMouseEvent, QCursor, QIcon, QPainter, QPixmap, QVector3D
 
 from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit, FluentIcon, TransparentToolButton, PipsPager, PipsScrollButtonDisplayMode
 
 from config.settings import settings
+from config.theme_config import FontSize, palette, theme_colors, bg_rgba
 from views.quadrant_floating_widget import QuadrantFloatingWidget
 
 
@@ -93,17 +94,17 @@ class FloatingWidget(QWidget):
         title_layout.setContentsMargins(1, 0, 1, 0)
 
         self.title_label = BodyLabel("任务列表")
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 13px; border: none;")
+        self.title_label.setStyleSheet(f"font-weight: bold; font-size: {FontSize.BODY}px; border: none;")
         title_layout.addWidget(self.title_label)
 
         self.count_label = BodyLabel("")
-        self.count_label.setStyleSheet("font-size: 12px; border: none;")
+        self.count_label.setStyleSheet(f"font-size: {FontSize.SMALL}px; border: none;")
         self.count_label.setCursor(Qt.PointingHandCursor)
         title_layout.addWidget(self.count_label)
 
         self.collapse_indicator = QLabel("▾")
         self.collapse_indicator.setFixedWidth(12)
-        self.collapse_indicator.setStyleSheet("font-size: 11px; border: none;")
+        self.collapse_indicator.setStyleSheet(f"font-size: {FontSize.CAPTION}px; border: none;")
         self.collapse_indicator.setCursor(Qt.PointingHandCursor)
         title_layout.addWidget(self.collapse_indicator)
 
@@ -230,7 +231,7 @@ class FloatingWidget(QWidget):
         overlay_layout.setContentsMargins(12, 10, 12, 10)
         overlay_layout.setSpacing(8)
         overlay_title = BodyLabel("添加")
-        overlay_title.setStyleSheet("font-weight: bold; font-size: 13px; border: none;")
+        overlay_title.setStyleSheet(f"font-weight: bold; font-size: {FontSize.BODY}px; border: none;")
         overlay_layout.addWidget(overlay_title)
         self.quick_input = LineEdit()
         self.quick_input.setPlaceholderText("输入任务标题...")
@@ -258,11 +259,8 @@ class FloatingWidget(QWidget):
 
     def _update_bg_opacity(self):
         """根据透明度更新背景色"""
-        c = self._theme_colors()
-        if isDarkTheme():
-            r, g, b = 45, 45, 45
-        else:
-            r, g, b = 255, 255, 255
+        c = theme_colors()
+        r, g, b, _ = bg_rgba(255)
         alpha = int(self._opacity * 255)
         self.bg_frame.setStyleSheet(f"""
             #floatingBg {{
@@ -273,11 +271,8 @@ class FloatingWidget(QWidget):
         """)
 
     def _apply_theme(self):
-        c = self._theme_colors()
-        if isDarkTheme():
-            r, g, b = 45, 45, 45
-        else:
-            r, g, b = 255, 255, 255
+        c = theme_colors()
+        r, g, b, _ = bg_rgba(255)
         alpha = int(self._opacity * 255)
         self.bg_frame.setStyleSheet(f"""
             #floatingBg {{
@@ -288,24 +283,24 @@ class FloatingWidget(QWidget):
         """)
         title_color = f"color: {c['title']};" if c['title'] else ""
         self.title_label.setStyleSheet(
-            f"font-weight: bold; font-size: 13px; {title_color} border: none;"
+            f"font-weight: bold; font-size: {FontSize.BODY}px; {title_color} border: none;"
         )
         self.count_label.setStyleSheet(
-            f"font-size: 12px; color: {c.get('close', '#999')}; border: none;"
+            f"font-size: {FontSize.SMALL}px; color: {c.get('close', '#999')}; border: none;"
         )
         self.collapse_indicator.setStyleSheet(
-            f"font-size: 11px; color: {c.get('close', '#999')}; border: none;"
+            f"font-size: {FontSize.CAPTION}px; color: {c.get('close', '#999')}; border: none;"
         )
         self.sep.setStyleSheet(f"background-color: {c['sep']}; border: none;")
         # 快速新建弹窗样式
         if isDarkTheme():
-            overlay_bg = "rgba(43, 43, 43, 240)"
-            input_bg = "rgb(59, 59, 59)"
-            input_border = "rgb(80, 80, 80)"
+            overlay_bg = palette().OVERLAY_BG
+            input_bg = palette().INPUT_BG
+            input_border = palette().INPUT_BORDER
             input_color = "#EEE"
             btn_color = "#0078D4"
         else:
-            overlay_bg = "rgba(255, 255, 255, 245)"
+            overlay_bg = palette().OVERLAY_BG
             input_bg = "#FFF"
             input_border = "rgb(200, 200, 200)"
             input_color = "#333"
@@ -323,36 +318,12 @@ class FloatingWidget(QWidget):
                 border-radius: 6px;
             }}
         """)
-        self.quick_cancel.setStyleSheet(f"color: #888; font-size: 13px; border: none;")
-        self.quick_confirm.setStyleSheet(f"color: {btn_color}; font-size: 13px; font-weight: bold; border: none;")
+        self.quick_cancel.setStyleSheet(f"color: #888; font-size: {FontSize.BODY}px; border: none;")
+        self.quick_confirm.setStyleSheet(f"color: {btn_color}; font-size: {FontSize.BODY}px; font-weight: bold; border: none;")
 
     @staticmethod
     def _theme_colors():
-        if isDarkTheme():
-            return {
-                "bg": "rgba(45, 45, 45, 245)",
-                "border": "rgba(255, 255, 255, 0.08)",
-                "title": "#EEE",
-                "close": "#888",
-                "close_hover": "#FFF",
-                "close_hover_bg": "rgba(255,255,255,0.1)",
-                "sep": "rgba(255,255,255,0.06)",
-                "empty": "#888",
-                "done_text": "#666",
-                "row_hover": "rgba(255,255,255,0.06)",
-            }
-        return {
-            "bg": "rgba(255, 255, 255, 245)",
-            "border": "rgba(0, 0, 0, 0.08)",
-            "title": "",
-            "close": "#999",
-            "close_hover": "#333",
-            "close_hover_bg": "rgba(0,0,0,0.06)",
-            "sep": "rgba(0,0,0,0.06)",
-            "empty": "#999",
-            "done_text": "#999",
-            "row_hover": "rgba(0,0,0,0.04)",
-        }
+        return theme_colors()
 
     def set_opacity(self, value: float):
         self._opacity = max(0.1, min(1.0, value))
@@ -432,10 +403,10 @@ class FloatingWidget(QWidget):
     def _apply_list_collapse(self):
         """根据收起状态显示/隐藏列表区域，并调整窗口大小"""
         collapsed = self._list_collapsed
-        c = self._theme_colors()
+        c = theme_colors()
         self.collapse_indicator.setText("▸" if collapsed else "▾")
         self.collapse_indicator.setStyleSheet(
-            f"font-size: 11px; color: {c.get('close', '#999')}; border: none;"
+            f"font-size: {FontSize.CAPTION}px; color: {c.get('close', '#999')}; border: none;"
         )
         self.scroll.setVisible(not collapsed and self._mode == "list")
         self.quadrant_widget.setVisible(not collapsed and self._mode == "quadrant")
@@ -619,7 +590,7 @@ class FloatingWidget(QWidget):
         has_due = settings.floating_show_due_date and due and not is_done
 
         row = QFrame()
-        row.setFixedHeight(42 if (has_due and not is_child) else (36 if has_due else (26 if is_child else 30)))
+        row.setFixedHeight(30)
         row.setCursor(Qt.PointingHandCursor)
 
         color_tag = todo.get("color_tag")
@@ -663,12 +634,23 @@ class FloatingWidget(QWidget):
             h_layout.setContentsMargins(20, 2, 6, 2)
         else:
             h_layout.setContentsMargins(8, 2, 6, 2)
-        h_layout.setSpacing(0)
+        h_layout.setSpacing(6)
 
         title = todo.get("title", "")
         font_size = "13px" if is_child else "15px"
 
+        title_label = QLabel(title)
+        title_label.setToolTip(title)
+        title_label.setWordWrap(False)
+        title_label.setStyleSheet(f"font-size: {font_size}; {text_style} border: none; background: transparent;")
+        # 使用 Ignored 策略：忽略 minimumSizeHint，允许标题收缩，
+        # 确保截止日期始终保持在右侧
+        title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        h_layout.addWidget(title_label, 1)
+
         if has_due:
+            due_text = ""
+            due_color = c['title']
             try:
                 from datetime import date as pydate
                 due_date = pydate.fromisoformat(due)
@@ -678,25 +660,18 @@ class FloatingWidget(QWidget):
                     due_color = settings.warning_color
                 elif due_date == today:
                     due_text = "今天"
-                    due_color = c['title']
                 else:
                     due_text = due
-                    due_color = c['title']
-                display = (
-                    f'<span style="font-size:{font_size};{text_style}">{title}</span>'
-                    f'<br><span style="font-size:11px;color:{due_color};float:right;margin-top:2px">{due_text}</span>'
-                )
             except:
-                display = f'<span style="font-size:{font_size};{text_style}">{title}</span>'
-        else:
-            display = f'<span style="font-size:{font_size};{text_style}">{title}</span>'
+                pass
 
-        content_label = QLabel(display)
-        content_label.setToolTip(title)
-        content_label.setWordWrap(True)
-        content_label.setTextFormat(Qt.RichText)
-        content_label.setStyleSheet("border: none; background: transparent;")
-        h_layout.addWidget(content_label, 1)
+            if due_text:
+                due_label = QLabel(due_text)
+                due_label.setToolTip(due)
+                due_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+                due_label.setStyleSheet(f"font-size: {FontSize.CAPTION}px; color: {due_color}; border: none; background: transparent;")
+                due_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+                h_layout.addWidget(due_label, 0)
 
         todo_id = todo["id"]
         row.mousePressEvent = lambda e, tid=todo_id: self._on_row_clicked(e, tid)

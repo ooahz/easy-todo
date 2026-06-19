@@ -14,9 +14,84 @@ html, body {
     -webkit-user-select: text; user-select: text;
 }
 
+/* ---- 自定义滚动条 ---- */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: rgba(128, 128, 128, 0.3);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(128, 128, 128, 0.5);
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
 .page {
     margin: 0 auto;
     padding: 20px 24px 40px;
+}
+
+/* ---- 头部区域 ---- */
+.header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--divider);
+}
+
+.color-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.title {
+    font-size: 22px;
+    font-weight: bold;
+    color: var(--title);
+    margin: 0;
+    flex: 1;
+    word-break: break-word;
+}
+
+.title.done {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+.status-tag {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background-color: var(--tag-bg);
+    color: var(--body);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.status-tag.done {
+    background-color: var(--done-green);
+    color: white;
+}
+
+.status-tag.archived {
+    background-color: var(--muted);
+    color: white;
 }
 
 /* ---- 信息条 ---- */
@@ -246,8 +321,5 @@ html, body {
 
 .markdown-body th { background-color: var(--code-bg); }
 
-.markdown-body img {
-    max-width: 100%;
-    max-height: 480px;
-    border-radius: 4px;
-}
+.markdown-body img { max-width: 100%; max-height: 480px; border-radius: 4px; cursor: zoom-in; transition: opacity 0.15s, box-shadow 0.15s; }
+.markdown-body img:hover { opacity: 0.9; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }

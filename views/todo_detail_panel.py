@@ -18,66 +18,15 @@ from qfluentwidgets import (
 
 from config.constants import PRIORITY_MAP, STATUS_MAP
 from config.settings import settings
+from config.theme_config import FontSize, palette, theme_colors
 from services.file_service import FileService
-
-
-def _tc():
-    if isDarkTheme():
-        return {
-            "bg": "#1F1F1F",
-            "card_bg": "#2D2D2D",
-            "card_hover": "#333333",
-            "border": "rgba(255, 255, 255, 0.08)",
-            "title": "#EEE",
-            "subtitle": "#CCC",
-            "body": "#BBB",
-            "muted": "#888",
-            "icon": "rgba(255, 255, 255, 0.45)",
-            "accent": "#60CDFF",
-            "divider": "rgba(255, 255, 255, 0.06)",
-            "tag_bg": "rgba(255, 255, 255, 0.06)",
-            "priority_urgent_important": "#FF6B6B",
-            "priority_important": "#FFB347",
-            "priority_urgent": "#60CDFF",
-            "priority_minor": "#8764B8",
-            "overdue": "#FF6B6B",
-            "done_green": "#6BCB77",
-            "code_bg": "#3A3A3A",
-            "code_border": "#555",
-            "link_color": "#60CDFF",
-            "blockquote_color": "#AAA",
-        }
-    return {
-        "bg": "#FAFAFA",
-        "card_bg": "#FFFFFF",
-        "card_hover": "#F5F5F5",
-        "border": "rgba(0, 0, 0, 0.06)",
-        "title": "#1A1A1A",
-        "subtitle": "#444",
-        "body": "#555",
-        "muted": "#999",
-        "icon": "rgba(0, 0, 0, 0.35)",
-        "accent": "#0078D4",
-        "divider": "rgba(0, 0, 0, 0.06)",
-        "tag_bg": "rgba(0, 0, 0, 0.04)",
-        "priority_urgent_important": "#D13438",
-        "priority_important": "#0078D4",
-        "priority_urgent": "#CA5010",
-        "priority_minor": "#8764B8",
-        "overdue": "#D13438",
-        "done_green": "#107C10",
-        "code_bg": "#F5F5F5",
-        "code_border": "#DDD",
-        "link_color": "#0078D4",
-        "blockquote_color": "#666",
-    }
 
 
 def _markdown_css(c: dict) -> str:
     return f"""
         body {{
             font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
-            font-size: 14px;
+            font-size: {FontSize.MEDIUM}px;
             line-height: 1.7;
             color: {c['body']};
             background-color: transparent;
@@ -89,10 +38,10 @@ def _markdown_css(c: dict) -> str:
             font-weight: bold;
             color: {c['title']};
         }}
-        h1 {{ font-size: 22px; }}
-        h2 {{ font-size: 18px; }}
-        h3 {{ font-size: 16px; }}
-        h4 {{ font-size: 14px; }}
+        h1 {{ font-size: {FontSize.H1}px; }}
+        h2 {{ font-size: {FontSize.H3}px; }}
+        h3 {{ font-size: {FontSize.LARGE}px; }}
+        h4 {{ font-size: {FontSize.MEDIUM}px; }}
         p {{ margin: 6px 0; }}
         code {{
             background-color: {c['code_bg']};
@@ -100,7 +49,7 @@ def _markdown_css(c: dict) -> str:
             border-radius: 3px;
             padding: 1px 5px;
             font-family: "Cascadia Code", "Consolas", monospace;
-            font-size: 13px;
+            font-size: {FontSize.BODY}px;
         }}
         pre {{
             background-color: {c['code_bg']};
@@ -163,7 +112,7 @@ class InfoRow(QWidget):
         layout.setContentsMargins(0, 6, 0, 6)
         layout.setSpacing(10)
 
-        c = _tc()
+        c = theme_colors()
 
         icon_w = IconWidget(icon)
         icon_w.setFixedSize(14, 14)
@@ -172,19 +121,19 @@ class InfoRow(QWidget):
 
         label_w = CaptionLabel(label)
         label_w.setFixedWidth(56)
-        label_w.setStyleSheet(f"color: {c['muted']}; font-size: 12px;")
+        label_w.setStyleSheet(f"color: {c['muted']}; font-size: {FontSize.SMALL}px;")
         layout.addWidget(label_w)
 
         value_w = BodyLabel(value)
         vc = value_color or c['body']
-        value_w.setStyleSheet(f"color: {vc}; font-size: 12px;")
+        value_w.setStyleSheet(f"color: {vc}; font-size: {FontSize.SMALL}px;")
         value_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         value_w.setWordWrap(True)
         layout.addWidget(value_w, 1)
 
 
 class ClickableImageBrowser(QTextBrowser):
-    """QTextBrowser 扩展：点击图片时发送 imageClicked(file_path)。"""
+    """QTextBrowser 扩展"""
 
     imageClicked = Signal(str)
 
@@ -220,7 +169,6 @@ class ClickableImageBrowser(QTextBrowser):
         """判断光标位置是否命中图片，并返回该图片的本地路径。"""
         if cursor is None:
             return None
-        # charFormat() 拿当前字符格式（图片以 inline char 形式存在）
         fmt = cursor.charFormat()
         if not fmt.isImageFormat():
             return None
@@ -238,7 +186,6 @@ class ClickableImageBrowser(QTextBrowser):
             if local:
                 self.imageClicked.emit(local)
                 return
-        # 非 file 协议，交给 QTextBrowser 默认行为
         self.setSource(QUrl(anchor))
 
 
@@ -252,7 +199,7 @@ class SubtaskItem(CardWidget):
         self._setup_ui(data)
 
     def _setup_ui(self, data: dict):
-        c = _tc()
+        c = theme_colors()
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(8)
@@ -289,7 +236,7 @@ class FileItem(CardWidget):
         super().__init__(parent)
         self._todo_id = todo_id
         self._file_path = file_info.get("path", "")
-        c = _tc()
+        c = theme_colors()
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(8)
@@ -304,7 +251,7 @@ class FileItem(CardWidget):
         if len(file_name) > 28:
             display_name = file_name[:12] + "..." + file_name[-13:]
         name = BodyLabel(display_name)
-        name.setStyleSheet(f"color: {c['accent']}; font-size: 12px;")
+        name.setStyleSheet(f"color: {c['accent']}; font-size: {FontSize.SMALL}px;")
         name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         if display_name != file_name:
             name.setToolTip(file_name)
@@ -313,7 +260,7 @@ class FileItem(CardWidget):
         size_kb = file_info.get("size", 0) / 1024
         size_text = f"{size_kb:.0f}KB" if size_kb < 1024 else f"{size_kb/1024:.1f}MB"
         size_label = CaptionLabel(size_text)
-        size_label.setStyleSheet(f"color: {c['muted']}; font-size: 11px;")
+        size_label.setStyleSheet(f"color: {c['muted']}; font-size: {FontSize.CAPTION}px;")
         layout.addWidget(size_label)
 
         self.setStyleSheet(f"""
@@ -487,7 +434,7 @@ class TodoDetailDialog(QDialog):
         super().closeEvent(event)
 
     def _setup_content(self):
-        c = _tc()
+        c = theme_colors()
 
         # 主布局
         main_layout = QVBoxLayout(self)
@@ -576,13 +523,13 @@ class TodoDetailDialog(QDialog):
                 self.title_label.setStyleSheet(f"""
                     color: {c['muted']};
                     text-decoration: line-through;
-                    font-size: 18px;
+                    font-size: {FontSize.H3}px;
                     font-weight: bold;
                 """)
             else:
                 self.title_label.setStyleSheet(f"""
                     color: {c['title']};
-                    font-size: 18px;
+                    font-size: {FontSize.H3}px;
                     font-weight: bold;
                 """)
 
@@ -594,7 +541,7 @@ class TodoDetailDialog(QDialog):
                     background-color: rgba(16, 124, 16, 0.12);
                     color: {c['done_green']};
                     border-radius: 10px;
-                    font-size: 11px;
+                    font-size: {FontSize.CAPTION}px;
                     padding: 2px 8px;
                 """)
             else:
@@ -602,7 +549,7 @@ class TodoDetailDialog(QDialog):
                     background-color: {c['tag_bg']};
                     color: {c['accent']};
                     border-radius: 10px;
-                    font-size: 11px;
+                    font-size: {FontSize.CAPTION}px;
                     padding: 2px 8px;
                 """)
             top_bar.addWidget(status_tag)
@@ -610,7 +557,7 @@ class TodoDetailDialog(QDialog):
             self.title_label = TitleLabel("任务详情")
             self.title_label.setStyleSheet(f"""
                 color: {c['title']};
-                font-size: 18px;
+                font-size: {FontSize.H3}px;
                 font-weight: bold;
             """)
 
@@ -695,7 +642,7 @@ class TodoDetailDialog(QDialog):
         self._view_layout.addLayout(self.body_layout, 1)
 
     def _rebuild_content(self):
-        c = _tc()
+        c = theme_colors()
         todo = self._todo_data
         if not todo:
             return
@@ -754,9 +701,9 @@ class TodoDetailDialog(QDialog):
         title_label.setWordWrap(True)
         title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         if is_done:
-            title_label.setStyleSheet(f"color: {c['muted']}; text-decoration: line-through; font-size: 20px; font-weight: bold;")
+            title_label.setStyleSheet(f"color: {c['muted']}; text-decoration: line-through; font-size: {FontSize.H2}px; font-weight: bold;")
         else:
-            title_label.setStyleSheet(f"color: {c['title']}; font-size: 20px; font-weight: bold;")
+            title_label.setStyleSheet(f"color: {c['title']}; font-size: {FontSize.H2}px; font-weight: bold;")
         title_row.addWidget(title_label, 1)
         title_layout.addLayout(title_row)
 
@@ -764,9 +711,9 @@ class TodoDetailDialog(QDialog):
         status_text = STATUS_MAP.get(status, "未知")
         status_tag = QLabel(f"  {status_text}  ")
         if is_done:
-            status_tag.setStyleSheet(f"background-color: rgba(16, 124, 16, 0.12); color: {c['done_green']}; border-radius: 10px; font-size: 11px; padding: 2px 8px;")
+            status_tag.setStyleSheet(f"background-color: rgba(16, 124, 16, 0.12); color: {c['done_green']}; border-radius: 10px; font-size: {FontSize.CAPTION}px; padding: 2px 8px;")
         else:
-            status_tag.setStyleSheet(f"background-color: {c['tag_bg']}; color: {c['accent']}; border-radius: 10px; font-size: 11px; padding: 2px 8px;")
+            status_tag.setStyleSheet(f"background-color: {c['tag_bg']}; color: {c['accent']}; border-radius: 10px; font-size: {FontSize.CAPTION}px; padding: 2px 8px;")
         title_layout.addWidget(status_tag)
 
         layout.addLayout(title_layout)
@@ -800,7 +747,6 @@ class TodoDetailDialog(QDialog):
             desc_body.setMarkdown(desc)
             desc_body.setReadOnly(True)
             desc_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            # 描述里的 ![name](name) 相对于 task_{id}/ 解析（文件最终落点）
             task_folder = self._file_service._get_task_folder(self._current_todo_id)
             desc_body.setSearchPaths([str(task_folder)])
             desc_body.setStyleSheet(f"""
@@ -874,15 +820,22 @@ class TodoDetailDialog(QDialog):
                     border-radius: 8px;
                     padding: 16px 20px;
                     color: {c['body']};
+                    outline: none;
+                }}
+                QTextBrowser:focus {{
+                    border: 1px solid {c['divider']};
                 }}
             """)
+            desc_browser.setObjectName("descBrowser")
+            desc_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            desc_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             self.left_layout.addWidget(desc_browser)
         else:
             empty_hint = QLabel("暂无描述")
             empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_hint.setStyleSheet(f"""
                 color: {c['muted']};
-                font-size: 14px;
+                font-size: {FontSize.MEDIUM}px;
                 background-color: {c['card_bg']};
                 border: 1px solid {c['divider']};
                 border-radius: 8px;
@@ -931,11 +884,11 @@ class TodoDetailDialog(QDialog):
             subtask_header = QHBoxLayout()
             subtask_header.setSpacing(6)
             subtask_title = CaptionLabel("子任务")
-            subtask_title.setStyleSheet(f"color: {c['muted']}; font-size: 11px; font-weight: bold;")
+            subtask_title.setStyleSheet(f"color: {c['muted']}; font-size: {FontSize.CAPTION}px; font-weight: bold;")
             subtask_header.addWidget(subtask_title)
             done_count = sum(1 for ch in children if ch.get("_is_done", False))
             count_label = CaptionLabel(f"{done_count}/{len(children)}")
-            count_label.setStyleSheet(f"color: {c['accent']}; font-size: 11px;")
+            count_label.setStyleSheet(f"color: {c['accent']}; font-size: {FontSize.CAPTION}px;")
             subtask_header.addWidget(count_label)
 
             progress_pct = int(done_count / len(children) * 100) if children else 0
@@ -1000,7 +953,7 @@ class TodoDetailDialog(QDialog):
             elif file_count > 0:
                 view_all_btn = PushButton("打开文件夹")
                 view_all_btn.setFixedHeight(26)
-                view_all_btn.setStyleSheet(f"font-size: 12px; padding: 0 8px; color: {c['accent']}; background-color: {c['card_bg']}; border: 1px solid {c['divider']}; border-radius: 4px;")
+                view_all_btn.setStyleSheet(f"font-size: {FontSize.SMALL}px; padding: 0 8px; color: {c['accent']}; background-color: {c['card_bg']}; border: 1px solid {c['divider']}; border-radius: 4px;")
                 view_all_btn.clicked.connect(lambda: self._open_task_folder())
                 file_layout.addWidget(view_all_btn)
 

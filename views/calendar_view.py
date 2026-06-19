@@ -7,16 +7,17 @@ from services.recurrence_utils import matches_recurrence
 
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
-    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QGraphicsDropShadowEffect, QSizePolicy
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QSizePolicy
 )
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, ToolButton, FluentIcon, isDarkTheme, StrongBodyLabel, IconWidget, SubtitleLabel,
+    BodyLabel, CaptionLabel, ToolButton, FluentIcon, StrongBodyLabel, SubtitleLabel,
     TransparentToolButton
 )
 
 from config.settings import settings
+from config.theme_config import FontSize, palette, theme_colors, tooltip_style, is_dark
 
 
 class WeekView(QWidget):
@@ -33,23 +34,23 @@ class WeekView(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        dark = isDarkTheme()
-        
+        c = palette()
+
         self.setStyleSheet(f"""
             WeekView {{
                 background-color: transparent;
             }}
         """)
-        
+
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(4)
-        
+
         # 导航行
         nav_layout = QHBoxLayout()
         nav_layout.setSpacing(4)
         nav_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # 上一周按钮
         self.prev_week_btn = ToolButton(FluentIcon.LEFT_ARROW)
         self.prev_week_btn.setFixedSize(24, 56)
@@ -57,20 +58,20 @@ class WeekView(QWidget):
         self.prev_week_btn.setToolTip("上一周")
         self.prev_week_btn.clicked.connect(self._prev_week)
         nav_layout.addWidget(self.prev_week_btn)
-        
+
         # 日期显示区域
         self.days_layout = QHBoxLayout()
         self.days_layout.setSpacing(4)
         self.days_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self._day_widgets: list[dict] = []
         for i in range(7):
             day_widget = self._create_day_widget(i)
             self.days_layout.addWidget(day_widget["frame"])
             self._day_widgets.append(day_widget)
-        
+
         nav_layout.addLayout(self.days_layout)
-        
+
         # 下一周按钮
         self.next_week_btn = ToolButton(FluentIcon.RIGHT_ARROW)
         self.next_week_btn.setFixedSize(24, 56)
@@ -78,20 +79,20 @@ class WeekView(QWidget):
         self.next_week_btn.setToolTip("下一周")
         self.next_week_btn.clicked.connect(self._next_week)
         nav_layout.addWidget(self.next_week_btn)
-        
+
         self.main_layout.addLayout(nav_layout)
-        
+
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setStyleSheet(f"""
             QFrame {{
-                background-color: {'rgba(255, 255, 255, 0.08)' if dark else 'rgba(0, 0, 0, 0.06)'};
+                background-color: {c.DIVIDER_FALLBACK};
                 border: none;
                 max-height: 1px;
             }}
         """)
         self.main_layout.addWidget(separator)
-        
+
         self._update_week_display()
 
     def _prev_week(self):
@@ -113,36 +114,32 @@ class WeekView(QWidget):
         self.filter_changed.emit(self._selected_date)
 
     def _create_day_widget(self, index: int) -> dict:
-        dark = isDarkTheme()
-        
+        c = palette()
+
         frame = QFrame()
         frame.setObjectName("dayFrame")
         frame.setCursor(Qt.PointingHandCursor)
         frame.setFixedHeight(56)
         frame.mousePressEvent = lambda e, idx=index: self._on_day_clicked(idx)
-        
+
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(2)
         layout.setAlignment(Qt.AlignCenter)
-        
+
         weekday_label = CaptionLabel()
         weekday_label.setAlignment(Qt.AlignCenter)
-        if dark:
-            color = "#AAA"
-        else:
-            color = "#666"
         weekday_label.setStyleSheet(f"""
-            color: {color};
-            font-size: 10px;
+            color: {c.BLOCKQUOTE};
+            font-size: {FontSize.TINY}px;
         """)
         layout.addWidget(weekday_label)
-        
+
         day_label = BodyLabel()
         day_label.setAlignment(Qt.AlignCenter)
         day_label.setStyleSheet(f"""
-            color: {'#E0E0E0' if dark else '#333'};
-            font-size: 14px;
+            color: {c.BODY_LIGHT};
+            font-size: {FontSize.MEDIUM}px;
             font-weight: 600;
         """)
         layout.addWidget(day_label)
@@ -170,7 +167,7 @@ class WeekView(QWidget):
         self.filter_changed.emit(self._selected_date)
 
     def _update_week_display(self):
-        dark = isDarkTheme()
+        c = theme_colors()
         today = date.today()
 
         weekday = today.weekday()
@@ -189,52 +186,31 @@ class WeekView(QWidget):
             if is_selected:
                 day_widget["frame"].setStyleSheet(f"""
                     QFrame#dayFrame {{
-                        background-color: rgba(0, 120, 212, 0.25);
-                        border: 2px solid #0078D4;
+                        background-color: {c['drop_bg']};
+                        border: 2px solid {c['accent']};
                         border-radius: 8px;
                     }}
                     QFrame#dayFrame:hover {{
-                        background-color: rgba(0, 120, 212, 0.35);
-                    }}
-                """)
-                day_widget["day_label"].setStyleSheet("""
-                    color: #0078D4;
-                    font-size: 14px;
-                    font-weight: bold;
-                """)
-            elif has_pending:
-                if dark:
-                    bg_color = "rgba(255, 152, 0, 0.12)"
-                    border_color = "rgba(255, 152, 0, 0.3)"
-                else:
-                    bg_color = "rgba(255, 152, 0, 0.08)"
-                    border_color = "rgba(255, 152, 0, 0.25)"
-                day_widget["frame"].setStyleSheet(f"""
-                    QFrame#dayFrame {{
-                        background-color: {bg_color};
-                        border: 1px solid {border_color};
-                        border-radius: 8px;
-                    }}
-                    QFrame#dayFrame:hover {{
-                        background-color: {'rgba(255, 152, 0, 0.18)' if dark else 'rgba(255, 152, 0, 0.12)'};
+                        background-color: {c['option_selected_bg']};
                     }}
                 """)
                 day_widget["day_label"].setStyleSheet(f"""
-                    color: {'#FFD54F' if dark else '#F9A825'};
-                    font-size: 14px;
-                    font-weight: 600;
+                    color: {c['accent']};
+                    font-size: {FontSize.MEDIUM}px;
+                    font-weight: bold;
                 """)
-            else:
-                if dark:
-                    bg_color = "rgba(255, 255, 255, 0.03)"
-                    border_color = "rgba(255, 255, 255, 0.06)"
-                    hover_bg = "rgba(255, 255, 255, 0.06)"
-                    color = "#E0E0E0"
+            elif has_pending:
+                # 待办高亮使用警告色，主题感知
+                if is_dark():
+                    bg_color = "rgba(255, 152, 0, 0.12)"
+                    border_color = "rgba(255, 152, 0, 0.3)"
+                    hover_bg = "rgba(255, 152, 0, 0.18)"
+                    day_color = "#FFD54F"
                 else:
-                    bg_color = "rgba(0, 0, 0, 0.02)"
-                    border_color = "rgba(0, 0, 0, 0.04)"
-                    hover_bg = "rgba(0, 0, 0, 0.04)"
-                    color = "#333"
+                    bg_color = "rgba(255, 152, 0, 0.08)"
+                    border_color = "rgba(255, 152, 0, 0.25)"
+                    hover_bg = "rgba(255, 152, 0, 0.12)"
+                    day_color = "#F9A825"
                 day_widget["frame"].setStyleSheet(f"""
                     QFrame#dayFrame {{
                         background-color: {bg_color};
@@ -246,8 +222,24 @@ class WeekView(QWidget):
                     }}
                 """)
                 day_widget["day_label"].setStyleSheet(f"""
-                    color: {color};
-                    font-size: 14px;
+                    color: {day_color};
+                    font-size: {FontSize.MEDIUM}px;
+                    font-weight: 600;
+                """)
+            else:
+                day_widget["frame"].setStyleSheet(f"""
+                    QFrame#dayFrame {{
+                        background-color: {c['cell_bg']};
+                        border: 1px solid {c['cell_border']};
+                        border-radius: 8px;
+                    }}
+                    QFrame#dayFrame:hover {{
+                        background-color: {c['hover']};
+                    }}
+                """)
+                day_widget["day_label"].setStyleSheet(f"""
+                    color: {c['text']};
+                    font-size: {FontSize.MEDIUM}px;
                     font-weight: 600;
                 """)
 
@@ -370,11 +362,11 @@ class CalendarDialog(QDialog):
         self._drag_pos = None
 
     def paintEvent(self, event):
+        c = palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        dark = isDarkTheme()
-        bg_color = QColor(30, 30, 30) if dark else QColor(250, 250, 250)
-        border_color = QColor(60, 60, 60) if dark else QColor(210, 210, 210)
+        bg_color = QColor(c.BG)
+        border_color = QColor(c.INPUT_BORDER) if is_dark() else QColor(210, 210, 210)
         path = QPainterPath()
         path.addRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 10, 10)
         painter.fillPath(path, bg_color)
@@ -389,42 +381,16 @@ class CalendarDialog(QDialog):
         y = screen.y() + (screen.height() - self.height()) // 2
         self.move(x, y)
 
-    def _get_tooltip_style(self) -> str:
-        """获取 tooltip 样式片段"""
-        if isDarkTheme():
-            return """
-                QToolTip {
-                    background-color: #3C3C3C;
-                    color: #EEE;
-                    border: 1px solid #555;
-                    border-radius: 6px;
-                    padding: 6px 10px;
-                    font-size: 12px;
-                }
-            """
-        else:
-            return """
-                QToolTip {
-                    background-color: #FFF;
-                    color: #333;
-                    border: 1px solid #DDD;
-                    border-radius: 6px;
-                    padding: 6px 10px;
-                    font-size: 12px;
-                }
-            """
-
     def _setup_ui(self):
         """构建 UI"""
-        dark = isDarkTheme()
-        tooltip_style = self._get_tooltip_style()
-        
-        bg_color = "#1E1E1E" if dark else "#FAFAFA"
+        c = palette()
+        tc = tooltip_style(FontSize.SMALL)
+
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: transparent;
             }}
-            {tooltip_style}
+            {tc}
         """)
 
         self.main_layout = QVBoxLayout(self)
@@ -435,7 +401,7 @@ class CalendarDialog(QDialog):
         top_bar.setSpacing(8)
 
         title_label = SubtitleLabel("日程视图")
-        title_label.setStyleSheet(f"font-weight: bold; color: {'#EEE' if dark else '#111'};")
+        title_label.setStyleSheet(f"font-weight: bold; color: {c.TITLE};")
         top_bar.addWidget(title_label, 1)
 
         close_btn = TransparentToolButton(FluentIcon.CLOSE)
@@ -456,7 +422,7 @@ class CalendarDialog(QDialog):
         separator.setFrameShape(QFrame.HLine)
         separator.setStyleSheet(f"""
             QFrame {{
-                background-color: {'rgba(255, 255, 255, 0.1)' if dark else 'rgba(0, 0, 0, 0.08)'};
+                background-color: {c.BORDER_STRONG};
                 border: none;
                 max-height: 1px;
             }}
@@ -474,11 +440,10 @@ class CalendarDialog(QDialog):
         self.toolbar.addWidget(self.prev_btn)
 
         self.month_label = StrongBodyLabel()
-        month_color = "#FFF" if dark else "#1A1A1A"
         self.month_label.setStyleSheet(f"""
-            font-size: 16px;
+            font-size: {FontSize.LARGE}px;
             font-weight: 600;
-            color: {month_color};
+            color: {c.TITLE};
             min-width: 120px;
         """)
         self.month_label.setAlignment(Qt.AlignCenter)
@@ -508,13 +473,13 @@ class CalendarDialog(QDialog):
             label.setAlignment(Qt.AlignCenter)
             label.setFixedHeight(28)
             is_weekend = i == 5 or i == 6  # 周六、周日
-            if dark:
-                color = "#ffeb6b" if is_weekend else "#AAA"
+            if is_dark():
+                color = "#ffeb6b" if is_weekend else c.MUTED
             else:
-                color = "#e59935" if is_weekend else "#666"
+                color = "#e59935" if is_weekend else c.BLOCKQUOTE
             label.setStyleSheet(f"""
                 color: {color};
-                font-size: 13px;
+                font-size: {FontSize.BODY}px;
                 font-weight: {'bold' if is_weekend else 'normal'};
             """)
             self.week_header.addWidget(label)
@@ -794,50 +759,48 @@ class CalendarDialog(QDialog):
         return tasks
 
     def _get_day_label_style(self, is_today: bool, col: int, holiday: dict = None) -> str:
-        dark = isDarkTheme()
+        c = palette()
         is_weekend = col == 5 or col == 6  # 周六、周日
 
         if is_today:
-            return """
-                QLabel {
+            return f"""
+                QLabel {{
                     color: #FFF;
-                    font-size: 12px;
+                    font-size: {FontSize.SMALL}px;
                     font-weight: bold;
-                    background-color: #0078D4;
+                    background-color: {c.ACCENT};
                     border-radius: 10px;
                     padding: 0px 4px;
                     min-height: 20px;
-                }
+                }}
             """
 
         # 调休上班日
         if holiday and not holiday.get("isOffDay", True):
-            return "color: #D32F2F; font-size: 12px; font-weight: 600;"
+            return f"color: {c.DANGER}; font-size: {FontSize.SMALL}px; font-weight: 600;"
 
         # 节假日
         if holiday and holiday.get("isOffDay", False):
-            return "color: #2E7D32; font-size: 12px; font-weight: 600;"
+            return f"color: {c.DONE_GREEN}; font-size: {FontSize.SMALL}px; font-weight: 600;"
 
-        if dark:
+        if is_dark():
             color = "#E0E0E0"
         else:
-            color = "#424242"
+            color = c.BODY_LIGHT
 
-        return f"color: {color}; font-size: 12px; font-weight: 500;"
+        return f"color: {color}; font-size: {FontSize.SMALL}px; font-weight: 500;"
 
     def _get_day_label_style_dim(self, col: int) -> str:
         """非当月日期的日期标签样式"""
-        dark = isDarkTheme()
-        if dark:
+        if is_dark():
             color = "#555"
         else:
             color = "#C0C0C0"
-        return f"color: {color}; font-size: 12px; font-weight: 400;"
+        return f"color: {color}; font-size: {FontSize.SMALL}px; font-weight: 400;"
 
     def _get_cell_style_dim(self, col: int) -> str:
         """非当月日期的单元格样式"""
-        dark = isDarkTheme()
-        if dark:
+        if is_dark():
             bg_color = "rgba(255, 255, 255, 0.01)"
             border_color = "rgba(255, 255, 255, 0.03)"
         else:
@@ -853,12 +816,12 @@ class CalendarDialog(QDialog):
 
     def _get_cell_style(self, is_today: bool, has_tasks: bool, col: int, holiday: dict = None) -> str:
         """获取单元格样式"""
-        dark = isDarkTheme()
+        c = theme_colors()
         is_weekend = col == 5 or col == 6  # 周六、周日
         is_holiday = holiday and holiday.get("isOffDay", False)
         is_workday = holiday and not holiday.get("isOffDay", True)
 
-        if dark:
+        if is_dark():
             if is_today:
                 bg_color = "rgba(0, 120, 212, 0.15)"
                 border_color = "#0078D4"
@@ -877,6 +840,8 @@ class CalendarDialog(QDialog):
             else:
                 bg_color = "rgba(255, 255, 255, 0.02)"
                 border_color = "rgba(255, 255, 255, 0.05)"
+            hover_bg = "rgba(255, 255, 255, 0.08)"
+            hover_border = "rgba(255, 255, 255, 0.15)"
         else:
             if is_today:
                 bg_color = "rgba(0, 120, 212, 0.08)"
@@ -896,6 +861,8 @@ class CalendarDialog(QDialog):
             else:
                 bg_color = "rgba(0, 0, 0, 0.01)"
                 border_color = "rgba(0, 0, 0, 0.04)"
+            hover_bg = "rgba(0, 0, 0, 0.04)"
+            hover_border = "rgba(0, 0, 0, 0.12)"
 
         return f"""
             QFrame#dayCell {{
@@ -904,52 +871,48 @@ class CalendarDialog(QDialog):
                 border-radius: 8px;
             }}
             QFrame#dayCell:hover {{
-                background-color: {'rgba(255, 255, 255, 0.08)' if dark else 'rgba(0, 0, 0, 0.04)'};
-                border-color: {'rgba(255, 255, 255, 0.15)' if dark else 'rgba(0, 0, 0, 0.12)'};
+                background-color: {hover_bg};
+                border-color: {hover_border};
             }}
         """
 
     def _get_task_style(self, task: dict) -> str:
         """获取任务标签样式"""
-        dark = isDarkTheme()
+        c = palette()
         is_done = task.get("_is_done", False)
         color_tag = task.get("color_tag")
 
         if is_done:
-            color = "#888" if dark else "#AAA"
+            color = c.MUTED
             decoration = "text-decoration: line-through;"
             bg = "transparent"
         elif color_tag:
             color = color_tag
             decoration = ""
-            bg = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.05)"
+            bg = c.HOVER_BG_STRONG if is_dark() else "rgba(0, 0, 0, 0.05)"
         else:
             priority = task.get("priority", 0)
-            if dark:
+            if is_dark():
                 colors = {0: "#B0BEC5", 1: "#4FC3F7", 2: "#FFB74D", 3: "#EF5350"}
             else:
                 colors = {0: "#607D8B", 1: "#0288D1", 2: "#F57C00", 3: "#D32F2F"}
             color = colors.get(priority, colors[0])
             decoration = ""
-            bg = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.05)"
-
-        tooltip_bg = "#3C3C3C" if dark else "#FFF"
-        tooltip_text = "#EEE" if dark else "#333"
-        tooltip_border = "#555" if dark else "#DDD"
+            bg = c.HOVER_BG_STRONG if is_dark() else "rgba(0, 0, 0, 0.05)"
 
         return f"""
             QLabel {{
                 color: {color};
-                font-size: 10px;
+                font-size: {FontSize.TINY}px;
                 {decoration}
                 padding: 2px 4px;
                 border-radius: 3px;
                 background-color: {bg};
             }}
             QToolTip {{
-                background-color: {tooltip_bg};
-                color: {tooltip_text};
-                border: 1px solid {tooltip_border};
+                background-color: {c.TOOLTIP_BG};
+                color: {c.BODY_LIGHT};
+                border: 1px solid {c.DIVIDER};
                 border-radius: 6px;
                 padding: 6px 10px;
             }}
@@ -957,21 +920,18 @@ class CalendarDialog(QDialog):
 
     def _get_more_style(self) -> str:
         """获取"更多"标签样式"""
-        dark = isDarkTheme()
-        color = "#888" if dark else "#999"
+        c = palette()
         return f"""
-            color: {color};
+            color: {c.MUTED};
             font-size: 9px;
             padding: 1px 4px;
         """
 
     def _get_holiday_label_style(self, holiday: dict) -> str:
         """获取节日标签样式"""
+        c = palette()
         is_off = holiday.get("isOffDay", True)
-        if is_off:
-            color = "#2E7D32"
-        else:
-            color = "#D32F2F"
+        color = c.DONE_GREEN if is_off else c.DANGER
         return f"""
             color: {color};
             font-size: 9px;
@@ -982,15 +942,14 @@ class CalendarDialog(QDialog):
 
     def _get_holiday_badge_style(self, is_off: bool) -> str:
         """获取节假日/调休角标样式"""
+        c = palette()
         if is_off:
-            bg = "#2E7D32"
-            color = "#FFF"
+            bg = c.DONE_GREEN
         else:
-            bg = "#D32F2F"
-            color = "#FFF"
+            bg = c.DANGER
         return f"""
             background-color: {bg};
-            color: {color};
+            color: #FFF;
             font-size: 9px;
             font-weight: bold;
             border-radius: 8px;

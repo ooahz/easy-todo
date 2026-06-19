@@ -1,4 +1,4 @@
-"""任务详情预览 - pywebview 子进程长驻版(只读,上下结构)
+"""任务详情预览
 
 通过单例 _WebViewProcessManager 复用 webview 子进程，
 避免每次点击都重新启动 Python + 导入 pywebview + 初始化 WebView2 引擎。
@@ -18,12 +18,11 @@ from services.file_service import FileService
 
 
 def _is_dark() -> bool:
-    """读取应用当前主题(优先 qfluentwidgets 的运行时状态,fallback 到 settings)。"""
+    """读取应用当前主题"""
     try:
         from qfluentwidgets import isDarkTheme
         return bool(isDarkTheme())
     except Exception:
-        # settings.theme: "light" / "dark" / "system"
         theme = (settings.theme or "system").lower()
         if theme == "dark":
             return True
@@ -38,11 +37,7 @@ def _is_dark() -> bool:
 
 
 def _runner_command() -> list[str] | None:
-    """构造启动 webview_runner 子进程的命令。
-
-    源码模式: python webview_runner.py
-    打包模式: EasyTodo.exe --webview-runner (由 main.py 早期拦截)
-    """
+    """构造启动 webview_runner 子进程的命令"""
     if getattr(sys, "frozen", False):
         return [sys.executable, "--webview-runner"]
     runner_path = Path(__file__).parent / "webview_runner.py"
@@ -57,6 +52,7 @@ class _WebViewProcessManager:
     def __init__(self):
         self._process: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        self._reader_thread: threading.Thread | None = None
 
     def ensure_running(self) -> bool:
         """确保子进程已启动（幂等）。返回是否可用。"""
@@ -74,19 +70,51 @@ class _WebViewProcessManager:
             self._process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
                 close_fds=True,
             )
+            self._reader_thread = threading.Thread(
+                target=self._read_stdout, daemon=True
+            )
+            self._reader_thread.start()
         except Exception as e:
             self._process = None
             self._on_failure(f"启动子进程失败: {e}")
             return False
         return True
 
+    def _read_stdout(self):
+        """读取子进程 stdout，处理尺寸变更等消息。"""
+        proc = self._process
+        if proc is None or proc.stdout is None:
+            return
+        try:
+            for line in proc.stdout:
+                try:
+                    line_str = line.decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    line_str = line.strip() if isinstance(line, str) else ""
+                if not line_str:
+                    continue
+                try:
+                    msg = json.loads(line_str)
+                except json.JSONDecodeError:
+                    continue
+                if msg.get("type") == "resized":
+                    w = msg.get("width")
+                    h = msg.get("height")
+                    if w and h:
+                        try:
+                            settings.detail_dialog_size = (int(w), int(h))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
     def send(self, data: dict):
-        """发送任务数据到子进程渲染。子进程不可用时会自动重启一次。"""
+        """发送任务数据到子进程渲染"""
         if not self.ensure_running():
             return
         proc = self._process
@@ -112,7 +140,7 @@ class _WebViewProcessManager:
                 self._on_failure("webview 子进程重启失败")
 
     def stop(self):
-        """关闭子进程（应用退出时调用）。"""
+        """关闭子进程"""
         with self._lock:
             proc = self._process
             self._process = None
@@ -153,7 +181,7 @@ _manager = _WebViewProcessManager()
 
 
 def ensure_webview_running():
-    """预热：提前启动 webview 子进程以初始化引擎（不阻塞主线程）。"""
+    """预热：提前启动 webview 子进程以初始化引擎"""
     _manager.ensure_running()
 
 
@@ -163,7 +191,7 @@ def stop_webview():
 
 
 class TodoDetailWebView:
-    """在复用的子进程中渲染任务详情(只读,上下结构)。"""
+    """在复用的子进程中渲染任务详情"""
 
     def __init__(self, todo_data: dict, todo_id: int,
                  popup_pos: tuple[int, int] | None = None):
@@ -187,12 +215,15 @@ class TodoDetailWebView:
             pass
 
         files = self._collect_files(todo)
+        dialog_w, dialog_h = settings.detail_dialog_size
         return {
             "theme": "dark" if _is_dark() else "light",
             "popup_pos": list(self._popup_pos) if self._popup_pos else None,
             "task_folder": task_folder,
             "files": files,
             "todo": todo,
+            "dialog_width": dialog_w,
+            "dialog_height": dialog_h,
         }
 
     def _collect_files(self, todo: dict) -> list[dict]:

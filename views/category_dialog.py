@@ -11,6 +11,7 @@ from qfluentwidgets import (
     BodyLabel, CaptionLabel
 )
 
+from config.theme_config import FontSize, accent_color, palette
 from services.category_service import CategoryService, category_event_bus
 
 SYSTEM_VIEWS = [
@@ -64,14 +65,12 @@ class SystemViewItem(QWidget):
         layout.addWidget(self.down_btn)
 
     def _update_icon_color(self):
-        color = "#0078D4" if not isDarkTheme() else "#60CDFF"
+        color = accent_color()
         self.icon_w.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
 
     def _update_sys_tag_style(self, tag):
-        if isDarkTheme():
-            tag.setStyleSheet("color: #AAA; font-size: 11px; padding: 1px 6px; background: rgba(255,255,255,0.08); border-radius: 3px;")
-        else:
-            tag.setStyleSheet("color: #888; font-size: 11px; padding: 1px 6px; background: rgba(0,0,0,0.06); border-radius: 3px;")
+        c = palette()
+        tag.setStyleSheet(f"color: {c.SYS_TAG_FG}; font-size: {FontSize.CAPTION}px; padding: 1px 6px; background: {c.SYS_TAG_BG}; border-radius: 3px;")
 
 
 class CategoryListItem(QWidget):
@@ -123,7 +122,7 @@ class CategoryListItem(QWidget):
         layout.addWidget(self.delete_btn)
 
     def _update_icon_color(self):
-        color = "#0078D4" if not isDarkTheme() else "#60CDFF"
+        color = accent_color()
         self.icon_label.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
 
 
@@ -216,7 +215,7 @@ class CategoryDialog(QDialog):
         top_bar.setSpacing(8)
 
         title_label = SubtitleLabel("管理分类")
-        title_label.setStyleSheet(f"font-weight: bold; color: {'#EEE' if isDarkTheme() else '#111'};")
+        title_label.setStyleSheet(f"font-weight: bold; color: {palette().TITLE if isDarkTheme() else '#111'};")
         top_bar.addWidget(title_label, 1)
 
         close_btn = TransparentToolButton(FluentIcon.CLOSE)
@@ -229,7 +228,7 @@ class CategoryDialog(QDialog):
         # 分隔线
         divider = QFrame()
         divider.setFixedHeight(1)
-        divider.setStyleSheet(f"background-color: {'#444' if isDarkTheme() else '#DDD'};")
+        divider.setStyleSheet(f"background-color: {palette().DIVIDER};")
         layout.addWidget(divider)
 
         # ---- 新建分类输入区 ----
@@ -262,14 +261,15 @@ class CategoryDialog(QDialog):
         y = screen.y() + (screen.height() - self.height()) // 2
         self.move(x, y)
         # 设置弹窗整体背景色
+        c = palette()
         if isDarkTheme():
-            self.setStyleSheet("""
-                QDialog {
+            self.setStyleSheet(f"""
+                QDialog {{
                     background-color: transparent;
-                }
-                BodyLabel { color: #DDD; }
-                LineEdit { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
-                ListWidget { background-color: rgb(59, 59, 59); color: #EEE; border: 1px solid rgb(80,80,80); border-radius: 6px; }
+                }}
+                BodyLabel {{ color: {c.BODY_LIGHT}; }}
+                LineEdit {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
+                ListWidget {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
             """)
             # 更新列表项图标颜色
             for i in range(self.category_list.count()):
@@ -278,13 +278,13 @@ class CategoryDialog(QDialog):
                 if widget and hasattr(widget, '_update_icon_color'):
                     widget._update_icon_color()
         else:
-            self.setStyleSheet("""
-                QDialog {
+            self.setStyleSheet(f"""
+                QDialog {{
                     background-color: transparent;
-                }
-                BodyLabel { color: #333; }
-                LineEdit { background-color: #FFF; color: #333; }
-                ListWidget { background-color: #FFF; color: #333; }
+                }}
+                BodyLabel {{ color: {c.BODY_LIGHT}; }}
+                LineEdit {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; }}
+                ListWidget {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; }}
             """)
             # 更新列表项图标颜色
             for i in range(self.category_list.count()):
@@ -313,8 +313,7 @@ class CategoryDialog(QDialog):
         sep_item = QListWidgetItem()
         sep_widget = QLabel()
         sep_widget.setFixedHeight(1)
-        c = "#444" if isDarkTheme() else "#DDD"
-        sep_widget.setStyleSheet(f"background-color: {c}; margin: 4px 8px;")
+        sep_widget.setStyleSheet(f"background-color: {palette().DIVIDER}; margin: 4px 8px;")
         self.category_list.addItem(sep_item)
         self.category_list.setItemWidget(sep_item, sep_widget)
         sep_item.setSizeHint(sep_widget.sizeHint())

@@ -1,14 +1,11 @@
-"""任务详情 webview 子进程入口（长驻版）
-
-主进程通过 stdin 每行发送一个 JSON 对象，本进程复用 WebView2 引擎渲染多个任务详情。
-首次启动初始化引擎（约 1s），后续点击仅更新 HTML（约 100ms）。
-完全与主 Qt 进程解耦，不会影响主程序的事件循环。
-"""
+"""任务详情 webview 子进程入口"""
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -16,64 +13,62 @@ from datetime import date, datetime
 from html import escape
 from pathlib import Path
 
+from config.theme_config import theme_colors_by_name
+
 # 在 import qtpy 之前设置 Qt 后端
 os.environ.setdefault("QT_API", "pyside6")
 
 
-# ============== 主题 ==============
-THEMES = {
-    "dark": {
-        "bg": "#1F1F1F",
-        "card_bg": "#2D2D2D",
-        "card_hover": "#333333",
-        "border": "rgba(255, 255, 255, 0.08)",
-        "title": "#EEE",
-        "subtitle": "#CCC",
-        "body": "#BBB",
-        "muted": "#888",
-        "icon": "rgba(255, 255, 255, 0.45)",
-        "accent": "#60CDFF",
-        "divider": "rgba(255, 255, 255, 0.06)",
-        "tag_bg": "rgba(255, 255, 255, 0.06)",
-        "priority_urgent_important": "#FF6B6B",
-        "priority_important": "#FFB347",
-        "priority_urgent": "#60CDFF",
-        "priority_minor": "#8764B8",
-        "overdue": "#FF6B6B",
-        "done_green": "#6BCB77",
-        "code_bg": "#3A3A3A",
-        "code_border": "#555",
-        "link_color": "#60CDFF",
-        "blockquote_color": "#AAA",
-        "header_bg": "#262626",
-    },
-    "light": {
-        "bg": "#FAFAFA",
-        "card_bg": "#FFFFFF",
-        "card_hover": "#F5F5F5",
-        "border": "rgba(0, 0, 0, 0.06)",
-        "title": "#1A1A1A",
-        "subtitle": "#444",
-        "body": "#555",
-        "muted": "#999",
-        "icon": "rgba(0, 0, 0, 0.35)",
-        "accent": "#0078D4",
-        "divider": "rgba(0, 0, 0, 0.06)",
-        "tag_bg": "rgba(0, 0, 0, 0.04)",
-        "priority_urgent_important": "#D13438",
-        "priority_important": "#0078D4",
-        "priority_urgent": "#CA5010",
-        "priority_minor": "#8764B8",
-        "overdue": "#D13438",
-        "done_green": "#107C10",
-        "code_bg": "#F5F5F5",
-        "code_border": "#DDD",
-        "link_color": "#0078D4",
-        "blockquote_color": "#666",
-        "header_bg": "#F0F0F0",
-    },
-}
+# ============== 详情页 HTML 临时文件 ==============
+_HTML_TMP_PATH: str | None = None
 
+
+def _write_html_to_tempfile(html: str) -> str | None:
+    """把 HTML 写入复用的临时文件,返回 file:// URL;失败返回 None。"""
+    global _HTML_TMP_PATH
+    try:
+        if _HTML_TMP_PATH is None:
+            fd, _HTML_TMP_PATH = tempfile.mkstemp(suffix=".html", prefix="easytodo_detail_")
+            os.close(fd)
+        with open(_HTML_TMP_PATH, "w", encoding="utf-8") as f:
+            f.write(html)
+    except Exception:
+        return None
+    return "file:///" + _HTML_TMP_PATH.replace(os.sep, "/")
+
+
+def _cleanup_html_tmp_file() -> None:
+    global _HTML_TMP_PATH
+    if _HTML_TMP_PATH is not None:
+        try:
+            os.unlink(_HTML_TMP_PATH)
+        except Exception:
+            pass
+        _HTML_TMP_PATH = None
+
+
+atexit.register(_cleanup_html_tmp_file)
+
+
+# ============== 详情弹窗尺寸 ==============
+_WEBVIEW_DEFAULT_SIZE = (480, 520)
+_WEBVIEW_MIN_SIZE = (400, 300)
+
+
+def _load_webview_size(data: dict) -> tuple[int, int]:
+    """从主进程传入的数据中读取弹窗尺寸,失败或越界时回退到默认值。"""
+    try:
+        w = int(data.get("dialog_width", _WEBVIEW_DEFAULT_SIZE[0]))
+        h = int(data.get("dialog_height", _WEBVIEW_DEFAULT_SIZE[1]))
+        if w < _WEBVIEW_MIN_SIZE[0] or h < _WEBVIEW_MIN_SIZE[1]:
+            return _WEBVIEW_DEFAULT_SIZE
+        return (w, h)
+    except Exception:
+        return _WEBVIEW_DEFAULT_SIZE
+
+
+# ============== 主题 ==============
+# 颜色取自 config.theme_config，与主进程保持统一。
 # ============== CSS 外挂文件 ==============
 # 内置 CSS 文件路径（相对于项目根目录）
 _BUILTIN_CSS_PATH = Path(__file__).resolve().parent.parent / "css" / "detail.css"
@@ -102,7 +97,6 @@ def _load_detail_css() -> str:
 
 def _build_css_vars(c: dict) -> str:
     """将主题色字典转为 CSS 自定义属性声明。"""
-    # Python key → CSS 变量名: card_bg → --card-bg, done_green → --done-green
     lines = []
     for key, value in c.items():
         css_name = "--" + key.replace("_", "-")
@@ -204,17 +198,28 @@ def _format_dt(v):
 
 
 def _rewrite_image_paths(html_str: str, folder: Path) -> str:
-    """把 <img src='相对路径'> 改写为 file:// 绝对路径(供 webview 直接显示)。"""
+    """把 <img src='相对路径或绝对路径'> 改写为 file:// 绝对路径(供 webview 直接显示)。"""
     import re
+    from html import unescape
+    from urllib.parse import quote
 
     def repl(m):
-        prefix, src = m.group(1), m.group(2)
+        prefix, raw_src = m.group(1), m.group(2)
+        # markdown 可能输出 HTML 实体(如 &amp;),先反转义再解析路径
+        src = unescape(raw_src)
         if not src or src.startswith(("file://", "http://", "https://", "data:")):
             return m.group(0)
-        candidate = folder / src
+        # Windows 绝对路径(C:\...)直接使用,相对路径基于 task folder 解析
+        if os.path.isabs(src):
+            candidate = Path(src)
+        else:
+            candidate = folder / src
         if candidate.exists():
-            abs_path = (folder / src).as_posix()
-            return f'{prefix}="file:///{abs_path.replace(" ", "%20")}"'
+            abs_path = candidate.resolve().as_posix()
+            # 完整 URL 编码(保留 / 和 : 以兼容 Windows 盘符路径)
+            # 修复中文、空格等非 ASCII 字符导致 WebView2 无法加载 file:// 的问题
+            encoded = quote(abs_path, safe="/:")
+            return f'{prefix}="file:///{encoded}"'
         return m.group(0)
 
     return re.sub(r'(<img\s+[^>]*?src)="([^"]+)"', repl, html_str)
@@ -222,7 +227,7 @@ def _rewrite_image_paths(html_str: str, folder: Path) -> str:
 
 def build_html(data: dict) -> str:
     theme_mode = data.get("theme", "light")
-    c = THEMES.get(theme_mode, THEMES["light"])
+    c = theme_colors_by_name(theme_mode)
     todo = data.get("todo", {})
     is_done = bool(todo.get("_is_done"))
     is_archived = bool(todo.get("_is_archived"))
@@ -260,6 +265,11 @@ html, body {{
     font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
     -webkit-user-select: text; user-select: text;
 }}
+::-webkit-scrollbar {{ width: 6px; height: 6px; }}
+::-webkit-scrollbar-track {{ background: transparent; }}
+::-webkit-scrollbar-thumb {{ background-color: rgba(128, 128, 128, 0.3); border-radius: 3px; }}
+::-webkit-scrollbar-thumb:hover {{ background-color: rgba(128, 128, 128, 0.5); }}
+::-webkit-scrollbar-corner {{ background: transparent; }}
 .page {{ margin: 0 auto; padding: 20px 24px 40px; }}
 .info-strip {{ display: flex; flex-wrap: wrap; gap: 8px 16px;
     background-color: var(--card-bg); border: 1px solid var(--border);
@@ -323,27 +333,30 @@ html, body {{
 .markdown-body img {{ max-width: 100%; max-height: 480px; border-radius: 4px; }}
 """
 
-    # 状态（移入信息条，标题由原生窗口标题栏显示）
+    # 头部
+    color_tag = todo.get("color_tag")
+    color_dot = (
+        f'<span class="color-dot" style="background-color: {escape(color_tag)};"></span>'
+        if color_tag else ""
+    )
+    title_cls = "title done" if is_done else "title"
     status = todo.get("status", 0)
     status_text = STATUS_MAP.get(status, "未知")
     if is_archived:
-        status_item = (
-            f'<span class="info-item"><span class="label">状态</span>'
-            f'<span class="value" style="color:{c["muted"]}">已归档</span></span>'
-        )
+        tag_cls, tag_text = "status-tag archived", "已归档"
     elif is_done:
-        status_item = (
-            f'<span class="info-item"><span class="label">状态</span>'
-            f'<span class="value done">已完成</span></span>'
-        )
+        tag_cls, tag_text = "status-tag done", "已完成"
     else:
-        status_item = (
-            f'<span class="info-item"><span class="label">状态</span>'
-            f'<span class="value">{escape(status_text)}</span></span>'
-        )
+        tag_cls, tag_text = "status-tag", status_text
+    header = f"""
+<div class="header">
+    {color_dot}
+    <h1 class="{title_cls}">{escape(todo.get('title', ''))}</h1>
+    <span class="{tag_cls}">{escape(tag_text)}</span>
+</div>"""
 
     # 信息条
-    items = [status_item]
+    items = []
     p = todo.get("priority", 0)
     if p > 0:
         ptext, pcolor = _render_priority(p, c)
@@ -466,12 +479,48 @@ html, body {{
 </head>
 <body>
 <div class="page">
+    {header}
     {info_strip}
     {desc}
     {subtasks}
     {files_html}
 </div>
 <script>
+// 把 file:// URL 还原成本地路径,供 open_file 使用
+function fileUrlToPath(url) {{
+    if (!url || url.indexOf('file://') !== 0) return null;
+    var p = url.substring(7);  // 去掉 'file://'
+    // Windows: file:///C:/path -> C:/path
+    if (/^\/[A-Za-z]:/.test(p)) p = p.substring(1);
+    try {{ return decodeURIComponent(p); }} catch (e) {{ return p; }}
+}}
+
+// 描述区图片:双击/右键 → 调系统看图器打开
+function openDescImage(img) {{
+    if (!img || !img.src) return;
+    var path = fileUrlToPath(img.src);
+    if (!path) return;  // http(s)/data 之类的非本地图,忽略
+    if (window.pywebview && window.pywebview.api) {{
+        window.pywebview.api.open_file(path);
+    }}
+}}
+
+document.addEventListener('dblclick', function(e) {{
+    var img = e.target.closest('.markdown-body img');
+    if (img) {{
+        e.preventDefault();
+        openDescImage(img);
+    }}
+}});
+
+document.addEventListener('contextmenu', function(e) {{
+    var img = e.target.closest('.markdown-body img');
+    if (img) {{
+        e.preventDefault();
+        openDescImage(img);
+    }}
+}});
+
 document.addEventListener('click', function(e) {{
     // 点击文件夹按钮 → 打开所在文件夹
     var folderBtn = e.target.closest('.file-folder-btn');
@@ -496,11 +545,7 @@ document.addEventListener('click', function(e) {{
 
 
 def main():
-    """长驻模式：从 stdin 读取 JSON 命令行，复用 webview 引擎渲染任务详情。
-
-    首次启动初始化 WebView2 引擎（约 1s），后续点击仅更新 HTML（约 100ms）。
-    主进程通过 stdin 每行发送一个 JSON 对象，EOF 时子进程退出。
-    """
+    """长驻模式：从 stdin 读取 JSON 命令行，复用 webview 引擎渲染任务详情。"""
     try:
         import webview
     except ImportError as e:
@@ -545,7 +590,6 @@ def main():
 
     api = _Api()
 
-    # 隐藏的保活窗口：确保任务窗口关闭后 webview.start() 不会退出
     try:
         keepalive = webview.create_window(
             "__keepalive__", html="<!DOCTYPE html><html></html>", hidden=True
@@ -561,7 +605,6 @@ def main():
         state["task_window"] = None
 
     def _find_hwnd_by_title(window_title: str) -> int | None:
-        """通过 EnumWindows 按窗口标题(精确匹配)查找可见窗口的 HWND。"""
         if sys.platform != "win32":
             return None
         try:
@@ -590,7 +633,6 @@ def main():
             return None
 
     def _apply_window_position(window_title: str, x: int, y: int):
-        """轮询找到任务窗口后,通过 SetWindowPos 移动到 (x, y)(尺寸保持不变)。"""
         if sys.platform != "win32":
             return
         try:
@@ -620,11 +662,6 @@ def main():
         threading.Thread(target=_worker, daemon=True).start()
 
     def _apply_native_title_bar_color(window_title: str, bg_hex: str, text_hex: str):
-        """通过 Windows DWM API 把原生窗口标题栏背景设为指定背景色（仅 Windows 11+ 生效）。
-
-        任务窗口由 pywebview 在 GUI 线程创建,这里启动守护线程轮询窗口句柄,
-        找到后调用 DwmSetWindowAttribute 设置 DWMWA_CAPTION_COLOR / DWMWA_TEXT_COLOR。
-        """
         if sys.platform != "win32":
             return
         if not bg_hex or len(bg_hex) != 7 or not bg_hex.startswith("#"):
@@ -679,6 +716,29 @@ def main():
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _on_resized(*args):
+        """webview 弹窗尺寸变化时通过 stdout 通知主进程保存。"""
+        w, h = None, None
+        if len(args) >= 2:
+            w, h = args[0], args[1]
+        elif len(args) == 1 and isinstance(args[0], (tuple, list)) and len(args[0]) == 2:
+            w, h = args[0]
+        if w is None or h is None:
+            return
+        try:
+            w, h = int(w), int(h)
+        except (TypeError, ValueError):
+            return
+        if w < _WEBVIEW_MIN_SIZE[0] or h < _WEBVIEW_MIN_SIZE[1]:
+            return
+        # 通过 stdout 通知主进程保存尺寸
+        try:
+            msg = json.dumps({"type": "resized", "width": w, "height": h})
+            sys.stdout.write(msg + "\n")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
     def _handle_data(data: dict):
         try:
             html = build_html(data)
@@ -687,17 +747,36 @@ def main():
             return
         title = "任务详情"
         theme_mode = data.get("theme", "light")
-        # 标题栏背景与弹窗内容背景保持一致(深色 #1F1F1F / 浅色 #FAFAFA)
-        theme_colors = THEMES.get(theme_mode, THEMES["light"])
-        caption_bg = theme_colors["bg"]
-        caption_text = theme_colors["title"]
+        # 标题栏背景与弹窗内容背景保持一致(取自统一主题色配置)
+        c = theme_colors_by_name(theme_mode)
+        caption_bg = c["bg"]
+        caption_text = c["title"]
         popup_pos = data.get("popup_pos")
         existing = state["task_window"]
+
+        # 把 HTML 写到临时文件,以 file:// 加载,这样图片资源(file://)能被同源加载。
+        # 直接用 html= 加载会被 WebView2 视为 data: origin,从而拦截 file:// 图片。
+        page_url = _write_html_to_tempfile(html)
+
+        if existing is not None:
+            try:
+                saved_w, saved_h = existing.width, existing.height
+            except Exception:
+                saved_w, saved_h = _load_webview_size(data)
+        else:
+            saved_w, saved_h = _load_webview_size(data)
+
+        def _load_into(window):
+            if page_url is not None:
+                window.load_url(page_url)
+            else:
+                window.load_html(html, '')
+
         # 快速路径：复用已存在的任务窗口，仅更新内容
         if existing is not None:
             try:
                 existing.set_title(title)
-                existing.load_html(html)
+                _load_into(existing)
                 existing.show()
                 existing.restore()
                 _apply_native_title_bar_color(title, caption_bg, caption_text)
@@ -706,20 +785,22 @@ def main():
                 return
             except Exception:
                 state["task_window"] = None
-        # 慢速路径：任务窗口已被关闭，新建一个（引擎已就绪，耗时远低于冷启动）
         try:
-            win = webview.create_window(
-                title,
-                html=html,
-                width=900,
-                height=720,
+            kwargs = dict(
+                width=saved_w,
+                height=saved_h,
                 resizable=True,
                 text_select=True,
                 on_top=False,
                 background_color=caption_bg,
                 js_api=api,
             )
+            if page_url is not None:
+                win = webview.create_window(title, url=page_url, **kwargs)
+            else:
+                win = webview.create_window(title, html=html, **kwargs)
             win.events.closed += _on_task_closed
+            win.events.resized += _on_resized
             state["task_window"] = win
             _apply_native_title_bar_color(title, caption_bg, caption_text)
             if popup_pos and isinstance(popup_pos, (list, tuple)) and len(popup_pos) == 2:
@@ -747,7 +828,6 @@ def main():
             except json.JSONDecodeError:
                 continue
             _handle_data(data)
-        # stdin 关闭 → 销毁保活窗口，让 webview.start() 返回
         try:
             keepalive.destroy()
         except Exception:

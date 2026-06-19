@@ -1,11 +1,12 @@
 """四象限浮窗组件 - 艾森豪威尔矩阵视图"""
 from __future__ import annotations
+from datetime import date
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPainter, QColor, QPen, QFont
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy
 
-from qfluentwidgets import BodyLabel, isDarkTheme
+from qfluentwidgets import BodyLabel
 
 from config.constants import (
     PRIORITY_IMPORTANT_URGENT,
@@ -15,6 +16,30 @@ from config.constants import (
     PRIORITY_MAP,
     PRIORITY_GROUP_COLORS,
 )
+from config.settings import settings
+from config.theme_config import FontSize, theme_colors
+
+
+class _ElidedLabel(QLabel):
+    """自动省略超长文本的 QLabel"""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self.setWordWrap(False)
+
+    def setText(self, text: str):
+        self._full_text = text
+        self._update_elided()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided()
+
+    def _update_elided(self):
+        fm = self.fontMetrics()
+        elided = fm.elidedText(self._full_text, Qt.TextElideMode.ElideRight, self.width())
+        super().setText(elided)
 
 
 class QuadrantCell(QFrame):
@@ -29,6 +54,7 @@ class QuadrantCell(QFrame):
         self._color = PRIORITY_GROUP_COLORS.get(priority, "#888")
         self._title = PRIORITY_MAP.get(priority, "")
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -38,16 +64,16 @@ class QuadrantCell(QFrame):
         header = QHBoxLayout()
         header.setSpacing(4)
         dot = QLabel("●")
-        dot.setStyleSheet(f"color: {self._color}; font-size: 10px; border: none; background: transparent;")
+        dot.setStyleSheet(f"color: {self._color}; font-size: {FontSize.TINY}px; border: none; background: transparent;")
         header.addWidget(dot)
 
         title_label = QLabel(self._title)
-        title_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._color}; border: none; background: transparent;")
+        title_label.setStyleSheet(f"font-size: {FontSize.BODY}px; font-weight: bold; color: {self._color}; border: none; background: transparent;")
         header.addWidget(title_label)
         header.addStretch()
 
         self.count_label = BodyLabel("0")
-        self.count_label.setStyleSheet("font-size: 10px; border: none; background: transparent;")
+        self.count_label.setStyleSheet(f"font-size: {FontSize.TINY}px; border: none; background: transparent;")
         header.addWidget(self.count_label)
         layout.addLayout(header)
 
@@ -77,21 +103,7 @@ class QuadrantCell(QFrame):
 
     @staticmethod
     def _theme_colors():
-        if isDarkTheme():
-            return {
-                "cell_bg": "rgba(255, 255, 255, 0.04)",
-                "cell_border": "rgba(255, 255, 255, 0.06)",
-                "text": "#DDD",
-                "done_text": "#666",
-                "hover": "rgba(255, 255, 255, 0.06)",
-            }
-        return {
-            "cell_bg": "rgba(0, 0, 0, 0.02)",
-            "cell_border": "rgba(0, 0, 0, 0.06)",
-            "text": "#333",
-            "done_text": "#999",
-            "hover": "rgba(0, 0, 0, 0.04)",
-        }
+        return theme_colors()
 
     def set_todos(self, todos: list[dict]):
         self._todos = todos
@@ -109,7 +121,7 @@ class QuadrantCell(QFrame):
             if item.widget():
                 item.widget().deleteLater()
 
-        c = self._theme_colors()
+        c = theme_colors()
         for todo in self._todos:
             row = self._create_row(todo, c)
             self.list_layout.addWidget(row)
@@ -119,6 +131,24 @@ class QuadrantCell(QFrame):
         is_done = todo.get("_is_done", False)
         title = todo.get("title", "")
         todo_id = todo["id"]
+        due = todo.get("due_date")
+        has_due = settings.floating_show_due_date and due and not is_done
+
+        due_text = ""
+        due_color = c['text']
+        if has_due:
+            try:
+                due_date = date.fromisoformat(due)
+                today = date.today()
+                if due_date < today:
+                    due_text = "已过期"
+                    due_color = settings.warning_color
+                elif due_date == today:
+                    due_text = "今天"
+                else:
+                    due_text = due
+            except (ValueError, TypeError):
+                has_due = False
 
         row = QFrame()
         row.setFixedHeight(30)
@@ -142,12 +172,24 @@ class QuadrantCell(QFrame):
 
         h = QHBoxLayout(row)
         h.setContentsMargins(4, 0, 4, 0)
-        h.setSpacing(0)
+        h.setSpacing(6)
 
-        label = QLabel(title)
-        label.setStyleSheet(f"font-size: 15px; {text_style} border: none; background: transparent;")
-        label.setWordWrap(False)
-        h.addWidget(label, 1)
+        title_label = _ElidedLabel(title)
+        title_label.setToolTip(title)
+        title_label.setStyleSheet(
+            f"font-size: {FontSize.SUBTITLE}px; {text_style} border: none; background: transparent;"
+        )
+        title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        h.addWidget(title_label, 1)
+
+        if has_due:
+            due_label = QLabel(due_text)
+            due_label.setToolTip(due)
+            due_label.setAlignment(Qt.AlignVCenter | Qt.AlignRight)
+            due_label.setStyleSheet(
+                f"font-size: {FontSize.CAPTION}px; color: {due_color}; border: none; background: transparent;"
+            )
+            h.addWidget(due_label, 0)
 
         row.mousePressEvent = lambda e, tid=todo_id: self._on_clicked(e, tid)
         return row
