@@ -10,6 +10,7 @@ from PySide6.QtGui import QMouseEvent, QCursor, QIcon, QPainter, QPixmap, QVecto
 from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit, FluentIcon, TransparentToolButton, PipsPager, PipsScrollButtonDisplayMode
 
 from config.settings import settings
+from views.quadrant_floating_widget import QuadrantFloatingWidget
 
 
 class FloatingWidget(QWidget):
@@ -39,7 +40,7 @@ class FloatingWidget(QWidget):
         self.setMouseTracking(True)
         self.resize(300, 400)
         self.setMinimumSize(self.MIN_WIDTH, self.MIN_HEIGHT)
-        self.setMaximumSize(800, 1200)
+        self.setMaximumSize(1200, 1200)
 
         self._opacity = 0.95
         self._dragging = False
@@ -54,6 +55,9 @@ class FloatingWidget(QWidget):
         self._closing = False
         self._page_size = 20
         self._current_page = 0
+        self._mode = "list"  # "list" 或 "quadrant"
+        self._list_collapsed = False  # 标题点击收起列表
+        self._expanded_height = None  # 收起前保存的高度
         self._snap_anim: QPropertyAnimation | None = None
         self._snapped_edges = 0       # 贴边方向位掩码: 上1 下2 左4 右8
         self._collapsed = False
@@ -91,7 +95,43 @@ class FloatingWidget(QWidget):
         self.title_label = BodyLabel("任务列表")
         self.title_label.setStyleSheet("font-weight: bold; font-size: 13px; border: none;")
         title_layout.addWidget(self.title_label)
+
+        self.count_label = BodyLabel("")
+        self.count_label.setStyleSheet("font-size: 12px; border: none;")
+        self.count_label.setCursor(Qt.PointingHandCursor)
+        title_layout.addWidget(self.count_label)
+
+        self.collapse_indicator = QLabel("▾")
+        self.collapse_indicator.setFixedWidth(12)
+        self.collapse_indicator.setStyleSheet("font-size: 11px; border: none;")
+        self.collapse_indicator.setCursor(Qt.PointingHandCursor)
+        title_layout.addWidget(self.collapse_indicator)
+
         title_layout.addStretch()
+
+        # 数量和收起图标点击收起/展开列表
+        self.count_label._pressed_pos = None
+        self.collapse_indicator._pressed_pos = None
+
+        def _make_press_handler(widget):
+            def _on_press(e):
+                if e.button() == Qt.LeftButton:
+                    widget._pressed_pos = e.globalPosition().toPoint()
+            return _on_press
+
+        def _make_release_handler(widget):
+            def _on_release(e):
+                if e.button() == Qt.LeftButton and widget._pressed_pos is not None:
+                    delta = (e.globalPosition().toPoint() - widget._pressed_pos)
+                    if delta.manhattanLength() < 5:
+                        self._toggle_list_collapse()
+                widget._pressed_pos = None
+            return _on_release
+
+        self.count_label.mousePressEvent = _make_press_handler(self.count_label)
+        self.count_label.mouseReleaseEvent = _make_release_handler(self.count_label)
+        self.collapse_indicator.mousePressEvent = _make_press_handler(self.collapse_indicator)
+        self.collapse_indicator.mouseReleaseEvent = _make_release_handler(self.collapse_indicator)
 
         # 新建按钮
         self.add_btn = TransparentToolButton(FluentIcon.ADD)
@@ -100,6 +140,15 @@ class FloatingWidget(QWidget):
         self.add_btn.setToolTip("快速新建任务")
         self.add_btn.clicked.connect(self._show_quick_add)
         title_layout.addWidget(self.add_btn)
+
+        # 四象限切换按钮（仅在重要任务视图显示）
+        self.quadrant_btn = TransparentToolButton(FluentIcon.TILES)
+        self.quadrant_btn.setFixedSize(24, 24)
+        self.quadrant_btn.setIconSize(QSize(12, 12))
+        self.quadrant_btn.setToolTip("四象限视图")
+        self.quadrant_btn.clicked.connect(self._toggle_mode)
+        self.quadrant_btn.setVisible(False)
+        title_layout.addWidget(self.quadrant_btn)
 
         # 固定按钮
         self.pin_btn = TransparentToolButton(FluentIcon.PIN)
@@ -140,6 +189,12 @@ class FloatingWidget(QWidget):
 
         self.scroll.setWidget(self.list_widget)
         bg_layout.addWidget(self.scroll, 1)
+
+        # 四象限视图
+        self.quadrant_widget = QuadrantFloatingWidget(self.bg_frame)
+        self.quadrant_widget.setVisible(False)
+        self.quadrant_widget.todo_toggled.connect(self.todo_toggled.emit)
+        bg_layout.addWidget(self.quadrant_widget, 1)
 
         # 分页器
         self.pager = PipsPager(Qt.Horizontal)
@@ -234,6 +289,12 @@ class FloatingWidget(QWidget):
         title_color = f"color: {c['title']};" if c['title'] else ""
         self.title_label.setStyleSheet(
             f"font-weight: bold; font-size: 13px; {title_color} border: none;"
+        )
+        self.count_label.setStyleSheet(
+            f"font-size: 12px; color: {c.get('close', '#999')}; border: none;"
+        )
+        self.collapse_indicator.setStyleSheet(
+            f"font-size: 11px; color: {c.get('close', '#999')}; border: none;"
         )
         self.sep.setStyleSheet(f"background-color: {c['sep']}; border: none;")
         # 快速新建弹窗样式
@@ -363,6 +424,39 @@ class FloatingWidget(QWidget):
         self.set_pinned(self._pinned)
         self.pin_changed.emit(self._pinned)
 
+    def _toggle_list_collapse(self):
+        """点击标题收起/展开列表"""
+        self._list_collapsed = not self._list_collapsed
+        self._apply_list_collapse()
+
+    def _apply_list_collapse(self):
+        """根据收起状态显示/隐藏列表区域，并调整窗口大小"""
+        collapsed = self._list_collapsed
+        c = self._theme_colors()
+        self.collapse_indicator.setText("▸" if collapsed else "▾")
+        self.collapse_indicator.setStyleSheet(
+            f"font-size: 11px; color: {c.get('close', '#999')}; border: none;"
+        )
+        self.scroll.setVisible(not collapsed and self._mode == "list")
+        self.quadrant_widget.setVisible(not collapsed and self._mode == "quadrant")
+        self.pager.setVisible(not collapsed and self._mode == "list" and len(self._todos) > self._page_size)
+        self.sep.setVisible(not collapsed)
+
+        # 调整窗口高度
+        if collapsed:
+            self._expanded_height = self.height()
+            # 标题栏高度 + 上下内边距 + 分隔线
+            title_bar_h = self.title_bar.height()
+            collapsed_h = title_bar_h + 20  # 上下 margin 10+10
+            self.setFixedHeight(collapsed_h)
+            self.setMinimumHeight(collapsed_h)
+        else:
+            self.setMinimumHeight(self.MIN_HEIGHT)
+            self.setMaximumSize(1200, 1200)
+            restore_h = self._expanded_height or 400
+            self.resize(self.width(), restore_h)
+            self._expanded_height = None
+
     def _show_quick_add(self):
         """显示快速新建弹窗"""
         overlay_w = min(self.bg_frame.width() - 24, 240)
@@ -428,13 +522,62 @@ class FloatingWidget(QWidget):
     def set_todos(self, todos: list[dict]):
         self._todos = todos
         self._current_page = 0
+        self._update_count_label()
         self._update_pager()
         self._refresh_list()
+        self.quadrant_widget.set_todos(todos)
+
+    def _update_count_label(self):
+        """更新任务数量标签"""
+        total = len(self._todos)
+        done = sum(1 for t in self._todos if t.get("_is_done", False))
+        c = self._theme_colors()
+        self.count_label.setStyleSheet(
+            f"font-size: 12px; color: {c.get('close', '#999')}; border: none;"
+        )
+        self.count_label.setText(f"{done}/{total}")
+
+    def set_mode(self, mode: str):
+        """设置浮窗模式: 'list' 或 'quadrant'"""
+        if mode == self._mode:
+            return
+        self._mode = mode
+        self._apply_mode()
+
+    def set_view_key(self, view_key: str):
+        """设置当前视图标识，控制四象限按钮可见性"""
+        self.quadrant_btn.setVisible(view_key == "important")
+
+    def _toggle_mode(self):
+        """切换列表/四象限模式"""
+        new_mode = "quadrant" if self._mode == "list" else "list"
+        self._mode = new_mode
+        self._apply_mode()
+
+    def _apply_mode(self):
+        """根据当前模式切换显示"""
+        if self._list_collapsed:
+            self.scroll.setVisible(False)
+            self.quadrant_widget.setVisible(False)
+            self.pager.setVisible(False)
+            return
+        if self._mode == "quadrant":
+            self.scroll.setVisible(False)
+            self.pager.setVisible(False)
+            self.quadrant_widget.setVisible(True)
+            self.quadrant_widget.set_todos(self._todos)
+            self.quadrant_btn.setToolTip("列表视图")
+        else:
+            self.scroll.setVisible(True)
+            self.quadrant_widget.setVisible(False)
+            self._update_pager()
+            self.quadrant_btn.setToolTip("四象限视图")
 
     def refresh_theme(self):
         """主题切换时刷新浮窗样式"""
         self._apply_theme()
         self._refresh_list()
+        self.quadrant_widget.refresh_theme()
 
     def _refresh_list(self):
         from config.settings import settings
@@ -680,7 +823,7 @@ class FloatingWidget(QWidget):
                     geo.setBottom(geo.top() + self.MIN_HEIGHT)
 
             # 强制最大尺寸
-            max_w, max_h = 800, 1200
+            max_w, max_h = 1200, 1200
             if geo.width() > max_w:
                 if edge & 4:
                     geo.setLeft(geo.right() - max_w)

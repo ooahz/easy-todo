@@ -195,11 +195,18 @@ class _LoadTodosWorker(QRunnable):
             # ---- 重要任务 ----
             if view_keys is None or 'important' in view_keys:
                 due_start, due_end = p.get('imp_due_start'), p.get('imp_due_end')
-                important_todos, important_total = svc.get_high_priority_with_count(
-                    page=0, page_size=0,
-                    due_start=due_start, due_end=due_end,
-                    dedup_recurrence=True,
-                )
+                if show_done:
+                    important_todos, important_total = svc.get_high_priority_including_done_with_count(
+                        page=0, page_size=0,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
+                else:
+                    important_todos, important_total = svc.get_high_priority_with_count(
+                        page=0, page_size=0,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
                 important_tree = _build_todo_tree(important_todos, truncate_desc=True)
                 _inject_completed_flags(important_tree)
                 result['important'] = {'tree': important_tree, 'total': important_total}
@@ -423,6 +430,10 @@ class MainWindow(FluentWindow):
             self.floating.setGeometry(geo.get("x", 0), geo.get("y", 0),
                                       geo.get("w", 300), geo.get("h", 400))
             self._floating_view_key = settings.floating_view
+            # 恢复浮窗模式和按钮可见性
+            self.floating.set_view_key(self._floating_view_key)
+            if self._floating_view_key == "important":
+                self.floating.set_mode("quadrant")
         else:
             self._position_floating()
 
@@ -495,6 +506,12 @@ class MainWindow(FluentWindow):
         """从托盘显示浮窗"""
         if not self.floating.isVisible():
             self._position_floating()
+            # 根据视图设置浮窗模式
+            self.floating.set_view_key(self._floating_view_key)
+            if self._floating_view_key == "important":
+                self.floating.set_mode("quadrant")
+            else:
+                self.floating.set_mode("list")
             self._update_floating_data(self._floating_view_key)
         self.floating.show()
         self.floating.activateWindow()
@@ -727,6 +744,13 @@ class MainWindow(FluentWindow):
         if not self.floating.isVisible():
             self._position_floating()
         self._floating_view_key = key
+        # 控制四象限按钮可见性
+        self.floating.set_view_key(key)
+        # 重要任务视图默认打开四象限模式
+        if key == "important":
+            self.floating.set_mode("quadrant")
+        else:
+            self.floating.set_mode("list")
         self._update_floating_data(key)
         self.floating.show()
         self.floating.activateWindow()
@@ -773,10 +797,16 @@ class MainWindow(FluentWindow):
                     status=STATUS_TODO, sort_rules=settings.sort_rules
                 )
         elif view_key == "important":
-            todos = self.todo_service.get_high_priority(
-                dedup_recurrence=True,
-                due_start=due_start, due_end=due_end,
-            )
+            if settings.show_done_tasks:
+                todos = self.todo_service.get_high_priority_including_done(
+                    dedup_recurrence=True,
+                    due_start=due_start, due_end=due_end,
+                )
+            else:
+                todos = self.todo_service.get_high_priority(
+                    dedup_recurrence=True,
+                    due_start=due_start, due_end=due_end,
+                )
         elif view_key == "recent":
             if settings.show_done_tasks:
                 todos = self.todo_service.get_all_including_done(
@@ -1031,11 +1061,18 @@ class MainWindow(FluentWindow):
         elif view_key == "important":
             due_start, due_end = self._get_date_range(
                 view.current_time_filter(), view)
-            important_todos, important_total = self.todo_service.get_high_priority_with_count(
-                page=0, page_size=0,
-                due_start=due_start, due_end=due_end,
-                dedup_recurrence=True,
-            )
+            if show_done:
+                important_todos, important_total = self.todo_service.get_high_priority_including_done_with_count(
+                    page=0, page_size=0,
+                    due_start=due_start, due_end=due_end,
+                    dedup_recurrence=True,
+                )
+            else:
+                important_todos, important_total = self.todo_service.get_high_priority_with_count(
+                    page=0, page_size=0,
+                    due_start=due_start, due_end=due_end,
+                    dedup_recurrence=True,
+                )
             important_tree = self._build_todo_tree(important_todos, truncate_desc=True)
             self._inject_completed_dates(important_tree)
             view.set_todos(important_tree, total_count=important_total)
@@ -1182,19 +1219,34 @@ class MainWindow(FluentWindow):
 
         elif view_key == "important":
             due_start, due_end = self._get_date_range(view.current_time_filter(), view)
-            def query():
-                svc = TodoService()
-                try:
-                    todos, total = svc.get_high_priority_with_count(
-                        page=0, page_size=0,
-                        due_start=due_start, due_end=due_end,
-                        dedup_recurrence=True,
-                    )
-                    tree = _build_todo_tree(todos, truncate_desc=True)
-                    _inject_completed_flags(tree)
-                    return tree, total
-                finally:
-                    svc.close()
+            if show_done:
+                def query():
+                    svc = TodoService()
+                    try:
+                        todos, total = svc.get_high_priority_including_done_with_count(
+                            page=0, page_size=0,
+                            due_start=due_start, due_end=due_end,
+                            dedup_recurrence=True,
+                        )
+                        tree = _build_todo_tree(todos, truncate_desc=True)
+                        _inject_completed_flags(tree)
+                        return tree, total
+                    finally:
+                        svc.close()
+            else:
+                def query():
+                    svc = TodoService()
+                    try:
+                        todos, total = svc.get_high_priority_with_count(
+                            page=0, page_size=0,
+                            due_start=due_start, due_end=due_end,
+                            dedup_recurrence=True,
+                        )
+                        tree = _build_todo_tree(todos, truncate_desc=True)
+                        _inject_completed_flags(tree)
+                        return tree, total
+                    finally:
+                        svc.close()
 
         elif view_key == "done":
             done_filter = getattr(self, '_done_filter', 'done')

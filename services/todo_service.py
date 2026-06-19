@@ -737,12 +737,14 @@ class TodoService:
         return query.all(), total
 
     def _build_high_priority_query(self, due_start: date = None, due_end: date = None,
-                                    dedup_recurrence: bool = False):
+                                    dedup_recurrence: bool = False,
+                                    include_done: bool = False):
+        status_filter = Todo.status.in_([STATUS_TODO, STATUS_DONE]) if include_done else Todo.status == STATUS_TODO
         query = self.session.query(Todo).options(
             selectinload(Todo.children),
             joinedload(Todo.category),
         ).filter(
-            Todo.status == STATUS_TODO,
+            status_filter,
             Todo.priority != PRIORITY_NONE,
             Todo.is_recurrence_template == False,
         )
@@ -762,11 +764,34 @@ class TodoService:
             query = query.offset(page * page_size).limit(page_size)
         return query.all()
 
+    def get_high_priority_including_done(self, page: int = 0, page_size: int = 0,
+                                          due_start: date = None, due_end: date = None,
+                                          dedup_recurrence: bool = False) -> list[Todo]:
+        query = self._build_high_priority_query(due_start=due_start, due_end=due_end,
+                                                dedup_recurrence=dedup_recurrence,
+                                                include_done=True)
+        query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
+        if page_size > 0:
+            query = query.offset(page * page_size).limit(page_size)
+        return query.all()
+
     def get_high_priority_with_count(self, page: int = 0, page_size: int = 0,
                                      due_start: date = None, due_end: date = None,
                                      dedup_recurrence: bool = False) -> tuple[list[Todo], int]:
         query = self._build_high_priority_query(due_start=due_start, due_end=due_end,
                                                 dedup_recurrence=dedup_recurrence)
+        total = query.with_entities(func.count(Todo.id)).scalar()
+        query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
+        if page_size > 0:
+            query = query.offset(page * page_size).limit(page_size)
+        return query.all(), total
+
+    def get_high_priority_including_done_with_count(self, page: int = 0, page_size: int = 0,
+                                                     due_start: date = None, due_end: date = None,
+                                                     dedup_recurrence: bool = False) -> tuple[list[Todo], int]:
+        query = self._build_high_priority_query(due_start=due_start, due_end=due_end,
+                                                dedup_recurrence=dedup_recurrence,
+                                                include_done=True)
         total = query.with_entities(func.count(Todo.id)).scalar()
         query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
         if page_size > 0:
