@@ -173,10 +173,6 @@ class TodoDialog(QDialog):
     def closeEvent(self, event):
         # 保存窗口尺寸
         settings.todo_dialog_size = (self.width(), self.height())
-        if hasattr(self, '_category_service') and self._category_service:
-            self._category_service.close()
-        if hasattr(self, '_file_service') and self._file_service:
-            self._file_service.close()
         # 用户取消 / 直接关闭时，清理粘贴图暂存目录（成功保存后 _pending_paste_finalized=True，跳过）
         if not getattr(self, '_pending_paste_finalized', False):
             try:

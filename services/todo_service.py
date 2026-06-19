@@ -5,7 +5,7 @@ from datetime import datetime, date, timedelta
 from typing import Optional
 
 from sqlalchemy import func, case, literal, and_, or_
-from sqlalchemy.orm import Session, selectinload, joinedload
+from sqlalchemy.orm import selectinload, joinedload
 
 from models.database import db
 from models.todo import Todo
@@ -18,25 +18,7 @@ RECURRENCE_END_MAX_DAYS = 365
 
 
 class TodoService:
-    """待办事项业务逻辑"""
-
-    def __init__(self):
-        self.session: Session = db.get_session()
-
-    def reset_session(self):
-        """重置会话，清理 identity map 缓存，防止长期持有导致内存膨胀"""
-        try:
-            self.session.close()
-        except Exception:
-            pass
-        self.session = db.get_session()
-
-    def _refresh_session(self):
-        """刷新会话"""
-        try:
-            self.session.commit()
-        except Exception:
-            self.session.rollback()
+    """待办事项业务逻辑（无状态，每次方法调用独立 session）"""
 
     @staticmethod
     def _coerce_date(value, field_name: str):
@@ -77,6 +59,15 @@ class TodoService:
             raise ValueError("重复结束日期不能早于今日")
         if end_date > today + timedelta(days=RECURRENCE_END_MAX_DAYS):
             raise ValueError("重复结束日期不能超过一年")
+
+    # ---- 内部查询辅助 ----
+
+    @staticmethod
+    def _get_by_id(session, todo_id: int) -> Optional[Todo]:
+        """根据 ID 获取（内部方法，使用传入的 session，带 eager load）"""
+        return session.query(Todo).options(
+            joinedload(Todo.category)
+        ).filter(Todo.id == todo_id).first()
 
     # ---- CRUD ----
 
@@ -122,38 +113,38 @@ class TodoService:
 
         is_template = bool(recurrence_type and pid is None)
 
-        max_order = self.session.query(Todo).filter(
-            Todo.pid == pid
-        ).count()
+        with db.session_scope() as session:
+            max_order = session.query(Todo).filter(
+                Todo.pid == pid
+            ).count()
 
-        todo = Todo(
-            title=title.strip(),
-            description=description.strip(),
-            priority=priority,
-            status=STATUS_TODO,
-            color_tag=color_tag,
-            start_date=start_date,
-            due_date=due_date,
-            task_type=task_type,
-            auto_postpone=auto_postpone,
-            sort_order=max_order,
-            category_id=category_id,
-            pid=pid,
-            recurrence_type=recurrence_type,
-            recurrence_interval=recurrence_interval,
-            recurrence_day=recurrence_day,
-            recurrence_start_date=recurrence_start_date,
-            recurrence_end_date=recurrence_end_date,
-            is_recurrence_template=is_template,
-        )
-        self.session.add(todo)
-        self.session.commit()
-        self.session.refresh(todo)
+            todo = Todo(
+                title=title.strip(),
+                description=description.strip(),
+                priority=priority,
+                status=STATUS_TODO,
+                color_tag=color_tag,
+                start_date=start_date,
+                due_date=due_date,
+                task_type=task_type,
+                auto_postpone=auto_postpone,
+                sort_order=max_order,
+                category_id=category_id,
+                pid=pid,
+                recurrence_type=recurrence_type,
+                recurrence_interval=recurrence_interval,
+                recurrence_day=recurrence_day,
+                recurrence_start_date=recurrence_start_date,
+                recurrence_end_date=recurrence_end_date,
+                is_recurrence_template=is_template,
+            )
+            session.add(todo)
+            session.flush()
 
-        if is_template:
-            self.ensure_instances(todo.id)
+            if is_template:
+                self._ensure_instances(session, todo.id)
 
-        return todo
+            return todo
 
     def create_raw(self, **kwargs) -> Todo:
         """直接创建待办事项"""
@@ -168,186 +159,188 @@ class TodoService:
             if key in kwargs:
                 kwargs[key] = self._coerce_date(kwargs[key], key)
 
-        if 'sort_order' not in kwargs:
-            pid = kwargs.get('pid')
-            max_order = self.session.query(Todo).filter(
-                Todo.pid == pid
-            ).count()
-            kwargs['sort_order'] = max_order
+        with db.session_scope() as session:
+            if 'sort_order' not in kwargs:
+                pid = kwargs.get('pid')
+                max_order = session.query(Todo).filter(
+                    Todo.pid == pid
+                ).count()
+                kwargs['sort_order'] = max_order
 
-        if 'status' not in kwargs:
-            kwargs['status'] = STATUS_TODO
+            if 'status' not in kwargs:
+                kwargs['status'] = STATUS_TODO
 
-        todo = Todo(**kwargs)
-        self.session.add(todo)
-        self.session.commit()
-        self.session.refresh(todo)
-        return todo
+            todo = Todo(**kwargs)
+            session.add(todo)
+            session.flush()
+            return todo
 
     def update(self, todo_id: int, **kwargs) -> Optional[Todo]:
         """更新待办事项"""
-        todo = self.session.query(Todo).filter(Todo.id == todo_id).first()
-        if not todo:
-            return None
+        with db.session_scope() as session:
+            todo = session.query(Todo).filter(Todo.id == todo_id).first()
+            if not todo:
+                return None
 
-        # 周期任务不允许开启自动延期
-        task_type = kwargs.get("task_type") or todo.task_type or "default"
-        if task_type == "periodic" and kwargs.get("auto_postpone"):
-            kwargs["auto_postpone"] = False
+            # 周期任务不允许开启自动延期
+            task_type = kwargs.get("task_type") or todo.task_type or "default"
+            if task_type == "periodic" and kwargs.get("auto_postpone"):
+                kwargs["auto_postpone"] = False
 
-        # Date 类型字段转换
-        for key in ('due_date', 'start_date', 'recurrence_end_date',
-                     'recurrence_start_date'):
-            if key in kwargs:
-                kwargs[key] = self._coerce_date(kwargs[key], key)
+            # Date 类型字段转换
+            for key in ('due_date', 'start_date', 'recurrence_end_date',
+                         'recurrence_start_date'):
+                if key in kwargs:
+                    kwargs[key] = self._coerce_date(kwargs[key], key)
 
-        # DateTime 类型字段转换
-        for key in ('completed_at',):
-            if key in kwargs:
-                kwargs[key] = self._coerce_date(kwargs[key], key)
+            # DateTime 类型字段转换
+            for key in ('completed_at',):
+                if key in kwargs:
+                    kwargs[key] = self._coerce_date(kwargs[key], key)
 
-        if 'recurrence_end_date' in kwargs:
-            self._validate_recurrence_end_date(kwargs['recurrence_end_date'])
+            if 'recurrence_end_date' in kwargs:
+                self._validate_recurrence_end_date(kwargs['recurrence_end_date'])
 
-        old_recurrence_type = todo.recurrence_type
-        was_template = todo.is_recurrence_template
+            old_recurrence_type = todo.recurrence_type
+            was_template = todo.is_recurrence_template
 
-        update_fields = set(kwargs.keys())
-        for key, value in kwargs.items():
-            if hasattr(todo, key) and (value is not None or key in update_fields):
-                setattr(todo, key, value)
+            update_fields = set(kwargs.keys())
+            for key, value in kwargs.items():
+                if hasattr(todo, key) and (value is not None or key in update_fields):
+                    setattr(todo, key, value)
 
-        todo.updated_at = datetime.now()
+            todo.updated_at = datetime.now()
 
-        new_recurrence_type = todo.recurrence_type
-        is_instance = bool(todo.recurrence_template_id) and bool(todo.recurrence_type)
+            new_recurrence_type = todo.recurrence_type
+            is_instance = bool(todo.recurrence_template_id) and bool(todo.recurrence_type)
 
-        if not is_instance and not was_template and new_recurrence_type and todo.pid is None:
-            todo.is_recurrence_template = True
-            self.session.commit()
-            self.session.refresh(todo)
-            self.ensure_instances(todo.id)
+            if not is_instance and not was_template and new_recurrence_type and todo.pid is None:
+                todo.is_recurrence_template = True
+                session.flush()
+                self._ensure_instances(session, todo.id)
+                return todo
+
+            if was_template and not new_recurrence_type:
+                todo.is_recurrence_template = False
+                session.query(Todo).filter(
+                    Todo.recurrence_template_id == todo.id
+                ).delete()
+                session.flush()
+                return todo
+
+            if was_template and new_recurrence_type:
+                session.flush()
+                session.query(Todo).filter(
+                    Todo.recurrence_template_id == todo.id,
+                    Todo.is_exception == False,
+                    Todo.occurrence_date >= date.today(),
+                ).delete()
+                self._ensure_instances(session, todo.id)
+                return todo
+
+            session.flush()
             return todo
-
-        if was_template and not new_recurrence_type:
-            todo.is_recurrence_template = False
-            self.session.query(Todo).filter(
-                Todo.recurrence_template_id == todo.id
-            ).delete()
-            self.session.commit()
-            self.session.refresh(todo)
-            return todo
-
-        if was_template and new_recurrence_type:
-            self.session.commit()
-            self.session.query(Todo).filter(
-                Todo.recurrence_template_id == todo.id,
-                Todo.is_exception == False,
-                Todo.occurrence_date >= date.today(),
-            ).delete()
-            self.session.refresh(todo)
-            self.ensure_instances(todo.id)
-            return todo
-
-        self.session.commit()
-        self.session.refresh(todo)
-        return todo
 
     def delete(self, todo_id: int) -> bool:
         """删除待办事项"""
-        todo = self.session.query(Todo).filter(Todo.id == todo_id).first()
-        if not todo:
-            return False
-        self.session.query(Todo).filter(Todo.pid == todo_id).delete(synchronize_session=False)
-        self.session.delete(todo)
-        self.session.commit()
-        return True
+        with db.session_scope() as session:
+            todo = session.query(Todo).filter(Todo.id == todo_id).first()
+            if not todo:
+                return False
+            session.query(Todo).filter(Todo.pid == todo_id).delete(synchronize_session=False)
+            session.delete(todo)
+            return True
 
     def get_by_id(self, todo_id: int) -> Optional[Todo]:
         """根据 ID 获取"""
-        return self.session.query(Todo).filter(Todo.id == todo_id).first()
+        with db.session_scope() as session:
+            return self._get_by_id(session, todo_id)
 
     # ---- 状态操作 ----
 
     def toggle_done(self, todo_id: int) -> Optional[Todo]:
         """切换完成状态，子任务全部完成时自动完成父任务"""
-        todo = self.get_by_id(todo_id)
-        if not todo:
-            return None
+        with db.session_scope() as session:
+            todo = self._get_by_id(session, todo_id)
+            if not todo:
+                return None
 
-        if todo.status == STATUS_TODO:
-            new_status = STATUS_DONE
-        elif todo.status == STATUS_DONE:
-            new_status = STATUS_TODO
-        else:
+            if todo.status == STATUS_TODO:
+                new_status = STATUS_DONE
+            elif todo.status == STATUS_DONE:
+                new_status = STATUS_TODO
+            else:
+                return todo
+
+            todo.status = new_status
+            todo.updated_at = datetime.now()
+
+            if new_status == STATUS_DONE:
+                todo.completed_at = datetime.now()
+            else:
+                todo.completed_at = None
+
+            if new_status == STATUS_DONE and todo.recurrence_template_id is not None and not todo.is_recurrence_template:
+                todo.recurrence_type = None
+                todo.recurrence_interval = 1
+                todo.recurrence_day = None
+                todo.recurrence_end_date = None
+
+            if todo.pid is not None:
+                parent = self._get_by_id(session, todo.pid)
+                if parent and not parent.is_recurrence_template:
+                    all_done = self._check_children_all_done(session, todo.pid)
+                    if parent.status != (STATUS_DONE if all_done else STATUS_TODO):
+                        parent.status = STATUS_DONE if all_done else STATUS_TODO
+                        parent.updated_at = datetime.now()
+                        parent.completed_at = datetime.now() if all_done else None
+            else:
+                children = session.query(Todo).filter(Todo.pid == todo.id).all()
+                for child in children:
+                    child.status = new_status
+                    child.updated_at = datetime.now()
+                    child.completed_at = datetime.now() if new_status == STATUS_DONE else None
+
+            session.flush()
             return todo
 
-        todo.status = new_status
-        todo.updated_at = datetime.now()
-
-        if new_status == STATUS_DONE:
-            todo.completed_at = datetime.now()
-        else:
-            todo.completed_at = None
-
-        if new_status == STATUS_DONE and todo.recurrence_template_id is not None and not todo.is_recurrence_template:
-            todo.recurrence_type = None
-            todo.recurrence_interval = 1
-            todo.recurrence_day = None
-            todo.recurrence_end_date = None
-
-        if todo.pid is not None:
-            parent = self.get_by_id(todo.pid)
-            if parent and not parent.is_recurrence_template:
-                all_done = self._check_children_all_done(todo.pid)
-                if parent.status != (STATUS_DONE if all_done else STATUS_TODO):
-                    parent.status = STATUS_DONE if all_done else STATUS_TODO
-                    parent.updated_at = datetime.now()
-                    parent.completed_at = datetime.now() if all_done else None
-        else:
-            children = self.session.query(Todo).filter(Todo.pid == todo.id).all()
-            for child in children:
-                child.status = new_status
-                child.updated_at = datetime.now()
-                child.completed_at = datetime.now() if new_status == STATUS_DONE else None
-
-        self.session.commit()
-        self.session.refresh(todo)
-        return todo
-
-    def _check_children_all_done(self, parent_id: int) -> bool:
+    @staticmethod
+    def _check_children_all_done(session, parent_id: int) -> bool:
         """检查父任务下所有子任务是否全部完成"""
-        children = self.session.query(Todo).filter(Todo.pid == parent_id).all()
+        children = session.query(Todo).filter(Todo.pid == parent_id).all()
         if not children:
             return False
         return all(c.status == STATUS_DONE for c in children)
 
     def get_children_count(self, parent_id: int) -> int:
         """获取父任务的子任务数量"""
-        return self.session.query(Todo).filter(Todo.pid == parent_id).count()
+        with db.session_scope() as session:
+            return session.query(Todo).filter(Todo.pid == parent_id).count()
 
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:
         """自动延期过期任务（排除模板、重复实例和周期任务），并生成重复实例"""
         today = date.today()
-        count = self.session.query(Todo).filter(
-            Todo.pid.is_(None),
-            Todo.status == STATUS_TODO,
-            Todo.auto_postpone == True,
-            Todo.due_date < today,
-            Todo.is_recurrence_template == False,
-            Todo.recurrence_type.is_(None),
-            or_(Todo.task_type != "periodic", Todo.task_type.is_(None)),
-        ).update({Todo.due_date: today, Todo.updated_at: datetime.now()},
-                 synchronize_session=False)
-        self.session.commit()
-        self.ensure_instances()
-        return count
+        with db.session_scope() as session:
+            count = session.query(Todo).filter(
+                Todo.pid.is_(None),
+                Todo.status == STATUS_TODO,
+                Todo.auto_postpone == True,
+                Todo.due_date < today,
+                Todo.is_recurrence_template == False,
+                Todo.recurrence_type.is_(None),
+                or_(Todo.task_type != "periodic", Todo.task_type.is_(None)),
+            ).update({Todo.due_date: today, Todo.updated_at: datetime.now()},
+                     synchronize_session=False)
+            session.flush()
+            self._ensure_instances(session)
+            return count
 
     # ---- 查询：返回所有任务 ----
 
-    def _apply_recurrence_dedup(self, query):
+    @staticmethod
+    def _apply_recurrence_dedup(session, query):
         """在 SQL 层完成循环任务去重，每个 recurrence_template_id 只保留最优实例。
 
         评分规则与原 Python _dedup_recurrence() 一致：
@@ -364,7 +357,7 @@ class TodoService:
         )
         distance_expr = func.abs(func.julianday(T2.c.due_date) - func.julianday(today))
         best_id = (
-            self.session.query(T2.c.id)
+            session.query(T2.c.id)
             .filter(
                 T2.c.recurrence_template_id == Todo.recurrence_template_id,
                 T2.c.is_recurrence_template == False,
@@ -379,7 +372,8 @@ class TodoService:
             (Todo.recurrence_template_id == None) | (Todo.id == best_id)
         )
 
-    def _apply_date_filter(self, query, due_start: date = None, due_end: date = None):
+    @staticmethod
+    def _apply_date_filter(query, due_start: date = None, due_end: date = None):
         """应用日期过滤，周期任务按生效区间交集匹配，其他任务按 due_date 范围过滤"""
         # 非周期任务：按 due_date 范围过滤
         non_periodic_cond = []
@@ -443,12 +437,13 @@ class TodoService:
         else:
             return "active"
 
-    def _build_get_all_query(self, status: int = STATUS_TODO,
+    @staticmethod
+    def _build_get_all_query(session, status: int = STATUS_TODO,
                             priority: Optional[int] = None, color_tag: Optional[str] = None,
                             category_id: Optional[int] = None,
                             due_start: date = None, due_end: date = None,
                             dedup_recurrence: bool = False):
-        query = self.session.query(Todo).options(
+        query = session.query(Todo).options(
             selectinload(Todo.children),
             joinedload(Todo.category),
         ).filter(
@@ -463,9 +458,9 @@ class TodoService:
         if category_id is not None:
             query = query.filter(Todo.category_id == category_id)
         if due_start is not None or due_end is not None:
-            query = self._apply_date_filter(query, due_start, due_end)
+            query = TodoService._apply_date_filter(query, due_start, due_end)
         if dedup_recurrence:
-            query = self._apply_recurrence_dedup(query)
+            query = TodoService._apply_recurrence_dedup(session, query)
         return query
 
     def get_all(self, status: int = STATUS_TODO,
@@ -476,21 +471,22 @@ class TodoService:
                 page: int = 0, page_size: int = 0,
                 due_start: date = None, due_end: date = None,
                 dedup_recurrence: bool = False) -> list[Todo]:
-        query = self._build_get_all_query(
-            status=status, priority=priority, color_tag=color_tag,
-            category_id=category_id, due_start=due_start, due_end=due_end,
-            dedup_recurrence=dedup_recurrence,
-        )
+        with db.session_scope() as session:
+            query = self._build_get_all_query(
+                session, status=status, priority=priority, color_tag=color_tag,
+                category_id=category_id, due_start=due_start, due_end=due_end,
+                dedup_recurrence=dedup_recurrence,
+            )
 
-        if sort_rules:
-            query = self._apply_multi_sort(query, sort_rules)
-        else:
-            query = self._apply_sort(query, sort_by, sort_order)
+            if sort_rules:
+                query = self._apply_multi_sort(query, sort_rules)
+            else:
+                query = self._apply_sort(query, sort_by, sort_order)
 
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
 
-        return query.all()
+            return query.all()
 
     def get_all_with_count(self, status: int = STATUS_TODO,
                            priority: Optional[int] = None, color_tag: Optional[str] = None,
@@ -500,33 +496,38 @@ class TodoService:
                            page: int = 0, page_size: int = 0,
                            due_start: date = None, due_end: date = None,
                            dedup_recurrence: bool = False) -> tuple[list[Todo], int]:
-        query = self._build_get_all_query(
-            status=status, priority=priority, color_tag=color_tag,
-            category_id=category_id, due_start=due_start, due_end=due_end,
-            dedup_recurrence=dedup_recurrence,
-        )
-        total = query.with_entities(func.count(Todo.id)).scalar()
+        with db.session_scope() as session:
+            query = self._build_get_all_query(
+                session, status=status, priority=priority, color_tag=color_tag,
+                category_id=category_id, due_start=due_start, due_end=due_end,
+                dedup_recurrence=dedup_recurrence,
+            )
+            total = query.with_entities(func.count(Todo.id)).scalar()
 
-        if sort_rules:
-            query = self._apply_multi_sort(query, sort_rules)
-        else:
-            query = self._apply_sort(query, sort_by, sort_order)
+            if sort_rules:
+                query = self._apply_multi_sort(query, sort_rules)
+            else:
+                query = self._apply_sort(query, sort_by, sort_order)
 
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
 
-        return query.all(), total
+            return query.all(), total
 
     def get_all_including_archived(self) -> list[Todo]:
         """获取所有任务"""
-        return self.session.query(Todo).all()
+        with db.session_scope() as session:
+            return session.query(Todo).options(
+                joinedload(Todo.category)
+            ).all()
 
-    def _build_get_all_including_done_query(self,
+    @staticmethod
+    def _build_get_all_including_done_query(session,
                                            category_id: Optional[int] = None,
                                            due_start: date = None, due_end: date = None,
                                            dedup_recurrence: bool = False,
                                            **kwargs):
-        query = self.session.query(Todo).options(
+        query = session.query(Todo).options(
             selectinload(Todo.children),
             joinedload(Todo.category),
         ).filter(
@@ -543,9 +544,9 @@ class TodoService:
         if category_id is not None:
             query = query.filter(Todo.category_id == category_id)
         if due_start is not None or due_end is not None:
-            query = self._apply_date_filter(query, due_start, due_end)
+            query = TodoService._apply_date_filter(query, due_start, due_end)
         if dedup_recurrence:
-            query = self._apply_recurrence_dedup(query)
+            query = TodoService._apply_recurrence_dedup(session, query)
         return query
 
     def get_all_including_done(self, sort_by: str = "created_at",
@@ -557,23 +558,24 @@ class TodoService:
                                 dedup_recurrence: bool = False,
                                 **kwargs) -> list[Todo]:
         """获取所有任务"""
-        query = self._build_get_all_including_done_query(
-            category_id=category_id, due_start=due_start, due_end=due_end,
-            dedup_recurrence=dedup_recurrence, **kwargs,
-        )
+        with db.session_scope() as session:
+            query = self._build_get_all_including_done_query(
+                session, category_id=category_id, due_start=due_start, due_end=due_end,
+                dedup_recurrence=dedup_recurrence, **kwargs,
+            )
 
-        if not sort_rules and sort_by == "custom":
-            sort_rules = ["custom"]
-        if sort_rules:
-            sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
-        else:
-            sort_exprs = self._build_sort_expr(sort_by, sort_order)
-        query = query.order_by(Todo.status.asc(), *sort_exprs)
+            if not sort_rules and sort_by == "custom":
+                sort_rules = ["custom"]
+            if sort_rules:
+                sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
+            else:
+                sort_exprs = self._build_sort_expr(sort_by, sort_order)
+            query = query.order_by(Todo.status.asc(), *sort_exprs)
 
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
 
-        return query.all()
+            return query.all()
 
     def get_all_including_done_with_count(self, sort_by: str = "created_at",
                                           sort_order: str = "desc",
@@ -583,26 +585,28 @@ class TodoService:
                                           due_start: date = None, due_end: date = None,
                                           dedup_recurrence: bool = False,
                                           **kwargs) -> tuple[list[Todo], int]:
-        query = self._build_get_all_including_done_query(
-            category_id=category_id, due_start=due_start, due_end=due_end,
-            dedup_recurrence=dedup_recurrence, **kwargs,
-        )
-        total = query.with_entities(func.count(Todo.id)).scalar()
+        with db.session_scope() as session:
+            query = self._build_get_all_including_done_query(
+                session, category_id=category_id, due_start=due_start, due_end=due_end,
+                dedup_recurrence=dedup_recurrence, **kwargs,
+            )
+            total = query.with_entities(func.count(Todo.id)).scalar()
 
-        if not sort_rules and sort_by == "custom":
-            sort_rules = ["custom"]
-        if sort_rules:
-            sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
-        else:
-            sort_exprs = self._build_sort_expr(sort_by, sort_order)
-        query = query.order_by(Todo.status.asc(), *sort_exprs)
+            if not sort_rules and sort_by == "custom":
+                sort_rules = ["custom"]
+            if sort_rules:
+                sort_exprs = [self._sort_expr_for_field(f) for f in sort_rules]
+            else:
+                sort_exprs = self._build_sort_expr(sort_by, sort_order)
+            query = query.order_by(Todo.status.asc(), *sort_exprs)
 
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
 
-        return query.all(), total
+            return query.all(), total
 
-    def _build_count_query(self, status=None, status_list=None,
+    @staticmethod
+    def _build_count_query(session, status=None, status_list=None,
                            priority: Optional[int] = None,
                            priority_op: str = "==",
                            color_tag: Optional[str] = None,
@@ -611,7 +615,7 @@ class TodoService:
                            exclude_recurrence: bool = False,
                            due_start: date = None, due_end: date = None):
         """构建计数查询的通用方法"""
-        query = self.session.query(func.count(Todo.id)).filter(
+        query = session.query(func.count(Todo.id)).filter(
             Todo.is_recurrence_template == False,
         )
         if status is not None:
@@ -644,23 +648,26 @@ class TodoService:
                        color_tag: Optional[str] = None,
                        category_id: Optional[int] = None,
                        due_start: date = None, due_end: date = None) -> int:
-        return self._build_count_query(status=status, priority=priority,
-                                       color_tag=color_tag, category_id=category_id,
-                                       due_start=due_start, due_end=due_end)
+        with db.session_scope() as session:
+            return self._build_count_query(session, status=status, priority=priority,
+                                           color_tag=color_tag, category_id=category_id,
+                                           due_start=due_start, due_end=due_end)
 
     def count_filtered_including_done(self,
                                       priority: Optional[int] = None,
                                       color_tag: Optional[str] = None,
                                       category_id: Optional[int] = None,
                                       due_start: date = None, due_end: date = None) -> int:
-        return self._build_count_query(status_list=[STATUS_TODO, STATUS_DONE],
-                                       priority=priority, color_tag=color_tag,
-                                       category_id=category_id,
-                                       due_start=due_start, due_end=due_end)
+        with db.session_scope() as session:
+            return self._build_count_query(session, status_list=[STATUS_TODO, STATUS_DONE],
+                                           priority=priority, color_tag=color_tag,
+                                           category_id=category_id,
+                                           due_start=due_start, due_end=due_end)
 
-    def _apply_sort(self, query, sort_by: str = "created_at", sort_order: str = "desc"):
+    @staticmethod
+    def _apply_sort(query, sort_by: str = "created_at", sort_order: str = "desc"):
         """应用排序规则"""
-        sort_expr = self._build_sort_expr(sort_by, sort_order)
+        sort_expr = TodoService._build_sort_expr(sort_by, sort_order)
         return query.order_by(*sort_expr)
 
     @staticmethod
@@ -675,7 +682,8 @@ class TodoService:
         else:
             return Todo.created_at.desc()
 
-    def _build_sort_expr(self, sort_by: str, sort_order: str):
+    @staticmethod
+    def _build_sort_expr(sort_by: str, sort_order: str):
         """构建排序表达式，主排序 + 副排序"""
         if sort_by == "sort_order":
             if sort_order == "asc":
@@ -698,7 +706,8 @@ class TodoService:
             else:
                 return [Todo.created_at.desc(), Todo.priority.asc()]
 
-    def _apply_multi_sort(self, query, sort_rules: list[str]):
+    @staticmethod
+    def _apply_multi_sort(query, sort_rules: list[str]):
         """应用多级排序规则"""
         if not sort_rules:
             return query
@@ -707,12 +716,13 @@ class TodoService:
         for field in sort_rules:
             if field not in seen:
                 seen.add(field)
-                exprs.append(self._sort_expr_for_field(field))
+                exprs.append(TodoService._sort_expr_for_field(field))
         return query.order_by(*exprs)
 
-    def _build_today_query(self):
+    @staticmethod
+    def _build_today_query(session):
         today = date.today()
-        return self.session.query(Todo).options(
+        return session.query(Todo).options(
             selectinload(Todo.children),
             joinedload(Todo.category),
         ).filter(
@@ -723,24 +733,27 @@ class TodoService:
 
     def get_today(self, page: int = 0, page_size: int = 0) -> list[Todo]:
         """获取今日到期的所有任务"""
-        query = self._build_today_query().order_by(Todo.priority.asc(), Todo.created_at.desc())
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
-        return query.all()
+        with db.session_scope() as session:
+            query = self._build_today_query(session).order_by(Todo.priority.asc(), Todo.created_at.desc())
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
+            return query.all()
 
     def get_today_with_count(self, page: int = 0, page_size: int = 0) -> tuple[list[Todo], int]:
-        query = self._build_today_query()
-        total = query.with_entities(func.count(Todo.id)).scalar()
-        query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
-        return query.all(), total
+        with db.session_scope() as session:
+            query = self._build_today_query(session)
+            total = query.with_entities(func.count(Todo.id)).scalar()
+            query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
+            return query.all(), total
 
-    def _build_high_priority_query(self, due_start: date = None, due_end: date = None,
+    @staticmethod
+    def _build_high_priority_query(session, due_start: date = None, due_end: date = None,
                                     dedup_recurrence: bool = False,
                                     include_done: bool = False):
         status_filter = Todo.status.in_([STATUS_TODO, STATUS_DONE]) if include_done else Todo.status == STATUS_TODO
-        query = self.session.query(Todo).options(
+        query = session.query(Todo).options(
             selectinload(Todo.children),
             joinedload(Todo.category),
         ).filter(
@@ -749,59 +762,64 @@ class TodoService:
             Todo.is_recurrence_template == False,
         )
         if due_start is not None or due_end is not None:
-            query = self._apply_date_filter(query, due_start, due_end)
+            query = TodoService._apply_date_filter(query, due_start, due_end)
         if dedup_recurrence:
-            query = self._apply_recurrence_dedup(query)
+            query = TodoService._apply_recurrence_dedup(session, query)
         return query
 
     def get_high_priority(self, page: int = 0, page_size: int = 0,
                           due_start: date = None, due_end: date = None,
                           dedup_recurrence: bool = False) -> list[Todo]:
-        query = self._build_high_priority_query(due_start=due_start, due_end=due_end,
-                                                dedup_recurrence=dedup_recurrence)
-        query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
-        return query.all()
+        with db.session_scope() as session:
+            query = self._build_high_priority_query(session, due_start=due_start, due_end=due_end,
+                                                    dedup_recurrence=dedup_recurrence)
+            query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
+            return query.all()
 
     def get_high_priority_including_done(self, page: int = 0, page_size: int = 0,
                                           due_start: date = None, due_end: date = None,
                                           dedup_recurrence: bool = False) -> list[Todo]:
-        query = self._build_high_priority_query(due_start=due_start, due_end=due_end,
-                                                dedup_recurrence=dedup_recurrence,
-                                                include_done=True)
-        query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
-        return query.all()
+        with db.session_scope() as session:
+            query = self._build_high_priority_query(session, due_start=due_start, due_end=due_end,
+                                                    dedup_recurrence=dedup_recurrence,
+                                                    include_done=True)
+            query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
+            return query.all()
 
     def get_high_priority_with_count(self, page: int = 0, page_size: int = 0,
                                      due_start: date = None, due_end: date = None,
                                      dedup_recurrence: bool = False) -> tuple[list[Todo], int]:
-        query = self._build_high_priority_query(due_start=due_start, due_end=due_end,
-                                                dedup_recurrence=dedup_recurrence)
-        total = query.with_entities(func.count(Todo.id)).scalar()
-        query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
-        return query.all(), total
+        with db.session_scope() as session:
+            query = self._build_high_priority_query(session, due_start=due_start, due_end=due_end,
+                                                    dedup_recurrence=dedup_recurrence)
+            total = query.with_entities(func.count(Todo.id)).scalar()
+            query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
+            return query.all(), total
 
     def get_high_priority_including_done_with_count(self, page: int = 0, page_size: int = 0,
                                                      due_start: date = None, due_end: date = None,
                                                      dedup_recurrence: bool = False) -> tuple[list[Todo], int]:
-        query = self._build_high_priority_query(due_start=due_start, due_end=due_end,
-                                                dedup_recurrence=dedup_recurrence,
-                                                include_done=True)
-        total = query.with_entities(func.count(Todo.id)).scalar()
-        query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
-        return query.all(), total
+        with db.session_scope() as session:
+            query = self._build_high_priority_query(session, due_start=due_start, due_end=due_end,
+                                                    dedup_recurrence=dedup_recurrence,
+                                                    include_done=True)
+            total = query.with_entities(func.count(Todo.id)).scalar()
+            query = query.order_by(Todo.priority.asc(), Todo.created_at.desc())
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
+            return query.all(), total
 
-    def _build_by_category_query(self, category_id: int,
+    @staticmethod
+    def _build_by_category_query(session, category_id: int,
                                   due_start: date = None, due_end: date = None,
                                   dedup_recurrence: bool = False):
-        query = self.session.query(Todo).options(
+        query = session.query(Todo).options(
             selectinload(Todo.children),
             joinedload(Todo.category),
         ).filter(
@@ -810,150 +828,161 @@ class TodoService:
             Todo.is_recurrence_template == False,
         )
         if due_start is not None or due_end is not None:
-            query = self._apply_date_filter(query, due_start, due_end)
+            query = TodoService._apply_date_filter(query, due_start, due_end)
         if dedup_recurrence:
-            query = self._apply_recurrence_dedup(query)
+            query = TodoService._apply_recurrence_dedup(session, query)
         return query
 
     def get_by_category(self, category_id: int, page: int = 0, page_size: int = 0,
                         due_start: date = None, due_end: date = None,
                         dedup_recurrence: bool = False) -> list[Todo]:
-        query = self._build_by_category_query(category_id, due_start=due_start, due_end=due_end,
-                                              dedup_recurrence=dedup_recurrence)
-        query = query.order_by(Todo.created_at.desc())
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
-        return query.all()
+        with db.session_scope() as session:
+            query = self._build_by_category_query(session, category_id, due_start=due_start, due_end=due_end,
+                                                  dedup_recurrence=dedup_recurrence)
+            query = query.order_by(Todo.created_at.desc())
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
+            return query.all()
 
     def get_by_category_with_count(self, category_id: int, page: int = 0, page_size: int = 0,
                                     due_start: date = None, due_end: date = None,
                                     dedup_recurrence: bool = False) -> tuple[list[Todo], int]:
-        query = self._build_by_category_query(category_id, due_start=due_start, due_end=due_end,
-                                              dedup_recurrence=dedup_recurrence)
-        total = query.with_entities(func.count(Todo.id)).scalar()
-        query = query.order_by(Todo.created_at.desc())
-        if page_size > 0:
-            query = query.offset(page * page_size).limit(page_size)
-        return query.all(), total
+        with db.session_scope() as session:
+            query = self._build_by_category_query(session, category_id, due_start=due_start, due_end=due_end,
+                                                  dedup_recurrence=dedup_recurrence)
+            total = query.with_entities(func.count(Todo.id)).scalar()
+            query = query.order_by(Todo.created_at.desc())
+            if page_size > 0:
+                query = query.offset(page * page_size).limit(page_size)
+            return query.all(), total
 
     def get_overdue(self) -> list[Todo]:
         """获取已过期的所有任务（排除模板和重复实例）"""
         today = date.today()
-        return self.session.query(Todo).options(
-            selectinload(Todo.children),
-            joinedload(Todo.category),
-        ).filter(
-            Todo.status == STATUS_TODO,
-            Todo.due_date < today,
-            Todo.is_recurrence_template == False,
-            Todo.recurrence_type.is_(None),
-        ).order_by(Todo.due_date.asc()).all()
+        with db.session_scope() as session:
+            return session.query(Todo).options(
+                selectinload(Todo.children),
+                joinedload(Todo.category),
+            ).filter(
+                Todo.status == STATUS_TODO,
+                Todo.due_date < today,
+                Todo.is_recurrence_template == False,
+                Todo.recurrence_type.is_(None),
+            ).order_by(Todo.due_date.asc()).all()
 
     # ---- 统计 ----
 
     def count_by_status(self, status: int) -> int:
         """统计父任务数量"""
-        return self.session.query(Todo).filter(
-            Todo.pid.is_(None),
-            Todo.status == status,
-            Todo.is_recurrence_template == False,
-        ).count()
+        with db.session_scope() as session:
+            return session.query(Todo).filter(
+                Todo.pid.is_(None),
+                Todo.status == status,
+                Todo.is_recurrence_template == False,
+            ).count()
 
     def count_today(self) -> int:
         today = date.today()
-        return self.session.query(Todo).filter(
-            Todo.pid.is_(None),
-            Todo.status == STATUS_TODO,
-            Todo.due_date == today,
-            Todo.is_recurrence_template == False,
-        ).count()
+        with db.session_scope() as session:
+            return session.query(Todo).filter(
+                Todo.pid.is_(None),
+                Todo.status == STATUS_TODO,
+                Todo.due_date == today,
+                Todo.is_recurrence_template == False,
+            ).count()
 
     def count_overdue(self) -> int:
         today = date.today()
-        return self.session.query(Todo).filter(
-            Todo.pid.is_(None),
-            Todo.status == STATUS_TODO,
-            Todo.due_date < today,
-            Todo.is_recurrence_template == False,
-            Todo.recurrence_type.is_(None),
-        ).count()
+        with db.session_scope() as session:
+            return session.query(Todo).filter(
+                Todo.pid.is_(None),
+                Todo.status == STATUS_TODO,
+                Todo.due_date < today,
+                Todo.is_recurrence_template == False,
+                Todo.recurrence_type.is_(None),
+            ).count()
 
     def count_all_view_stats(self, due_start: date = None, due_end: date = None) -> dict:
         """统计全部任务视图的数据（仅父任务）：总数、已完成数和已超期数"""
         today = date.today()
-        base = self.session.query(Todo).filter(
-            Todo.pid.is_(None),
-            Todo.is_recurrence_template == False,
-        )
-        if due_start is not None or due_end is not None:
-            base = self._apply_date_filter(base, due_start, due_end)
+        with db.session_scope() as session:
+            base = session.query(Todo).filter(
+                Todo.pid.is_(None),
+                Todo.is_recurrence_template == False,
+            )
+            if due_start is not None or due_end is not None:
+                base = self._apply_date_filter(base, due_start, due_end)
 
-        all_count = base.filter(Todo.status.in_([STATUS_TODO, STATUS_DONE])).count()
-        done_count = base.filter(Todo.status == STATUS_DONE).count()
-        overdue_count = base.filter(
-            Todo.status == STATUS_TODO,
-            Todo.due_date < today,
-        ).count()
-        return {"all_count": all_count, "done_count": done_count, "overdue_count": overdue_count}
+            all_count = base.filter(Todo.status.in_([STATUS_TODO, STATUS_DONE])).count()
+            done_count = base.filter(Todo.status == STATUS_DONE).count()
+            overdue_count = base.filter(
+                Todo.status == STATUS_TODO,
+                Todo.due_date < today,
+            ).count()
+            return {"all_count": all_count, "done_count": done_count, "overdue_count": overdue_count}
 
     def count_today_view_stats(self) -> dict:
         """统计今日任务视图的数据（仅父任务）：已完成数"""
         today = date.today()
-        done_count = self.session.query(Todo).filter(
-            Todo.pid.is_(None),
-            Todo.status == STATUS_DONE,
-            Todo.due_date == today,
-            Todo.is_recurrence_template == False,
-        ).count()
-        return {"done_count": done_count}
+        with db.session_scope() as session:
+            done_count = session.query(Todo).filter(
+                Todo.pid.is_(None),
+                Todo.status == STATUS_DONE,
+                Todo.due_date == today,
+                Todo.is_recurrence_template == False,
+            ).count()
+            return {"done_count": done_count}
 
     def count_today_all(self) -> int:
         """统计今日到期的任务总数"""
         today = date.today()
-        return self._build_count_query(status=STATUS_TODO, due_date=today)
+        with db.session_scope() as session:
+            return self._build_count_query(session, status=STATUS_TODO, due_date=today)
 
     def count_high_priority(self, due_start: date = None, due_end: date = None) -> int:
-        return self._build_count_query(status=STATUS_TODO, priority=PRIORITY_NONE,
-                                       priority_op="!=", due_start=due_start, due_end=due_end)
+        with db.session_scope() as session:
+            return self._build_count_query(session, status=STATUS_TODO, priority=PRIORITY_NONE,
+                                           priority_op="!=", due_start=due_start, due_end=due_end)
 
     def count_by_category(self, category_id: int,
                           due_start: date = None, due_end: date = None) -> int:
-        return self._build_count_query(status=STATUS_TODO, category_id=category_id,
-                                       due_start=due_start, due_end=due_end)
+        with db.session_scope() as session:
+            return self._build_count_query(session, status=STATUS_TODO, category_id=category_id,
+                                           due_start=due_start, due_end=due_end)
 
     # ---- 清理 ----
 
     def clear_completed(self) -> int:
         """清除所有已完成的父任务"""
-        count = self.session.query(Todo).filter(
-            Todo.pid.is_(None),
-            Todo.status == STATUS_DONE,
-            Todo.is_recurrence_template == False,
-        ).delete(synchronize_session=False)
-        self.session.commit()
-        return count
+        with db.session_scope() as session:
+            count = session.query(Todo).filter(
+                Todo.pid.is_(None),
+                Todo.status == STATUS_DONE,
+                Todo.is_recurrence_template == False,
+            ).delete(synchronize_session=False)
+            return count
 
     def archive_all_done(self) -> int:
         """归档所有已完成的任务"""
-        count = self.session.query(Todo).filter(
-            Todo.status == STATUS_DONE,
-            Todo.is_recurrence_template == False,
-        ).update({Todo.status: STATUS_ARCHIVED, Todo.updated_at: datetime.now()},
-                 synchronize_session=False)
-        self.session.commit()
-        return count
+        with db.session_scope() as session:
+            count = session.query(Todo).filter(
+                Todo.status == STATUS_DONE,
+                Todo.is_recurrence_template == False,
+            ).update({Todo.status: STATUS_ARCHIVED, Todo.updated_at: datetime.now()},
+                     synchronize_session=False)
+            return count
 
     def reorder(self, todo_ids: list[int]):
         """重新排序父任务"""
-        for order, todo_id in enumerate(todo_ids):
-            todo = self.session.query(Todo).filter(Todo.id == todo_id).first()
-            if todo:
-                todo.sort_order = order * 10
-        self.session.commit()
+        with db.session_scope() as session:
+            for order, todo_id in enumerate(todo_ids):
+                todo = session.query(Todo).filter(Todo.id == todo_id).first()
+                if todo:
+                    todo.sort_order = order * 10
 
     # ---- 重复任务：模板+实例 ----
 
-    def ensure_instances(self, template_id: int = None):
+    def _ensure_instances(self, session, template_id: int = None):
         """为模板生成 [today, today+14] 范围内缺失的实例"""
         from services.recurrence_utils import generate_occurrences
         from services.holiday_service import holiday_service
@@ -961,13 +990,13 @@ class TodoService:
         end = today + timedelta(days=INSTANCE_WINDOW_DAYS)
 
         if template_id:
-            templates = [self.session.query(Todo).filter(
+            templates = [session.query(Todo).filter(
                 Todo.id == template_id,
                 Todo.is_recurrence_template == True,
             ).first()]
             templates = [t for t in templates if t]
         else:
-            templates = self.session.query(Todo).filter(
+            templates = session.query(Todo).filter(
                 Todo.is_recurrence_template == True,
             ).all()
 
@@ -987,7 +1016,7 @@ class TodoService:
                 tmpl.recurrence_type, tmpl.recurrence_interval,
                 tmpl.recurrence_end_date, tmpl.recurrence_day,
             )
-            existing_dates = {r[0] for r in self.session.query(
+            existing_dates = {r[0] for r in session.query(
                 Todo.occurrence_date
             ).filter(
                 Todo.recurrence_template_id == tmpl.id,
@@ -996,11 +1025,10 @@ class TodoService:
 
             for occ_date in occurrences:
                 if occ_date not in existing_dates:
-                    self._create_instance_from_template(tmpl, occ_date)
+                    self._create_instance_from_template(session, tmpl, occ_date)
 
-        self.session.commit()
-
-    def _create_instance_from_template(self, template: Todo, occurrence_date: date) -> Todo:
+    @staticmethod
+    def _create_instance_from_template(session, template: Todo, occurrence_date: date) -> Todo:
         """从模板创建一个实例及其子任务蓝图副本"""
         instance = Todo(
             title=template.title,
@@ -1008,7 +1036,7 @@ class TodoService:
             priority=template.priority,
             status=STATUS_TODO,
             color_tag=template.color_tag,
-            start_date=self._coerce_date(template.start_date, 'start_date'),
+            start_date=TodoService._coerce_date(template.start_date, 'start_date'),
             due_date=occurrence_date,
             auto_postpone=False,
             sort_order=template.sort_order,
@@ -1016,16 +1044,16 @@ class TodoService:
             recurrence_type=template.recurrence_type,
             recurrence_interval=template.recurrence_interval,
             recurrence_day=template.recurrence_day,
-            recurrence_start_date=self._coerce_date(template.recurrence_start_date, 'recurrence_start_date'),
-            recurrence_end_date=self._coerce_date(template.recurrence_end_date, 'recurrence_end_date'),
+            recurrence_start_date=TodoService._coerce_date(template.recurrence_start_date, 'recurrence_start_date'),
+            recurrence_end_date=TodoService._coerce_date(template.recurrence_end_date, 'recurrence_end_date'),
             is_recurrence_template=False,
             recurrence_template_id=template.id,
             occurrence_date=occurrence_date,
         )
-        self.session.add(instance)
-        self.session.flush()
+        session.add(instance)
+        session.flush()
 
-        blueprints = self.session.query(Todo).filter(Todo.pid == template.id).all()
+        blueprints = session.query(Todo).filter(Todo.pid == template.id).all()
         for bp in blueprints:
             child = Todo(
                 title=bp.title,
@@ -1037,7 +1065,7 @@ class TodoService:
                 category_id=bp.category_id,
                 pid=instance.id,
             )
-            self.session.add(child)
+            session.add(child)
 
         return instance
 
@@ -1045,200 +1073,198 @@ class TodoService:
         """获取实例对应的模板"""
         if not instance.recurrence_template_id:
             return None
-        return self.session.query(Todo).filter(
-            Todo.id == instance.recurrence_template_id
-        ).first()
+        with db.session_scope() as session:
+            return session.query(Todo).options(
+                joinedload(Todo.category)
+            ).filter(
+                Todo.id == instance.recurrence_template_id
+            ).first()
 
     def get_all_templates(self) -> list[Todo]:
         """获取所有重复模板"""
-        return self.session.query(Todo).filter(
-            Todo.is_recurrence_template == True,
-        ).all()
+        with db.session_scope() as session:
+            return session.query(Todo).options(
+                joinedload(Todo.category)
+            ).filter(
+                Todo.is_recurrence_template == True,
+            ).all()
 
     def update_template(self, template_id: int, apply_to_future_only: bool = False, **kwargs):
         """更新模板并重新生成实例"""
-        template = self.session.query(Todo).filter(Todo.id == template_id).first()
-        if not template:
-            return None
+        with db.session_scope() as session:
+            template = session.query(Todo).filter(Todo.id == template_id).first()
+            if not template:
+                return None
 
-        for key, value in kwargs.items():
-            if hasattr(template, key):
-                setattr(template, key, value)
-        template.updated_at = datetime.now()
+            for key, value in kwargs.items():
+                if hasattr(template, key):
+                    setattr(template, key, value)
+            template.updated_at = datetime.now()
 
-        today = date.today()
-        if apply_to_future_only:
-            self.session.query(Todo).filter(
-                Todo.recurrence_template_id == template_id,
-                Todo.occurrence_date > today,
-                Todo.is_exception == False,
-            ).delete(synchronize_session=False)
-        else:
-            self.session.query(Todo).filter(
-                Todo.recurrence_template_id == template_id,
-                Todo.is_exception == False,
-            ).delete(synchronize_session=False)
+            today = date.today()
+            if apply_to_future_only:
+                session.query(Todo).filter(
+                    Todo.recurrence_template_id == template_id,
+                    Todo.occurrence_date > today,
+                    Todo.is_exception == False,
+                ).delete(synchronize_session=False)
+            else:
+                session.query(Todo).filter(
+                    Todo.recurrence_template_id == template_id,
+                    Todo.is_exception == False,
+                ).delete(synchronize_session=False)
 
-        self.session.commit()
-        self.ensure_instances(template_id)
-        return template
+            session.flush()
+            self._ensure_instances(session, template_id)
+            return template
 
     def get_affected_instance_ids(self, todo_id: int, mode: str) -> list[int]:
-        instance = self.get_by_id(todo_id)
-        if not instance:
-            return [todo_id]
+        with db.session_scope() as session:
+            instance = self._get_by_id(session, todo_id)
+            if not instance:
+                return [todo_id]
 
-        template_id = instance.recurrence_template_id
-        ids = [todo_id]
+            template_id = instance.recurrence_template_id
+            ids = [todo_id]
 
-        if mode == "this_and_future" and template_id:
-            occ_date = instance.occurrence_date or instance.due_date
-            future = self.session.query(Todo).filter(
-                Todo.recurrence_template_id == template_id,
-                Todo.occurrence_date >= occ_date,
-                Todo.id != todo_id,
-            ).all()
-            ids.extend([t.id for t in future])
-        elif mode == "all" and template_id:
-            all_instances = self.session.query(Todo).filter(
-                Todo.recurrence_template_id == template_id,
-                Todo.id != todo_id,
-            ).all()
-            ids.extend([t.id for t in all_instances])
-            ids.append(template_id)
+            if mode == "this_and_future" and template_id:
+                occ_date = instance.occurrence_date or instance.due_date
+                future = session.query(Todo).filter(
+                    Todo.recurrence_template_id == template_id,
+                    Todo.occurrence_date >= occ_date,
+                    Todo.id != todo_id,
+                ).all()
+                ids.extend([t.id for t in future])
+            elif mode == "all" and template_id:
+                all_instances = session.query(Todo).filter(
+                    Todo.recurrence_template_id == template_id,
+                    Todo.id != todo_id,
+                ).all()
+                ids.extend([t.id for t in all_instances])
+                ids.append(template_id)
 
-        return ids
+            return ids
 
     def delete_instance(self, todo_id: int, mode: str = "this") -> bool:
         """删除重复实例: this=仅此次, this_and_future=此次及之后, all=删除模板和所有实例"""
-        instance = self.get_by_id(todo_id)
-        if not instance:
+        with db.session_scope() as session:
+            instance = self._get_by_id(session, todo_id)
+            if not instance:
+                return False
+
+            template_id = instance.recurrence_template_id
+
+            if mode == "this":
+                session.query(Todo).filter(Todo.pid == todo_id).delete(synchronize_session=False)
+                session.delete(instance)
+                return True
+
+            if not template_id:
+                session.query(Todo).filter(Todo.pid == todo_id).delete(synchronize_session=False)
+                session.delete(instance)
+                return True
+
+            template = self._get_by_id(session, template_id)
+
+            if mode == "this_and_future":
+                occ_date = instance.occurrence_date or instance.due_date
+                future_instances = session.query(Todo).filter(
+                    Todo.recurrence_template_id == template_id,
+                    Todo.occurrence_date >= occ_date,
+                ).all()
+                for inst in future_instances:
+                    session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
+                    session.delete(inst)
+                if template:
+                    template.recurrence_end_date = occ_date - timedelta(days=1)
+                    template.updated_at = datetime.now()
+                return True
+
+            if mode == "all":
+                all_instances = session.query(Todo).filter(
+                    Todo.recurrence_template_id == template_id,
+                ).all()
+                for inst in all_instances:
+                    session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
+                    session.delete(inst)
+                if template:
+                    session.query(Todo).filter(Todo.pid == template.id).delete(synchronize_session=False)
+                    session.delete(template)
+                return True
+
             return False
-
-        template_id = instance.recurrence_template_id
-
-        if mode == "this":
-            self.session.query(Todo).filter(Todo.pid == todo_id).delete(synchronize_session=False)
-            self.session.delete(instance)
-            self.session.commit()
-            return True
-
-        if not template_id:
-            self.session.query(Todo).filter(Todo.pid == todo_id).delete(synchronize_session=False)
-            self.session.delete(instance)
-            self.session.commit()
-            return True
-
-        template = self.get_by_id(template_id)
-
-        if mode == "this_and_future":
-            occ_date = instance.occurrence_date or instance.due_date
-            future_instances = self.session.query(Todo).filter(
-                Todo.recurrence_template_id == template_id,
-                Todo.occurrence_date >= occ_date,
-            ).all()
-            for inst in future_instances:
-                self.session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
-                self.session.delete(inst)
-            if template:
-                template.recurrence_end_date = occ_date - timedelta(days=1)
-                template.updated_at = datetime.now()
-            self.session.commit()
-            return True
-
-        if mode == "all":
-            all_instances = self.session.query(Todo).filter(
-                Todo.recurrence_template_id == template_id,
-            ).all()
-            for inst in all_instances:
-                self.session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
-                self.session.delete(inst)
-            if template:
-                self.session.query(Todo).filter(Todo.pid == template.id).delete(synchronize_session=False)
-                self.session.delete(template)
-            self.session.commit()
-            return True
-
-        return False
 
     def split_and_update_from_instance(self, instance_id: int, **kwargs) -> Optional[Todo]:
         """拆分重复系列：从当前实例起，用新属性创建新模板并生成后续实例"""
-        instance = self.get_by_id(instance_id)
-        if not instance or not instance.recurrence_template_id:
-            return None
+        with db.session_scope() as session:
+            instance = self._get_by_id(session, instance_id)
+            if not instance or not instance.recurrence_template_id:
+                return None
 
-        old_template = self.get_by_id(instance.recurrence_template_id)
-        if not old_template:
-            return None
+            old_template = self._get_by_id(session, instance.recurrence_template_id)
+            if not old_template:
+                return None
 
-        occ_date = instance.occurrence_date or instance.due_date
+            occ_date = instance.occurrence_date or instance.due_date
 
-        old_template.recurrence_end_date = occ_date - timedelta(days=1)
-        old_template.updated_at = datetime.now()
+            old_template.recurrence_end_date = occ_date - timedelta(days=1)
+            old_template.updated_at = datetime.now()
 
-        future_instances = self.session.query(Todo).filter(
-            Todo.recurrence_template_id == old_template.id,
-            Todo.occurrence_date >= occ_date,
-        ).all()
-        for inst in future_instances:
-            self.session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
-            self.session.delete(inst)
+            future_instances = session.query(Todo).filter(
+                Todo.recurrence_template_id == old_template.id,
+                Todo.occurrence_date >= occ_date,
+            ).all()
+            for inst in future_instances:
+                session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
+                session.delete(inst)
 
-        new_template = Todo(
-            title=kwargs.get("title", old_template.title),
-            description=kwargs.get("description", old_template.description),
-            priority=kwargs.get("priority", old_template.priority),
-            status=STATUS_TODO,
-            color_tag=kwargs.get("color_tag", old_template.color_tag),
-            start_date=self._coerce_date(kwargs.get("start_date", old_template.start_date), 'start_date'),
-            due_date=occ_date,
-            auto_postpone=False,
-            sort_order=old_template.sort_order,
-            category_id=kwargs.get("category_id", old_template.category_id),
-            recurrence_type=kwargs.get("recurrence_type", old_template.recurrence_type),
-            recurrence_interval=kwargs.get("recurrence_interval", old_template.recurrence_interval),
-            recurrence_day=kwargs.get("recurrence_day", old_template.recurrence_day),
-            recurrence_start_date=self._coerce_date(kwargs.get("recurrence_start_date", old_template.recurrence_start_date), 'recurrence_start_date'),
-            recurrence_end_date=self._coerce_date(kwargs.get("recurrence_end_date", old_template.recurrence_end_date), 'recurrence_end_date'),
-            is_recurrence_template=True,
-        )
-        self.session.add(new_template)
-        self.session.flush()
-
-        for child in (old_template.children or []):
-            bp = Todo(
-                title=child.title,
-                description=child.description,
-                priority=child.priority,
+            new_template = Todo(
+                title=kwargs.get("title", old_template.title),
+                description=kwargs.get("description", old_template.description),
+                priority=kwargs.get("priority", old_template.priority),
                 status=STATUS_TODO,
-                color_tag=child.color_tag,
-                sort_order=child.sort_order,
-                category_id=child.category_id,
-                pid=new_template.id,
+                color_tag=kwargs.get("color_tag", old_template.color_tag),
+                start_date=self._coerce_date(kwargs.get("start_date", old_template.start_date), 'start_date'),
+                due_date=occ_date,
+                auto_postpone=False,
+                sort_order=old_template.sort_order,
+                category_id=kwargs.get("category_id", old_template.category_id),
+                recurrence_type=kwargs.get("recurrence_type", old_template.recurrence_type),
+                recurrence_interval=kwargs.get("recurrence_interval", old_template.recurrence_interval),
+                recurrence_day=kwargs.get("recurrence_day", old_template.recurrence_day),
+                recurrence_start_date=self._coerce_date(kwargs.get("recurrence_start_date", old_template.recurrence_start_date), 'recurrence_start_date'),
+                recurrence_end_date=self._coerce_date(kwargs.get("recurrence_end_date", old_template.recurrence_end_date), 'recurrence_end_date'),
+                is_recurrence_template=True,
             )
-            self.session.add(bp)
+            session.add(new_template)
+            session.flush()
 
-        self.session.commit()
-        self.ensure_instances(new_template.id)
-        return new_template
+            for child in (old_template.children or []):
+                bp = Todo(
+                    title=child.title,
+                    description=child.description,
+                    priority=child.priority,
+                    status=STATUS_TODO,
+                    color_tag=child.color_tag,
+                    sort_order=child.sort_order,
+                    category_id=child.category_id,
+                    pid=new_template.id,
+                )
+                session.add(bp)
+
+            self._ensure_instances(session, new_template.id)
+            return new_template
 
     def cleanup_old_instances(self, days_before: int = 30):
         """清理过期的已完成实例（仅清理仍为重复实例的，已转为普通任务的不清理）"""
         cutoff = date.today() - timedelta(days=days_before)
-        old_instances = self.session.query(Todo).filter(
-            Todo.recurrence_template_id.isnot(None),
-            Todo.recurrence_type.isnot(None),
-            Todo.occurrence_date < cutoff,
-            Todo.status == STATUS_DONE,
-        ).all()
-        for inst in old_instances:
-            self.session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
-            self.session.delete(inst)
-        self.session.commit()
-
-    def close(self):
-        """关闭会话"""
-        try:
-            self.session.close()
-        except Exception:
-            pass
+        with db.session_scope() as session:
+            old_instances = session.query(Todo).filter(
+                Todo.recurrence_template_id.isnot(None),
+                Todo.recurrence_type.isnot(None),
+                Todo.occurrence_date < cutoff,
+                Todo.status == STATUS_DONE,
+            ).all()
+            for inst in old_instances:
+                session.query(Todo).filter(Todo.pid == inst.id).delete(synchronize_session=False)
+                session.delete(inst)

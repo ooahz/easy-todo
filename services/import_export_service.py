@@ -653,15 +653,8 @@ class ImportExportService:
 
     def _clear_all_data(self):
         from models.database import db
-        session = db.get_session()
-        try:
+        from models.category import Category
+        with db.session_scope() as session:
             session.query(Todo).filter(Todo.pid.isnot(None)).delete(synchronize_session=False)
             session.query(Todo).filter(Todo.pid.is_(None)).delete(synchronize_session=False)
-            from models.category import Category
             session.query(Category).filter(Category.is_system == False).delete(synchronize_session=False)
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()

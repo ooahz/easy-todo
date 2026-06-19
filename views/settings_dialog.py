@@ -739,11 +739,8 @@ class SettingsPage(QWidget):
         from services.category_service import CategoryService
 
         cs = CategoryService()
-        try:
-            count = cs.get_count()
-            self.category_card.contentLabel.setText(f"当前有 {count} 个分类")
-        finally:
-            cs.close()
+        count = cs.get_count()
+        self.category_card.contentLabel.setText(f"当前有 {count} 个分类")
 
     def _make_about_card(self) -> QFrame:
         """创建关于卡片"""

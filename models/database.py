@@ -1,4 +1,5 @@
 """数据库连接与会话管理"""
+from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy import create_engine, event
@@ -226,8 +227,7 @@ class Database:
         from models.category import Category
         from models.todo import Todo
 
-        session = self.get_session()
-        try:
+        with self.session_scope() as session:
             system_cats = session.query(Category).filter(
                 Category.is_system == True
             ).all()
@@ -241,12 +241,6 @@ class Database:
 
             for cat in system_cats:
                 session.delete(cat)
-
-            session.commit()
-        except Exception:
-            session.rollback()
-        finally:
-            session.close()
 
     def _migrate_add_indexes(self):
         """迁移：为 todos 表补建索引"""
@@ -293,8 +287,25 @@ class Database:
             conn.commit()
 
     def get_session(self):
-        """获取数据库会话"""
+        """获取数据库会话（裸 Session，调用方需自行管理生命周期）"""
         return self.SessionLocal()
+
+    @contextmanager
+    def session_scope(self):
+        """提供事务范围的会话上下文管理器。
+
+        - 正常退出：自动 commit 并 close（连接归还连接池）
+        - 异常退出：自动 rollback 并 close，再向上抛出异常
+        """
+        session = self.SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
 
 # 全局数据库实例

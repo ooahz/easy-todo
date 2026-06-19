@@ -193,8 +193,6 @@ class CategoryDialog(QDialog):
         except (TypeError, RuntimeError):
             # 重复 disconnect / 已断开时忽略
             pass
-        if hasattr(self, 'category_service') and self.category_service:
-            self.category_service.close()
         super().closeEvent(event)
 
     def _on_category_event(self, *_args):

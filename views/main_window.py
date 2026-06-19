@@ -244,8 +244,6 @@ class _LoadTodosWorker(QRunnable):
             self._signals.done.emit(result)
         except Exception:
             self._signals.done.emit({})
-        finally:
-            svc.close()
 
 
 class ConfirmDialog(MessageBoxBase):
@@ -522,8 +520,6 @@ class MainWindow(FluentWindow):
         settings.flush()
         self.tray_icon.hide()
         self.floating.close()
-        self.todo_service.close()
-        self.category_service.close()
         # 关闭长驻 webview 子进程
         try:
             from views.todo_detail_webview import stop_webview
@@ -757,8 +753,6 @@ class MainWindow(FluentWindow):
 
     def _update_floating_data(self, view_key: str):
         """根据视图标识更新浮窗数据"""
-        self.todo_service.session.expire_all()
-
         view = self._get_view_by_key(view_key)
         filter_key = view.current_time_filter() if view else "all"
         due_start, due_end = self._get_date_range(filter_key, view) if view else (None, None)
@@ -898,16 +892,12 @@ class MainWindow(FluentWindow):
             def run(self):
                 from services.todo_service import TodoService
                 svc = TodoService()
-                try:
-                    svc.process_auto_postpone()
-                finally:
-                    svc.close()
+                svc.process_auto_postpone()
                 self._signals.done.emit({})
 
         def _on_done():
             self._refresh_in_progress = False
             self.settings_page.manual_refresh_btn.setEnabled(True)
-            self.todo_service.reset_session()
             self._load_todos()
             if show_done_info:
                 InfoBar.success(title="刷新完成", content="列表已更新", parent=self,
@@ -988,7 +978,6 @@ class MainWindow(FluentWindow):
 
     def _load_view(self, view_key: str):
         """加载单个视图的数据"""
-        self.todo_service.session.expire_all()
         PAGE_SIZE = 100
         sort_rules = settings.sort_rules
         show_done = settings.show_done_tasks
@@ -1124,144 +1113,117 @@ class MainWindow(FluentWindow):
             if show_done:
                 def query():
                     svc = TodoService()
-                    try:
-                        todos, total = svc.get_all_including_done_with_count(
-                            sort_rules=sort_rules,
-                            page=0, page_size=PAGE_SIZE,
-                            due_start=due_start, due_end=due_end,
-                            dedup_recurrence=True,
-                        )
-                        tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree)
-                        stats = svc.count_all_view_stats(due_start=due_start, due_end=due_end)
-                        return tree, total, stats
-                    finally:
-                        svc.close()
+                    todos, total = svc.get_all_including_done_with_count(
+                        sort_rules=sort_rules,
+                        page=0, page_size=PAGE_SIZE,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
+                    tree = _build_todo_tree(todos, truncate_desc=True)
+                    _inject_completed_flags(tree)
+                    stats = svc.count_all_view_stats(due_start=due_start, due_end=due_end)
+                    return tree, total, stats
             else:
                 def query():
                     svc = TodoService()
-                    try:
-                        todos, total = svc.get_all_with_count(
-                            status=STATUS_TODO, sort_rules=sort_rules,
-                            page=0, page_size=PAGE_SIZE,
-                            due_start=due_start, due_end=due_end,
-                            dedup_recurrence=True,
-                        )
-                        tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree)
-                        stats = svc.count_all_view_stats(due_start=due_start, due_end=due_end)
-                        return tree, total, stats
-                    finally:
-                        svc.close()
+                    todos, total = svc.get_all_with_count(
+                        status=STATUS_TODO, sort_rules=sort_rules,
+                        page=0, page_size=PAGE_SIZE,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
+                    tree = _build_todo_tree(todos, truncate_desc=True)
+                    _inject_completed_flags(tree)
+                    stats = svc.count_all_view_stats(due_start=due_start, due_end=due_end)
+                    return tree, total, stats
 
         elif view_key == "recent":
             due_start, due_end = self._get_date_range(view.current_time_filter(), view)
             if show_done:
                 def query():
                     svc = TodoService()
-                    try:
-                        todos, total = svc.get_all_including_done_with_count(
-                            sort_rules=sort_rules,
-                            page=0, page_size=0,
-                            due_start=due_start, due_end=due_end,
-                            dedup_recurrence=True,
-                        )
-                        tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree)
-                        return tree, total
-                    finally:
-                        svc.close()
+                    todos, total = svc.get_all_including_done_with_count(
+                        sort_rules=sort_rules,
+                        page=0, page_size=0,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
+                    tree = _build_todo_tree(todos, truncate_desc=True)
+                    _inject_completed_flags(tree)
+                    return tree, total
             else:
                 def query():
                     svc = TodoService()
-                    try:
-                        todos, total = svc.get_all_with_count(
-                            status=STATUS_TODO, sort_rules=sort_rules,
-                            page=0, page_size=0,
-                            due_start=due_start, due_end=due_end,
-                            dedup_recurrence=True,
-                        )
-                        tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree)
-                        return tree, total
-                    finally:
-                        svc.close()
+                    todos, total = svc.get_all_with_count(
+                        status=STATUS_TODO, sort_rules=sort_rules,
+                        page=0, page_size=0,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
+                    tree = _build_todo_tree(todos, truncate_desc=True)
+                    _inject_completed_flags(tree)
+                    return tree, total
 
         elif view_key == "today":
             if show_done:
                 def query():
                     svc = TodoService()
-                    try:
-                        todos, total = svc.get_all_including_done_with_count(
-                            sort_rules=sort_rules,
-                            page=0, page_size=PAGE_SIZE,
-                        )
-                        tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree)
-                        stats = svc.count_today_view_stats()
-                        return tree, total, stats
-                    finally:
-                        svc.close()
+                    todos, total = svc.get_all_including_done_with_count(
+                        sort_rules=sort_rules,
+                        page=0, page_size=PAGE_SIZE,
+                    )
+                    tree = _build_todo_tree(todos, truncate_desc=True)
+                    _inject_completed_flags(tree)
+                    stats = svc.count_today_view_stats()
+                    return tree, total, stats
             else:
                 def query():
                     svc = TodoService()
-                    try:
-                        todos, total = svc.get_all_with_count(
-                            status=STATUS_TODO, sort_rules=sort_rules,
-                            page=0, page_size=PAGE_SIZE,
-                        )
-                        tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree)
-                        stats = svc.count_today_view_stats()
-                        return tree, total, stats
-                    finally:
-                        svc.close()
+                    todos, total = svc.get_all_with_count(
+                        status=STATUS_TODO, sort_rules=sort_rules,
+                        page=0, page_size=PAGE_SIZE,
+                    )
+                    tree = _build_todo_tree(todos, truncate_desc=True)
+                    _inject_completed_flags(tree)
+                    stats = svc.count_today_view_stats()
+                    return tree, total, stats
 
         elif view_key == "important":
             due_start, due_end = self._get_date_range(view.current_time_filter(), view)
             if show_done:
                 def query():
                     svc = TodoService()
-                    try:
-                        todos, total = svc.get_high_priority_including_done_with_count(
-                            page=0, page_size=0,
-                            due_start=due_start, due_end=due_end,
-                            dedup_recurrence=True,
-                        )
-                        tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree)
-                        return tree, total
-                    finally:
-                        svc.close()
+                    todos, total = svc.get_high_priority_including_done_with_count(
+                        page=0, page_size=0,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
+                    tree = _build_todo_tree(todos, truncate_desc=True)
+                    _inject_completed_flags(tree)
+                    return tree, total
             else:
                 def query():
                     svc = TodoService()
-                    try:
-                        todos, total = svc.get_high_priority_with_count(
-                            page=0, page_size=0,
-                            due_start=due_start, due_end=due_end,
-                            dedup_recurrence=True,
-                        )
-                        tree = _build_todo_tree(todos, truncate_desc=True)
-                        _inject_completed_flags(tree)
-                        return tree, total
-                    finally:
-                        svc.close()
+                    todos, total = svc.get_high_priority_with_count(
+                        page=0, page_size=0,
+                        due_start=due_start, due_end=due_end,
+                        dedup_recurrence=True,
+                    )
+                    tree = _build_todo_tree(todos, truncate_desc=True)
+                    _inject_completed_flags(tree)
+                    return tree, total
 
         elif view_key == "done":
             done_filter = getattr(self, '_done_filter', 'done')
             status = STATUS_ARCHIVED if done_filter == 'archived' else STATUS_DONE
             def query():
                 svc = TodoService()
-                try:
-                    todos, total = svc.get_all_with_count(
-                        status=status, page=0, page_size=PAGE_SIZE,
-                    )
-                    tree = _build_todo_tree(todos, truncate_desc=True)
-                    _inject_completed_flags(tree)
-                    return tree, total
-                finally:
-                    svc.close()
+                todos, total = svc.get_all_with_count(
+                    status=status, page=0, page_size=PAGE_SIZE,
+                )
+                tree = _build_todo_tree(todos, truncate_desc=True)
+                _inject_completed_flags(tree)
+                return tree, total
 
         elif view_key.startswith("cat_"):
             cat_id = int(view_key.split("_")[1])
@@ -1269,17 +1231,14 @@ class MainWindow(FluentWindow):
             cat_due_start, cat_due_end = self._get_date_range(cat_filter_key, view)
             def query():
                 svc = TodoService()
-                try:
-                    todos, total = svc.get_by_category_with_count(
-                        cat_id, page=0, page_size=PAGE_SIZE,
-                        due_start=cat_due_start, due_end=cat_due_end,
-                        dedup_recurrence=True,
-                    )
-                    tree = _build_todo_tree(todos, truncate_desc=True)
-                    _inject_completed_flags(tree)
-                    return tree, total
-                finally:
-                    svc.close()
+                todos, total = svc.get_by_category_with_count(
+                    cat_id, page=0, page_size=PAGE_SIZE,
+                    due_start=cat_due_start, due_end=cat_due_end,
+                    dedup_recurrence=True,
+                )
+                tree = _build_todo_tree(todos, truncate_desc=True)
+                _inject_completed_flags(tree)
+                return tree, total
         else:
             self._view_load_in_progress.discard(view_key)
             return
@@ -1815,18 +1774,10 @@ class MainWindow(FluentWindow):
     def _show_calendar_view(self):
         """打开日程视图弹窗"""
         from views.calendar_view import CalendarDialog
-        try:
-            todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
-        except Exception:
-            self.todo_service.reset_session()
-            todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
+        todos = self.todo_service.get_all_including_done() if settings.show_done_tasks else self.todo_service.get_all()
         tree = self._build_todo_tree(todos, truncate_desc=True)
         self._inject_completed_dates(tree)
-        try:
-            templates = self.todo_service.get_all_templates()
-        except Exception:
-            self.todo_service.reset_session()
-            templates = self.todo_service.get_all_templates()
+        templates = self.todo_service.get_all_templates()
         tpl_dicts = [t.to_dict(truncate_desc=True) for t in templates]
         dialog = CalendarDialog(tree + tpl_dicts, parent=self)
         dialog.exec()
