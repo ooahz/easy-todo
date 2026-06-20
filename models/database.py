@@ -2,8 +2,9 @@
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from config.constants import APP_ID
 
@@ -35,7 +36,7 @@ class Database:
         self.engine = create_engine(
             f"sqlite:///{db_path}",
             echo=False,
-            pool_pre_ping=True,
+            poolclass=NullPool,
         )
 
         # 启用 WAL 模式，避免写操作独占锁阻塞读操作
