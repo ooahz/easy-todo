@@ -44,19 +44,14 @@ class DateRangeButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        bg = QColor(c.INPUT_BG)
-        border = QColor(c.INPUT_BORDER)
+        # 使用与弹窗一致的背景色（#FCFCFC / #2B2B2B）
+        bg = QColor(43, 43, 43) if isDarkTheme() else QColor(252, 252, 252)
         text_color = QColor(c.SUBTITLE if isDarkTheme() else c.BODY_LIGHT)
 
-        # 绘制背景
+        # 绘制背景（无边框无阴影）
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(bg)
         painter.drawRoundedRect(0, 0, self.width(), self.height(), 6, 6)
-
-        # 绘制边框
-        painter.setPen(border)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, 6, 6)
 
         # 绘制文字
         painter.setPen(text_color)
@@ -70,7 +65,7 @@ class DateRangeButton(QPushButton):
         # 绘制右侧日历图标
         from PySide6.QtGui import QPixmap
         icon = FluentIcon.CALENDAR.icon()
-        icon_color = QColor(160, 160, 160) if dark else QColor(136, 136, 136)
+        icon_color = QColor(160, 160, 160) if isDarkTheme() else QColor(136, 136, 136)
         pixmap = icon.pixmap(QSize(14, 14))
         # 给图标着色
         colored = QPixmap(pixmap.size())
@@ -177,7 +172,8 @@ class DateRangeButton(QPushButton):
                 painter.end()
 
         drawer = DrawerFrame(self.window())
-        drawer.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        drawer.setWindowFlags(
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         drawer.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         layout = QVBoxLayout(drawer)
@@ -389,7 +385,7 @@ class TodoListView(QWidget):
         self.toolbar.addWidget(self.filter_combo)
 
         self.time_filter_combo = ComboBox(self)
-        self.time_filter_combo.addItems(["全部", "本周", "本月", "本年", "自定义"])
+        self.time_filter_combo.addItems(["全部", "本周", "本月", "上周", "上月", "本年", "自定义"])
         self.time_filter_combo.setCurrentIndex(0)
         self.time_filter_combo.setFixedWidth(90)
         self.time_filter_combo.currentIndexChanged.connect(self._on_time_filter_index_changed)
@@ -1024,7 +1020,7 @@ class TodoListView(QWidget):
             self.week_view.clear_selection()
 
     def _on_time_filter_index_changed(self, idx: int):
-        keys = ["all", "week", "month", "year", "custom"]
+        keys = ["all", "week", "last_week", "month", "last_month", "year", "custom"]
         if 0 <= idx < len(keys):
             self._time_filter = keys[idx]
             self.date_range_btn.setVisible(self._time_filter == "custom")

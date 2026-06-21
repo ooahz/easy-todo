@@ -1573,6 +1573,13 @@ class MainWindow(FluentWindow):
             start = today - timedelta(days=weekday)
             end = start + timedelta(days=6)
             return start, end
+        elif filter_key == "last_week":
+            today = date.today()
+            weekday = today.weekday()
+            this_week_start = today - timedelta(days=weekday)
+            start = this_week_start - timedelta(days=7)
+            end = this_week_start - timedelta(days=1)
+            return start, end
         elif filter_key == "month":
             today = date.today()
             start = today.replace(day=1)
@@ -1580,6 +1587,15 @@ class MainWindow(FluentWindow):
                 end = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
             else:
                 end = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
+            return start, end
+        elif filter_key == "last_month":
+            today = date.today()
+            this_month_start = today.replace(day=1)
+            if today.month == 1:
+                start = today.replace(year=today.year - 1, month=12, day=1)
+            else:
+                start = today.replace(month=today.month - 1, day=1)
+            end = this_month_start - timedelta(days=1)
             return start, end
         elif filter_key == "year":
             today = date.today()

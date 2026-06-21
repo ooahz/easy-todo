@@ -430,6 +430,9 @@ class FloatingWidget(QWidget):
 
     def _show_quick_add(self):
         """显示快速新建弹窗"""
+        # 浮窗处于收起状态时，先展开浮窗再显示弹窗
+        if self._list_collapsed:
+            self._toggle_list_collapse()
         overlay_w = min(self.bg_frame.width() - 24, 240)
         overlay_h = 110
         x = (self.bg_frame.width() - overlay_w) // 2

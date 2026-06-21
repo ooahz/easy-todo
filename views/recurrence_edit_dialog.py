@@ -10,6 +10,8 @@ from qfluentwidgets import (
     CardWidget,
 )
 
+from config.theme_config import theme_colors
+
 
 def _colors():
     if isDarkTheme():

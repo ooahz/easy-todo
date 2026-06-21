@@ -104,7 +104,7 @@ class ImportExportService:
         ws = wb.active
         ws.title = "任务数据"
 
-        headers = ["任务名称", "详情", "开始时间", "完成时间", "创建时间", "更新时间", "分类", "状态", "任务类型"]
+        headers = ["任务名称", "详情", "开始时间", "结束时间", "完成时间", "创建时间", "更新时间", "分类", "状态", "任务类型"]
         ws.append(headers)
 
         header_fill = PatternFill(start_color="0078D4", end_color="0078D4", fill_type="solid")
@@ -141,6 +141,7 @@ class ImportExportService:
                 t.title or "",
                 t.description or "",
                 t.start_date.isoformat() if t.start_date else "",
+                t.due_date.isoformat() if t.due_date else "",
                 t.completed_at.strftime("%Y-%m-%d %H:%M:%S") if t.completed_at else "",
                 t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else "",
                 t.updated_at.strftime("%Y-%m-%d %H:%M:%S") if t.updated_at else "",
@@ -158,7 +159,7 @@ class ImportExportService:
 
             children = sorted(children_map.get(t.id, []), key=lambda x: x.sort_order)
             for child in children:
-                child_row = [child.title or "", "", "", "", "", "", "", "", ""]
+                child_row = [child.title or "", "", "", "", "", "", "", "", "", ""]
                 ws.append(child_row)
                 for col_idx in range(1, len(headers) + 1):
                     cell = ws.cell(row=row_idx, column=col_idx)
@@ -167,7 +168,7 @@ class ImportExportService:
                     cell.font = Font(color="666666")
                 row_idx += 1
 
-        col_widths = [30, 40, 16, 20, 20, 20, 12, 10, 12]
+        col_widths = [30, 40, 16, 16, 20, 20, 20, 12, 10, 12]
         for i, width in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = width
 

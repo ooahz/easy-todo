@@ -284,7 +284,9 @@ class TodoCard(CardWidget):
         if task_type == "periodic" and not recurrence:
             from services.todo_service import TodoService
             periodic_status = TodoService.get_periodic_status(self.todo_data)
-            if periodic_status == "not_started":
+            if self._is_done:
+                status_text = f"{start} ~ {due}" if start else f"{due}"
+            elif periodic_status == "not_started":
                 status_text = f'<span style="color:#0078D4">未开始</span> ({start} ~ {due})'
             elif periodic_status == "expired":
                 status_text = f'<span style="color:{settings.warning_color}">已过期</span> ({start} ~ {due})'
