@@ -32,6 +32,7 @@ from qfluentwidgets import FluentIcon
 
 from config.constants import APP_NAME, APP_VERSION
 from config.settings import settings
+from config.theme_config import font_family_list, app_default_font_size
 from models.database import db
 from views.main_window import MainWindow
 
@@ -58,8 +59,9 @@ def main():
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
-    # 设置字体
-    font = QFont("Microsoft YaHei", 10)
+    # 设置字体（字体族与默认字号均来自 theme_config，可被 theme.json 覆盖）
+    families = font_family_list()
+    font = QFont(families[0] if families else "Microsoft YaHei", app_default_font_size())
     font.setStyleStrategy(QFont.PreferAntialias)
     app.setFont(font)
 

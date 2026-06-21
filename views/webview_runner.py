@@ -13,7 +13,7 @@ from datetime import date, datetime
 from html import escape
 from pathlib import Path
 
-from config.theme_config import theme_colors_by_name
+from config.theme_config import theme_colors_by_name, font_family_str, mono_family_str
 
 # 在 import qtpy 之前设置 Qt 后端
 os.environ.setdefault("QT_API", "pyside6")
@@ -262,7 +262,7 @@ def build_html(data: dict) -> str:
 html, body {{
     margin: 0; padding: 0;
     background-color: var(--bg); color: var(--body);
-    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-family: {font_family_str()};
     -webkit-user-select: text; user-select: text;
 }}
 ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
@@ -306,7 +306,7 @@ html, body {{
 .file-folder-btn {{ cursor: pointer; opacity: 0.4; font-size: 14px; padding: 2px 4px;
     border-radius: 4px; transition: opacity 0.15s, background-color 0.15s; flex-shrink: 0; }}
 .file-folder-btn:hover {{ opacity: 1; background-color: var(--tag-bg); }}
-.markdown-body {{ font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+.markdown-body {{ font-family: {font_family_str()};
     font-size: 14px; line-height: 1.7; color: var(--body);
     background-color: transparent; padding: 0; margin: 0; }}
 .markdown-body h1,.markdown-body h2,.markdown-body h3,
@@ -316,7 +316,7 @@ html, body {{
 .markdown-body h3 {{ font-size: 16px; }} .markdown-body h4 {{ font-size: 14px; }}
 .markdown-body p {{ margin: 6px 0; }}
 .markdown-body code {{ background-color: var(--code-bg); border: 1px solid var(--code-border);
-    border-radius: 3px; padding: 1px 5px; font-family: "Cascadia Code", "Consolas", monospace; font-size: 13px; }}
+    border-radius: 3px; padding: 1px 5px; font-family: {mono_family_str()}; font-size: 13px; }}
 .markdown-body pre {{ background-color: var(--code-bg); border: 1px solid var(--code-border);
     border-radius: 6px; padding: 10px 12px; overflow-x: auto; }}
 .markdown-body pre code {{ border: none; padding: 0; background: transparent; }}

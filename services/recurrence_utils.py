@@ -9,10 +9,7 @@ from config.constants import parse_recurrence_day
 
 
 def _is_workday(target_date: date) -> Optional[bool]:
-    """判断指定日期是否为工作日，使用节日数据
-
-    返回 None 表示无法判断（节日数据不可用）
-    """
+    """判断指定日期是否为工作日，使用节日数据"""
     from services.holiday_service import holiday_service
     holiday_service.load_for_date(target_date)
     return holiday_service.is_workday(target_date)

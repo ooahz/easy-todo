@@ -22,7 +22,7 @@ class TodoService:
 
     @staticmethod
     def _coerce_date(value, field_name: str):
-        """将各种日期输入统一转为 Python date/datetime 对象"""
+        """将各种日期输入统一转为 date/datetime 对象"""
         if value is None:
             return None
         if isinstance(value, (date, datetime)):
@@ -58,7 +58,7 @@ class TodoService:
 
     @staticmethod
     def _get_by_id(session, todo_id: int) -> Optional[Todo]:
-        """根据 ID 获取（内部方法，使用传入的 session，带 eager load）"""
+        """根据 ID 获取"""
         return session.query(Todo).options(
             joinedload(Todo.category)
         ).filter(Todo.id == todo_id).first()
@@ -245,7 +245,6 @@ class TodoService:
             return True
 
     def get_by_id(self, todo_id: int) -> Optional[Todo]:
-        """根据 ID 获取"""
         with db.session_scope() as session:
             return self._get_by_id(session, todo_id)
 
@@ -306,7 +305,6 @@ class TodoService:
         return all(c.status == STATUS_DONE for c in children)
 
     def get_children_count(self, parent_id: int) -> int:
-        """获取父任务的子任务数量"""
         with db.session_scope() as session:
             return session.query(Todo).filter(Todo.pid == parent_id).count()
 
@@ -334,13 +332,7 @@ class TodoService:
 
     @staticmethod
     def _apply_recurrence_dedup(session, query):
-        """在 SQL 层完成循环任务去重，每个 recurrence_template_id 只保留最优实例。
-
-        评分规则与原 Python _dedup_recurrence() 一致：
-          (0, distance) — 未完成 + 未来/今天到期
-          (1, distance) — 未完成 + 已过期
-          (2, distance) — 已完成
-        """
+        """在 SQL 层完成循环任务去重，每个 recurrence_template_id 只保留最优实例"""
         today = date.today()
         T2 = Todo.__table__.alias("t2")
         score_expr = case(

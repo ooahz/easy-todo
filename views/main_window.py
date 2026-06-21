@@ -280,7 +280,6 @@ class MainWindow(FluentWindow):
 
     def __init__(self):
         super().__init__()
-        # 初始化完成前禁止任何子界面被渲染到屏幕，避免 Windows 上短暂弹出空窗口
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         self.stackedWidget.setAnimationEnabled(False)
 
@@ -292,10 +291,10 @@ class MainWindow(FluentWindow):
         self._current_view_key = "all"
         self._floating_view_key = "all"
         self._tray_tip_shown = False
-        self._detail_dialog = None  # 任务详情对话框引用
-        self._loaded_views: set[str] = set()  # 已加载过数据的视图集合
-        self._load_generation: int = 0  # 异步加载代数，防止旧请求覆盖新数据
-        self._view_load_in_progress: set[str] = set()  # 正在异步加载的视图集合
+        self._detail_dialog = None
+        self._loaded_views: set[str] = set()
+        self._load_generation: int = 0
+        self._view_load_in_progress: set[str] = set()
 
         # 分类导航项缓存 {category_id: (interface, name)}
         self._category_nav_items: dict[int, tuple] = {}
@@ -311,7 +310,7 @@ class MainWindow(FluentWindow):
         self._setup_ui()
         self._setup_navigation()
 
-        # 根据导航顺序确定初始视图（FluentWindow 默认显示第一个添加的视图）
+        # 根据导航顺序确定初始视图
         order = settings.system_view_order
         for key in order:
             if key in self._view_instances:
@@ -327,10 +326,10 @@ class MainWindow(FluentWindow):
         # 启动时处理自动延期
         self.todo_service.process_auto_postpone()
 
-        # 跨天检测：5分钟轮询 + changeEvent 兜底休眠恢复
-        self._last_refresh_date = date.today()  # 启动时已执行 process_auto_postpone
+        # 跨天检测
+        self._last_refresh_date = date.today()
         self._daily_check_timer = QTimer(self)
-        self._daily_check_timer.setInterval(300_000)  # 5分钟
+        self._daily_check_timer.setInterval(300_000)
         self._daily_check_timer.timeout.connect(self._check_daily_refresh)
         self._daily_check_timer.start()
 
@@ -339,8 +338,6 @@ class MainWindow(FluentWindow):
         self.stackedWidget.setAnimationEnabled(True)
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
 
-        # 双栏模式：延迟预热 webview 子进程，让用户首次点击即可秒开
-        # 子进程在后台初始化 WebView2 引擎，不阻塞主界面
         if settings.dialog_mode == "widescreen":
             QTimer.singleShot(3000, self._prewarm_webview)
 

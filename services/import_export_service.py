@@ -72,15 +72,7 @@ class ImportExportService:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> int:
-        """导出数据到 Excel 文件，返回导出的任务数量
-
-        :param path: 导出文件路径
-        :param date_field: 时间筛选字段，支持
-            start_date / due_date / completed_at / created_at；
-            为 None 或空字符串表示不按时间筛选，导出全部
-        :param start_date: 起始日期（含），None 表示不限
-        :param end_date: 结束日期（含），None 表示不限
-        """
+        """导出数据到 Excel 文件，返回导出的任务数量"""
         from openpyxl import Workbook
         from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
         from openpyxl.utils import get_column_letter

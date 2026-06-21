@@ -355,14 +355,14 @@ class TodoCard(CardWidget):
                 BodyLabel {{
                     text-decoration: line-through;
                     color: {c['done']};
-                    font-size: {FontSize.MEDIUM}px;
+                    font-size: {FontSize.TASK_TITLE}px;
                 }}
             """)
         else:
             self.title_label.setStyleSheet(f"""
                 BodyLabel {{
                     color: {c['title']};
-                    font-size: {FontSize.MEDIUM}px;
+                    font-size: {FontSize.TASK_TITLE}px;
                 }}
             """)
 
@@ -372,14 +372,14 @@ class TodoCard(CardWidget):
             self.info_label.setStyleSheet(f"""
                 CaptionLabel#infoLabel {{
                     color: {c['done']};
-                    font-size: {FontSize.SMALL}px;
+                    font-size: {FontSize.TASK_INFO}px;
                 }}
             """)
         else:
             self.info_label.setStyleSheet(f"""
                 CaptionLabel#infoLabel {{
                     color: {c['info']};
-                    font-size: {FontSize.SMALL}px;
+                    font-size: {FontSize.TASK_INFO}px;
                 }}
             """)
 
@@ -389,14 +389,14 @@ class TodoCard(CardWidget):
             self.desc_label.setStyleSheet(f"""
                 CaptionLabel#descLabel {{
                     color: {c['done']};
-                    font-size: {FontSize.SMALL}px;
+                    font-size: {FontSize.TASK_DESC}px;
                 }}
             """)
         else:
             self.desc_label.setStyleSheet(f"""
                 CaptionLabel#descLabel {{
                     color: {c['muted']};
-                    font-size: {FontSize.SMALL}px;
+                    font-size: {FontSize.TASK_DESC}px;
                 }}
             """)
 

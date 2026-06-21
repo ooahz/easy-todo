@@ -18,14 +18,17 @@ from qfluentwidgets import (
 
 from config.constants import PRIORITY_MAP, STATUS_MAP
 from config.settings import settings
-from config.theme_config import FontSize, palette, theme_colors
+from config.theme_config import (
+    FontSize, palette, theme_colors,
+    font_family_str, mono_family_str,
+)
 from services.file_service import FileService
 
 
 def _markdown_css(c: dict) -> str:
     return f"""
         body {{
-            font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+            font-family: {font_family_str()};
             font-size: {FontSize.MEDIUM}px;
             line-height: 1.7;
             color: {c['body']};
@@ -48,7 +51,7 @@ def _markdown_css(c: dict) -> str:
             border: 1px solid {c['code_border']};
             border-radius: 3px;
             padding: 1px 5px;
-            font-family: "Cascadia Code", "Consolas", monospace;
+            font-family: {mono_family_str()};
             font-size: {FontSize.BODY}px;
         }}
         pre {{

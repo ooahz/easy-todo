@@ -1,4 +1,4 @@
-"""文件管理服务 - 管理任务关联文件"""
+"""文件管理服务"""
 import os
 import shutil
 import uuid
@@ -91,7 +91,7 @@ class FileService:
         return moved
 
     def cleanup_pending(self, pending_id: str):
-        """清理某个 dialog 的暂存目录（用户取消时调用）"""
+        """清理某个 dialog 的暂存目录"""
         if not pending_id:
             return
         pending = self.pending_root / pending_id
@@ -175,9 +175,9 @@ class FileService:
         try:
             if system == "Windows":
                 os.startfile(str(task_folder))
-            elif system == "Darwin":  # macOS
+            elif system == "Darwin":
                 os.system(f'open "{task_folder}"')
-            else:  # Linux
+            else:
                 os.system(f'xdg-open "{task_folder}"')
             return True
         except Exception:

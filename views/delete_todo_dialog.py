@@ -5,7 +5,7 @@ from qfluentwidgets import MessageBoxBase, SubtitleLabel, BodyLabel, CheckBox
 
 
 class DeleteTodoDialog(MessageBoxBase):
-    """删除任务确认对话框，可选是否同时删除关联文件"""
+    """删除任务确认对话框"""
 
     def __init__(self, todo_id: int, file_count: int = 0, parent=None):
         super().__init__(parent)

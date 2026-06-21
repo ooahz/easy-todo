@@ -11,6 +11,8 @@ from qfluentwidgets import (
     TextEdit, isDarkTheme
 )
 
+from config.theme_config import font_family_str, mono_family_str
+
 
 class PasteImageTextEdit(TextEdit):
     """支持粘贴图片的 TextEdit：拦截 QMimeData.imageData，发送 imagePasted 信号。"""
@@ -134,7 +136,7 @@ class MarkdownEditor(QWidget):
 
         css = f"""
             body {{
-                font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+                font-family: {font_family_str()};
                 font-size: 13px;
                 line-height: 1.6;
                 color: {color};
@@ -155,7 +157,7 @@ class MarkdownEditor(QWidget):
                 border: 1px solid {code_border};
                 border-radius: 3px;
                 padding: 1px 4px;
-                font-family: "Cascadia Code", "Consolas", monospace;
+                font-family: {mono_family_str()};
                 font-size: 12px;
             }}
             pre {{

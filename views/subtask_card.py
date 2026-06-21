@@ -99,14 +99,14 @@ class SubtaskCard(CardWidget):
                 BodyLabel {{
                     text-decoration: line-through;
                     color: {c['done']};
-                    font-size: 13px;
+                    font-size: {FontSize.TASK_SUBTASK}px;
                 }}
             """)
         else:
             self.title_label.setStyleSheet(f"""
                 BodyLabel {{
                     color: {c['title']};
-                    font-size: 13px;
+                    font-size: {FontSize.TASK_SUBTASK}px;
                 }}
             """)
 

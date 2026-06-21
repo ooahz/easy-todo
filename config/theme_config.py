@@ -20,7 +20,14 @@ except Exception:  # 子进程（如 webview_runner）无 Qt 上下文时的安�
 # 字体大小
 # ============================================================
 class FontSize:
-    """统一字体大小（像素）"""
+    """统一字体大小（像素）
+
+    通用档位与场景档位并列：
+    - 通用档位（TINY/CAPTION/SMALL/BODY/MEDIUM/SUBTITLE/LARGE/H3/H2/H1）
+      适用于浮窗、详情、弹窗等多数界面。
+    - 任务列表档位（TASK_*）仅服务于 todo_card / subtask_card 等
+      任务列表区域，独立可调以避免影响其它场景。
+    """
     TINY = 10
     CAPTION = 11          # 辅助说明、标签头
     SMALL = 12            # 普通正文、按钮
@@ -31,6 +38,50 @@ class FontSize:
     H3 = 18               # H3 标题
     H2 = 20               # 大标题
     H1 = 22               # 详情 H1
+
+    # ---- 任务列表专属字号（独立于通用档位）----
+    TASK_TITLE = 14       # 任务卡片标题（原 MEDIUM）
+    TASK_DESC = 12        # 任务卡片描述（原 SMALL）
+    TASK_INFO = 12        # 任务卡片信息行（原 SMALL）
+    TASK_SUBTASK = 13     # 子任务标题（原硬编码 13px）
+
+    # ---- 浮窗列表专属字号（独立于通用档位）----
+    FLOATING_ITEM_TITLE = 15        # 浮窗列表项父任务（原硬编码 15px）
+    FLOATING_CHILD_ITEM_TITLE = 13  # 浮窗列表项子任务（原硬编码 13px）
+
+
+# ============================================================
+# 字体族
+# ============================================================
+class FontFamily:
+    """应用全局字体族（按优先级排列，第一个系统中可用的会被使用）。
+
+    可通过 theme.json 中 `font_family` 字段覆盖整个列表；
+    也可仅覆盖 `default_size` 调整应用级默认字号。
+    """
+    FAMILIES = ["Microsoft YaHei", "Segoe UI", "PingFang SC"]
+    MONO_FAMILIES = ["Cascadia Code", "Consolas", "monospace"]
+    DEFAULT_SIZE = 10     # main.py 中 QFont 的 point size 起点
+
+
+def font_family_list() -> list[str]:
+    """返回当前配置的字体族列表（顺序即优先级）。"""
+    return list(FontFamily.FAMILIES)
+
+
+def font_family_str() -> str:
+    """生成 CSS / QSS 通用的字体族字符串（自动加引号并以 sans-serif 兜底）。"""
+    return ", ".join(f'"{f}"' for f in FontFamily.FAMILIES) + ', "sans-serif"'
+
+
+def mono_family_str() -> str:
+    """生成等宽字体族字符串（用于代码块）。"""
+    return ", ".join(f'"{f}"' for f in FontFamily.MONO_FAMILIES)
+
+
+def app_default_font_size() -> int:
+    """main.py 中 QFont 使用的默认字号。"""
+    return int(FontFamily.DEFAULT_SIZE)
 
 
 # ============================================================
@@ -172,13 +223,30 @@ def _user_theme_path() -> Path:
     return _USER_THEME_PATH
 
 
+# 浮窗背景字段：仅这两个字段允许被外挂配置覆盖
+_FLOATING_BG_FIELDS = ("FLOATING_BG", "FLOATING_BG_OPAQUE")
+
+
+def _is_background_field(name: str) -> bool:
+    """判断字段名是否为背景类字段（不区分浮窗与其它）"""
+    if name == "BG" or name == "CARD_HOVER":
+        return True
+    return name.endswith("_BG")
+
+
 def _apply_overrides_to_class(cls, overrides: dict, value_type: type) -> None:
-    """把 dict 中的合法字段写回类属性；类型不匹配或字段不存在则跳过。"""
+    """把 dict 中的合法字段写回类属性；类型不匹配或字段不存在则跳过。
+
+    背景类字段（BG / *_BG / CARD_HOVER）一律忽略，保持预设值；
+    浮窗背景由 _apply_floating_bg_overrides 单独处理。
+    """
     if not isinstance(overrides, dict):
         return
     valid_names = {n for n in vars(cls) if not n.startswith("_")}
     for key, value in overrides.items():
         if key not in valid_names:
+            continue
+        if _is_background_field(key):
             continue
         if not isinstance(value, value_type):
             continue
@@ -188,8 +256,35 @@ def _apply_overrides_to_class(cls, overrides: dict, value_type: type) -> None:
             pass
 
 
+def _apply_floating_bg_overrides(cls, overrides: dict) -> None:
+    """把 dict 中的浮窗背景字段（FLOATING_BG / FLOATING_BG_OPAQUE）写回类属性。"""
+    if not isinstance(overrides, dict):
+        return
+    valid_names = {n for n in vars(cls) if not n.startswith("_")}
+    for key in _FLOATING_BG_FIELDS:
+        if key not in valid_names:
+            continue
+        value = overrides.get(key)
+        if not isinstance(value, str):
+            continue
+        try:
+            setattr(cls, key, value)
+        except Exception:
+            pass
+
+
 def _load_user_overrides() -> None:
-    """从用户 theme.json 合并覆盖到 FontSize / _LightColors / _DarkColors。
+    """从用户 theme.json 合并覆盖到 FontSize / FontFamily / _LightColors / _DarkColors。
+
+    覆盖范围：
+    - FontSize 任意字段（含任务列表专属 TASK_*）
+    - FontFamily.FAMILIES（整个列表） / FontFamily.MONO_FAMILIES /
+      FontFamily.DEFAULT_SIZE
+    - 非背景类颜色字段（文本、边框、强调色、警示色等）
+    - 浮窗背景字段（FLOATING_BG / FLOATING_BG_OPAQUE）
+
+    其余背景字段（BG / CARD_BG / INPUT_BG / HOVER_BG 等）始终使用预设值，
+    不受外挂配置影响，避免破坏主界面视觉一致性。
 
     失败（文件不存在、格式错误、权限不足）一律静默回退到内置默认值。
     """
@@ -205,8 +300,32 @@ def _load_user_overrides() -> None:
         return
 
     _apply_overrides_to_class(FontSize, data.get("font_size"), int)
+    _apply_font_family_overrides(data.get("font_family"))
     _apply_overrides_to_class(_LightColors, data.get("light"), str)
     _apply_overrides_to_class(_DarkColors, data.get("dark"), str)
+    _apply_floating_bg_overrides(_LightColors, data.get("light"))
+    _apply_floating_bg_overrides(_DarkColors, data.get("dark"))
+
+
+def _apply_font_family_overrides(overrides) -> None:
+    """把 dict 中的合法字段写回 FontFamily 类属性。
+
+    支持字段：
+    - families: list[str] 替换整个字体族列表
+    - mono_families: list[str] 替换等宽字体族列表
+    - default_size: int 调整 main.py 中 QFont 默认字号
+    """
+    if not isinstance(overrides, dict):
+        return
+    families = overrides.get("families")
+    if isinstance(families, list) and families and all(isinstance(f, str) and f.strip() for f in families):
+        FontFamily.FAMILIES = [f.strip() for f in families]
+    mono = overrides.get("mono_families")
+    if isinstance(mono, list) and mono and all(isinstance(f, str) and f.strip() for f in mono):
+        FontFamily.MONO_FAMILIES = [f.strip() for f in mono]
+    size = overrides.get("default_size")
+    if isinstance(size, int) and size > 0:
+        FontFamily.DEFAULT_SIZE = size
 
 
 # 启动时执行一次（模块级副作用，业务代码无需感知）

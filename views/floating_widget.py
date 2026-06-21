@@ -1,4 +1,4 @@
-"""浮窗组件 - 显示当前页面任务列表"""
+"""浮窗组件"""
 from __future__ import annotations
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup, QParallelAnimationGroup, QSize, QTimer
 from PySide6.QtWidgets import (
@@ -18,8 +18,8 @@ class FloatingWidget(QWidget):
     """浮窗布局"""
 
     todo_toggled = Signal(int)
-    quick_add = Signal(str)       # 快速新建任务
-    pin_changed = Signal(bool)    # 固定状态变更
+    quick_add = Signal(str)
+    pin_changed = Signal(bool)
 
     # 边缘检测区域宽度
     EDGE_SIZE = 5
@@ -57,8 +57,8 @@ class FloatingWidget(QWidget):
         self._page_size = 20
         self._current_page = 0
         self._mode = "list"  # "list" 或 "quadrant"
-        self._list_collapsed = False  # 标题点击收起列表
-        self._expanded_height = None  # 收起前保存的高度
+        self._list_collapsed = False
+        self._expanded_height = None
         self._snap_anim: QPropertyAnimation | None = None
         self._snapped_edges = 0       # 贴边方向位掩码: 上1 下2 左4 右8
         self._collapsed = False
@@ -142,7 +142,7 @@ class FloatingWidget(QWidget):
         self.add_btn.clicked.connect(self._show_quick_add)
         title_layout.addWidget(self.add_btn)
 
-        # 四象限切换按钮（仅在重要任务视图显示）
+        # 四象限切换按钮
         self.quadrant_btn = TransparentToolButton(FluentIcon.TILES)
         self.quadrant_btn.setFixedSize(24, 24)
         self.quadrant_btn.setIconSize(QSize(12, 12))
@@ -504,7 +504,7 @@ class FloatingWidget(QWidget):
         done = sum(1 for t in self._todos if t.get("_is_done", False))
         c = self._theme_colors()
         self.count_label.setStyleSheet(
-            f"font-size: 12px; color: {c.get('close', '#999')}; border: none;"
+            f"font-size: {FontSize.SMALL}px; color: {c.get('close', '#999')}; border: none;"
         )
         self.count_label.setText(f"{done}/{total}")
 
@@ -563,7 +563,7 @@ class FloatingWidget(QWidget):
 
         if not self._todos:
             empty = BodyLabel("暂无任务")
-            empty.setStyleSheet(f"color: {c['empty']}; font-size: 12px; border: none;")
+            empty.setStyleSheet(f"color: {c['empty']}; font-size: {FontSize.SMALL}px; border: none;")
             empty.setAlignment(Qt.AlignCenter)
             self.list_layout.addWidget(empty)
         else:
@@ -637,7 +637,8 @@ class FloatingWidget(QWidget):
         h_layout.setSpacing(6)
 
         title = todo.get("title", "")
-        font_size = "13px" if is_child else "15px"
+        font_size = (f"{FontSize.FLOATING_CHILD_ITEM_TITLE}px"
+                     if is_child else f"{FontSize.FLOATING_ITEM_TITLE}px")
 
         title_label = QLabel(title)
         title_label.setToolTip(title)

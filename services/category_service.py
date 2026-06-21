@@ -9,8 +9,7 @@ from models.category import Category
 
 
 class _CategoryEventBus(QObject):
-    """分类事件总线（单例 QObject），用于跨组件通知分类变更。
-    """
+    """分类事件总线（单例 QObject），用于跨组件通知分类变更。"""
 
     created = Signal(int)
     updated = Signal(int)
@@ -30,7 +29,7 @@ def category_event_bus() -> _CategoryEventBus:
 
 
 class CategoryService:
-    """分类服务（无状态，每次方法调用独立 session）"""
+    """分类服务"""
 
     def create(self, name: str, color: str = "#0078D4") -> Category:
         """创建分类"""

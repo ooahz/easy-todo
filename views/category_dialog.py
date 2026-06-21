@@ -138,9 +138,6 @@ class CategoryDialog(QDialog):
         self.setFixedSize(400, 500)
         self._setup_ui()
 
-        # 订阅分类事件总线，自身的数据变更也会通过总线回灌，
-        # 这样就不需要调用方在 close 后再触发全量刷新，
-        # 关闭的瞬间也不会出现"延迟动作"导致空窗口闪烁。
         bus = category_event_bus()
         bus.created.connect(self._on_category_event)
         bus.updated.connect(self._on_category_event)
@@ -159,13 +156,11 @@ class CategoryDialog(QDialog):
             event.accept()
 
     def mouseMoveEvent(self, event):
-        """鼠标移动时拖动窗口"""
         if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
 
     def mouseReleaseEvent(self, event):
-        """鼠标释放清除位置"""
         self._drag_pos = None
 
     def paintEvent(self, event):
@@ -182,7 +177,6 @@ class CategoryDialog(QDialog):
         super().paintEvent(event)
 
     def closeEvent(self, event):
-        """关闭时释放数据库连接并断开事件总线订阅"""
         bus = category_event_bus()
         try:
             bus.created.disconnect(self._on_category_event)
@@ -190,14 +184,12 @@ class CategoryDialog(QDialog):
             bus.deleted.disconnect(self._on_category_event)
             bus.reordered.disconnect(self._on_category_event)
         except (TypeError, RuntimeError):
-            # 重复 disconnect / 已断开时忽略
             pass
         super().closeEvent(event)
 
     def _on_category_event(self, *_args):
         """总线事件回调：刷新自身列表"""
         self._load_categories()
-        # 退出编辑态，避免被改/被删的分类残留
         if self._editing_id is not None:
             cat = self.category_service.get_by_id(self._editing_id)
             if not cat:
@@ -260,7 +252,6 @@ class CategoryDialog(QDialog):
         x = screen.x() + (screen.width() - self.width()) // 2
         y = screen.y() + (screen.height() - self.height()) // 2
         self.move(x, y)
-        # 设置弹窗整体背景色
         c = palette()
         if isDarkTheme():
             self.setStyleSheet(f"""
@@ -271,7 +262,6 @@ class CategoryDialog(QDialog):
                 LineEdit {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
                 ListWidget {{ background-color: {c.INPUT_BG}; color: {c.TITLE}; border: 1px solid {c.INPUT_BORDER}; border-radius: 6px; }}
             """)
-            # 更新列表项图标颜色
             for i in range(self.category_list.count()):
                 item = self.category_list.item(i)
                 widget = self.category_list.itemWidget(item)
@@ -286,7 +276,6 @@ class CategoryDialog(QDialog):
                 LineEdit {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; }}
                 ListWidget {{ background-color: {c.INPUT_BG}; color: {c.BODY_LIGHT}; }}
             """)
-            # 更新列表项图标颜色
             for i in range(self.category_list.count()):
                 item = self.category_list.item(i)
                 widget = self.category_list.itemWidget(item)
@@ -377,7 +366,6 @@ class CategoryDialog(QDialog):
         if idx > 0:
             cat_ids[idx], cat_ids[idx - 1] = cat_ids[idx - 1], cat_ids[idx]
             self.category_service.reorder(cat_ids)
-            # service 会通过事件总线触发 _on_category_event，列表自动刷新
 
     def _on_system_view_move_up(self, view_key: str):
         """上移系统视图"""
@@ -387,7 +375,6 @@ class CategoryDialog(QDialog):
         if idx > 0:
             order[idx], order[idx - 1] = order[idx - 1], order[idx]
             settings.system_view_order = order
-            # 系统视图顺序不影响分类数据，但本对话框顶部的"系统视图"段会展示出来
             self._load_categories()
 
     def _on_system_view_move_down(self, view_key: str):

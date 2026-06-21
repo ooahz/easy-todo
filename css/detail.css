@@ -1,8 +1,4 @@
-/* 任务详情弹窗样式 - 双栏模式 (pywebview)
- *
- * 使用 CSS 自定义属性实现主题切换，主题色由程序动态注入 :root 变量。
- * 用户可复制此文件到 ~/.com.easy.todo/css/detail.css 进行自定义覆盖。
- */
+/* 任务详情弹窗样式*/
 
 * { box-sizing: border-box; }
 

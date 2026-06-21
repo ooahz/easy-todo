@@ -1,4 +1,4 @@
-"""版本管理服务 - 处理版本检测、迁移控制等版本相关操作"""
+"""版本管理服务"""
 from __future__ import annotations
 
 from sqlalchemy import text
@@ -10,7 +10,6 @@ class VersionService:
     """版本管理服务
 
     通过数据库 _meta 表记录和查询版本信息，
-    用于控制迁移执行时机及未来其它版本相关操作。
     """
 
     def __init__(self, engine):
