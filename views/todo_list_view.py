@@ -630,8 +630,9 @@ class TodoListView(QWidget):
             {"key": "completed", "title": "已完成", "color": "#8764B8", "todos": []},
         ]
         for todo in todos:
+            is_archived = todo.get("_is_archived", False) or todo.get("status", 0) == 2
             is_done = todo.get("_is_done", False) or todo.get("status", 0) == 1
-            if is_done:
+            if is_done or is_archived:
                 groups[3]["todos"].append(todo)
                 continue
             # 周期任务按生效状态分组

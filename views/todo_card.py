@@ -284,7 +284,7 @@ class TodoCard(CardWidget):
         if task_type == "periodic" and not recurrence:
             from services.todo_service import TodoService
             periodic_status = TodoService.get_periodic_status(self.todo_data)
-            if self._is_done:
+            if self._is_done or self._is_archived:
                 status_text = f"{start} ~ {due}" if start else f"{due}"
             elif periodic_status == "not_started":
                 status_text = f'<span style="color:#0078D4">未开始</span> ({start} ~ {due})'
@@ -297,12 +297,12 @@ class TodoCard(CardWidget):
             if due:
                 due_date = date.fromisoformat(due)
                 today = date.today()
-                if due_date < today and not self._is_done:
+                if due_date < today and not self._is_done and not self._is_archived:
                     if start:
                         info_parts.append(f'<span style="color:{settings.warning_color}">{start} ~ {due}（已过期）</span>')
                     else:
                         info_parts.append(f'<span style="color:{settings.warning_color}">已过期 ({due})</span>')
-                elif due_date == today:
+                elif due_date == today and not self._is_archived:
                     if start:
                         info_parts.append(f"{start} ~ 今天")
                     else:

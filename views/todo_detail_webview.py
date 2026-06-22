@@ -13,6 +13,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import QTimer
+
 from config.settings import settings
 from services.file_service import FileService
 
@@ -53,6 +55,11 @@ class _WebViewProcessManager:
         self._process: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._reader_thread: threading.Thread | None = None
+        self._resized_callback = None
+
+    def register_resized_callback(self, callback):
+        """注册窗口尺寸变化回调(在 stdout 读取线程中调用)。"""
+        self._resized_callback = callback
 
     def ensure_running(self) -> bool:
         """确保子进程已启动（幂等）。返回是否可用。"""
@@ -107,7 +114,11 @@ class _WebViewProcessManager:
                     h = msg.get("height")
                     if w and h:
                         try:
-                            settings.detail_dialog_size = (int(w), int(h))
+                            iw, ih = int(w), int(h)
+                            settings.detail_dialog_size = (iw, ih)
+                            cb = self._resized_callback
+                            if cb is not None:
+                                cb(iw, ih)
                         except Exception:
                             pass
         except Exception:
@@ -193,17 +204,48 @@ def stop_webview():
 class TodoDetailWebView:
     """在复用的子进程中渲染任务详情"""
 
-    def __init__(self, todo_data: dict, todo_id: int,
-                 popup_pos: tuple[int, int] | None = None):
+    _active_instance: TodoDetailWebView | None = None
+
+    def __init__(
+        self,
+        todo_data: dict,
+        todo_id: int,
+        popup_pos: tuple[int, int] | None = None,
+        parent=None,
+    ):
         self._todo_data = todo_data
         self._current_todo_id = todo_id
         self._popup_pos = popup_pos
+        self._parent_window = parent
         self._file_service = FileService()
 
     def show(self):
         """预处理数据 + 发送到常驻子进程渲染。"""
+        TodoDetailWebView._active_instance = self
+        _manager.register_resized_callback(self._on_resized)
         data = self._prepare_data()
         _manager.send(data)
+
+    def _on_resized(self, width: int, height: int):
+        """子进程报告弹窗尺寸变化时，按新尺寸重新计算位置并通知子进程。
+
+        该回调在子进程 stdout 读取线程中执行，需通过 QTimer 切到 Qt 主线程
+        再访问主窗口几何信息并发送位置更新命令。
+        """
+        def _do_in_main_thread():
+            main = self._parent_window
+            if main is None:
+                return
+            try:
+                popup_pos = main._calc_popup_position(width, height)
+            except Exception:
+                return
+            if popup_pos:
+                _manager.send(
+                    {"type": "update_position", "popup_pos": list(popup_pos)}
+                )
+
+        QTimer.singleShot(0, _do_in_main_thread)
 
     def _prepare_data(self) -> dict[str, Any]:
         """把 todo 数据 + 主题 + 文件清单打包成 dict 传给子进程。"""

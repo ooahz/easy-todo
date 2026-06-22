@@ -144,15 +144,15 @@ def _render_priority(priority: int, c: dict) -> tuple:
     return text, color
 
 
-def _render_due(due, is_done, c):
+def _render_due(due, is_done, c, is_archived=False):
     if not due:
         return None
     try:
         due_date = date.fromisoformat(due)
         today = date.today()
-        if due_date < today and not is_done:
+        if due_date < today and not is_done and not is_archived:
             return f"{due} (已过期)", c["overdue"]
-        if due_date == today:
+        if due_date == today and not is_archived:
             return f"{due} (今天)", c["accent"]
         return due, c["body"]
     except (ValueError, TypeError):
@@ -376,7 +376,7 @@ html, body {{
             f'<span class="info-item"><span class="label">起始</span>'
             f'<span class="value">{escape(s)}</span></span>'
         )
-    due = _render_due(todo.get("due_date"), is_done, c)
+    due = _render_due(todo.get("due_date"), is_done, c, is_archived)
     if due:
         text, color = due
         cls = "overdue" if color == c["overdue"] else ("accent" if color == c["accent"] else "")
@@ -522,6 +522,19 @@ document.addEventListener('contextmenu', function(e) {{
 }});
 
 document.addEventListener('click', function(e) {{
+    // 点击外部链接 → 使用系统默认浏览器打开
+    var link = e.target.closest('a');
+    if (link && link.href) {{
+        var href = link.href;
+        if (href.indexOf('http://') === 0 || href.indexOf('https://') === 0) {{
+            e.preventDefault();
+            e.stopPropagation();
+            if (window.pywebview && window.pywebview.api) {{
+                window.pywebview.api.open_external_url(href);
+            }}
+            return;
+        }}
+    }}
     // 点击文件夹按钮 → 打开所在文件夹
     var folderBtn = e.target.closest('.file-folder-btn');
     if (folderBtn && folderBtn.dataset.path) {{
@@ -585,6 +598,16 @@ def main():
                 else:
                     import subprocess
                     subprocess.Popen(["xdg-open", str(Path(file_path).parent)])
+            except Exception:
+                pass
+
+        def open_external_url(self, url: str):
+            """在系统默认浏览器中打开外部链接。"""
+            if not url:
+                return
+            import webbrowser
+            try:
+                webbrowser.open(url)
             except Exception:
                 pass
 
@@ -740,6 +763,13 @@ def main():
             pass
 
     def _handle_data(data: dict):
+        msg_type = data.get("type", "show")
+        if msg_type == "update_position":
+            popup_pos = data.get("popup_pos")
+            if popup_pos and isinstance(popup_pos, (list, tuple)) and len(popup_pos) == 2:
+                _apply_window_position("任务详情", popup_pos[0], popup_pos[1])
+            return
+
         try:
             html = build_html(data)
         except Exception:

@@ -965,6 +965,7 @@ class TodoDetailDialog(QDialog):
     # ---- 共用构建方法 ----
 
     def _build_info_rows(self, c: dict, todo: dict, is_done: bool, layout: QVBoxLayout):
+        is_archived = todo.get("_is_archived", False)
         priority = todo.get("priority", 0)
         if priority > 0:
             priority_text = PRIORITY_MAP.get(priority, "无")
@@ -998,10 +999,10 @@ class TodoDetailDialog(QDialog):
             try:
                 due_date = date.fromisoformat(due)
                 today = date.today()
-                if due_date < today and not is_done:
+                if due_date < today and not is_done and not is_archived:
                     due_text = f"{due} | 已过期"
                     due_color = c['overdue']
-                elif due_date == today:
+                elif due_date == today and not is_archived:
                     due_text = f"{due} | 今天"
                     due_color = c['accent']
                 else:

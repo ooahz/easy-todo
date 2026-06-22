@@ -558,6 +558,7 @@ class MainWindow(FluentWindow):
 
         self.done_view.filter_combo.setVisible(True)
         self.done_view.archive_all_btn.setVisible(True)
+        self.done_view.float_btn.setVisible(False)
         self.done_view.filter_changed.connect(self._on_done_filter_changed)
         self.done_view.archive_all_clicked.connect(self._archive_all_done)
 
@@ -1468,7 +1469,7 @@ class MainWindow(FluentWindow):
         except ValueError as e:
             InfoBar.error(title="保存失败", content=str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=3000)
-            # 任务创建失败，清理粘贴图暂存（避免遗留）
+            # 任务创建失败，清理粘贴图暂存
             if pending_paste_id:
                 try:
                     self.file_service.cleanup_pending(pending_paste_id)
@@ -1484,7 +1485,7 @@ class MainWindow(FluentWindow):
                 except Exception as e:
                     print(f"保存文件失败: {e}")
 
-        # 迁移粘贴图暂存到 task_{todo_id}/（与新建任务上传文件路径完全一致）
+        # 迁移粘贴图暂存到 task_{todo_id}
         if todo and pending_paste_id:
             try:
                 self.file_service.save_paste_to_task(pending_paste_id, todo.id)
@@ -1705,11 +1706,7 @@ class MainWindow(FluentWindow):
         return None
 
     def _calc_popup_position(self, popup_w: int = 900, popup_h: int = 720) -> tuple[int, int] | None:
-        """计算双栏模式任务详情弹窗的位置:紧贴主窗口右侧 10px,垂直居中。
-
-        若右侧放不下,回退到主窗口左侧;再放不下则夹回当前屏幕工作区。
-        位置预算基于传入的 popup_w/popup_h,需与 webview 实际尺寸一致(否则贴边/避让会算偏)。
-        """
+        """计算双栏模式任务详情弹窗的位置"""
         try:
             from PySide6.QtWidgets import QApplication
             main_geo = self.frameGeometry()
@@ -1737,27 +1734,11 @@ class MainWindow(FluentWindow):
             return None
 
     def _load_webview_popup_size(self) -> tuple[int, int]:
-        """读取 webview 子进程持久化的弹窗尺寸(默认 900x720)。
-
-        用于在主进程侧把位置预算与 webview 真实尺寸对齐,避免贴边/避让算偏。
-        文件路径与 webview_runner.py 里的 _WEBVIEW_SIZE_PATH 保持一致。
-        """
-        from config.constants import APP_ID
-        from pathlib import Path
-        size_file = Path.home() / f".{APP_ID}" / "webview_size.json"
-        try:
-            if size_file.exists():
-                data = json.loads(size_file.read_text(encoding="utf-8"))
-                w = int(data.get("width", 900))
-                h = int(data.get("height", 720))
-                if w >= 400 and h >= 300:
-                    return (w, h)
-        except Exception:
-            pass
-        return (900, 720)
+        """读取 webview 弹窗持久化尺寸"""
+        return settings.detail_dialog_size
 
     def _on_card_clicked(self, todo_id: int):
-        """父任务卡片点击 - 弹出详情对话框"""
+        """父任务卡片点击"""
         todo = self.todo_service.get_by_id(todo_id)
         if todo:
             todo_tree = self._build_todo_tree([todo])
@@ -1766,12 +1747,11 @@ class MainWindow(FluentWindow):
                 return
             node = todo_tree[0]
             if settings.dialog_mode == "widescreen":
-                # 双栏模式:用 pywebview 子进程渲染只读预览
-                # webview 窗口在独立子进程中,关闭不影响主程序
-                # 位置预算要用真实弹窗尺寸(支持用户上次手动调整的尺寸持久化)
                 saved_w, saved_h = self._load_webview_popup_size()
                 popup_pos = self._calc_popup_position(saved_w, saved_h)
-                preview = TodoDetailWebView(node, todo_id=node["id"], popup_pos=popup_pos)
+                preview = TodoDetailWebView(
+                    node, todo_id=node["id"], popup_pos=popup_pos, parent=self
+                )
                 preview.show()
                 return
             dialog = TodoDetailDialog(node, parent=self)
@@ -1824,14 +1804,12 @@ class MainWindow(FluentWindow):
         if from_id not in todo_ids or to_id not in todo_ids:
             return
 
-        # 如果不是自定义排序，先记录当前顺序到数据库，再执行拖拽
         if settings.sort_rules != ["custom"]:
             self.todo_service.reorder(todo_ids)
             settings.sort_rules = ["custom"]
             settings.sort_rule = "custom"
             self.settings_page._update_sort_ui(["custom"])
 
-        # 重新排序：将 from_id 放到 to_id 的上方或下方
         from_idx = todo_ids.index(from_id)
         to_idx = todo_ids.index(to_id)
 
@@ -1867,7 +1845,7 @@ class MainWindow(FluentWindow):
             btn.setEnabled(enabled)
 
     def _export_json(self):
-        """导出JSON（支持恢复数据）"""
+        """导出JSON"""
         path, _ = QFileDialog.getSaveFileName(
             self, "导出JSON", "easy_todo_backup.json", "JSON 文件 (*.json)"
         )
@@ -1893,7 +1871,7 @@ class MainWindow(FluentWindow):
             self._set_io_buttons_enabled(True)
 
     def _export_excel(self):
-        """导出Excel（仅用于查看，不支持恢复）"""
+        """导出Excel"""
         from views.excel_export_filter_dialog import ExcelExportFilterDialog
 
         dlg = ExcelExportFilterDialog(parent=self)
