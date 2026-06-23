@@ -588,6 +588,7 @@ class MainWindow(FluentWindow):
         self.settings_page.export_excel_clicked.connect(self._export_excel)
         self.settings_page.import_btn.clicked.connect(self._import_data)
         # 分类变更走事件总线订阅，settings_page 自身不再需要 categories_changed 信号
+        self.settings_page.navigation_order_changed.connect(self._on_navigation_order_changed)
 
         # 快捷键
         self._setup_shortcuts()
@@ -2104,6 +2105,36 @@ class MainWindow(FluentWindow):
             view, name = item
             self.addSubInterface(view, FluentIcon.BOOK_SHELF, name,
                                  position=NavigationItemPosition.SCROLL)
+
+    def _on_navigation_order_changed(self):
+        """设置页/分类管理对话框中视图顺序变化后，重建左侧导航顺序"""
+        current_widget = self.stackedWidget.currentWidget()
+
+        # 重建系统视图导航
+        for key in list(self._view_instances.keys()):
+            view = self._view_instances[key]
+            try:
+                self.removeInterface(view, isDelete=False)
+            except Exception:
+                pass
+
+        for key in settings.system_view_order:
+            if key in self._view_instances:
+                self.addSubInterface(
+                    self._view_instances[key],
+                    self._view_map[key],
+                    self._view_names[key],
+                )
+
+        # 刷新分类导航
+        self._on_category_reordered()
+
+        # 尽量恢复之前的选中视图
+        if current_widget is not None:
+            try:
+                self.switchTo(current_widget)
+            except Exception:
+                pass
 
     def _on_floating_pin_changed(self, pinned: bool):
         """浮窗固定状态变更"""

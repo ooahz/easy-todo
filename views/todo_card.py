@@ -40,27 +40,8 @@ class TodoCard(CardWidget):
         self._is_selected = False
         self._readonly = readonly
 
-        # 单列模式下，如果描述为纯文本且不超过100字符，使用较小高度
-        desc = todo_data.get("description", "")
-        is_short_desc = len(desc) <= 100 and not self._has_markdown(desc)
-        if settings.dialog_mode == "default" and is_short_desc:
-            self._base_height = 50
-        else:
-            self._base_height = 72
-        self.setMinimumHeight(self._base_height)
-        self.setCursor(Qt.PointingHandCursor)
-
         self._setup_ui()
         self._apply_styles()
-
-    @staticmethod
-    def _has_markdown(text: str) -> bool:
-        """检查文本是否包含 Markdown 格式"""
-        if not text:
-            return False
-        # 检查常见的 Markdown 标记
-        md_patterns = ['**', '__', '##', '###', '- ', '* ', '1. ', '```', '`', '[', '](', '  \n']
-        return any(p in text for p in md_patterns)
 
     def _setup_ui(self):
         """构建卡片 UI"""

@@ -19,6 +19,7 @@ from qfluentwidgets import (
 
 from config.constants import APP_NAME, APP_VERSION
 from config.settings import settings
+from views.beginner_guide_dialog import BeginnerGuideDialog
 from views.style_sheet import StyleSheet
 
 
@@ -322,6 +323,7 @@ class SettingsPage(QWidget):
     manual_refresh_clicked = Signal()
     export_json_clicked = Signal()
     export_excel_clicked = Signal()
+    navigation_order_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -371,6 +373,9 @@ class SettingsPage(QWidget):
 
         # ---- 启动组 ----
         self.list_layout.addWidget(self._create_startup_group())
+
+        # ---- 帮助组 ----
+        self.list_layout.addWidget(self._create_help_group())
 
         # ---- 关于组 ----
         self.list_layout.addWidget(self._create_about_group())
@@ -616,6 +621,26 @@ class SettingsPage(QWidget):
 
         return group
 
+    def _create_help_group(self) -> SettingCardGroup:
+        group = SettingCardGroup("帮助", self.scroll_widget)
+
+        self.beginner_guide_card = PushSettingCard(
+            "查看指南",
+            FluentIcon.HELP,
+            "新手指南",
+            "快速了解 Easy Todo 的小技巧",
+        )
+        self.beginner_guide_card.clicked.connect(self._on_show_beginner_guide)
+        group.addSettingCard(self.beginner_guide_card)
+
+        return group
+
+    def _on_show_beginner_guide(self):
+        """打开新手指南对话框"""
+        dialog = BeginnerGuideDialog(self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.exec()
+
     def _create_about_group(self):
         group = SettingCardGroup("关于", self.scroll_widget)
 
@@ -722,6 +747,10 @@ class SettingsPage(QWidget):
     def _on_manage_categories(self):
         """打开分类管理对话框"""
         from views.category_dialog import CategoryDialog
+        from services.category_service import CategoryService
+
+        old_system_order = list(settings.system_view_order)
+        old_category_order = [c.id for c in CategoryService().get_all() if not c.is_system]
 
         # WA_DeleteOnClose 让 Qt 在窗口关闭后自动释放底层 C++ 对象，
         # 避免每次打开都残留一个挂在 SettingsPage 子树上的 CategoryDialog 实例
@@ -733,6 +762,11 @@ class SettingsPage(QWidget):
         # 主窗口侧由 MainWindow 订阅同一总线完成导航增量更新，
         # 关闭的瞬间不会再触发任何"延迟全量重建"。
         self._update_category_count()
+
+        new_system_order = list(settings.system_view_order)
+        new_category_order = [c.id for c in CategoryService().get_all() if not c.is_system]
+        if old_system_order != new_system_order or old_category_order != new_category_order:
+            self.navigation_order_changed.emit()
 
     def _update_category_count(self):
         """更新分类数量显示"""

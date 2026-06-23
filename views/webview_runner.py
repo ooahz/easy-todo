@@ -37,6 +37,22 @@ def _write_html_to_tempfile(html: str) -> str | None:
     return "file:///" + _HTML_TMP_PATH.replace(os.sep, "/")
 
 
+def _update_page_dom(page_inner: str, style_block: str) -> str:
+    """生成一段自执行 JS,用于在复用窗口中替换 .page 内容并刷新样式。
+
+    返回可直接传给 evaluate_js 的脚本字符串,不含换行(避免部分平台转义问题)。
+    """
+    script = (
+        "(function(){"
+        "var s=document.getElementById('easytodo-style');"
+        "if(!s){s=document.createElement('style');s.id='easytodo-style';document.head.appendChild(s);}"
+        "s.textContent=" + json.dumps(style_block, ensure_ascii=False) + ";"
+        "document.querySelector('.page').innerHTML=" + json.dumps(page_inner, ensure_ascii=False) + ";"
+        "})();"
+    )
+    return script
+
+
 def _cleanup_html_tmp_file() -> None:
     global _HTML_TMP_PATH
     if _HTML_TMP_PATH is not None:
@@ -225,39 +241,16 @@ def _rewrite_image_paths(html_str: str, folder: Path) -> str:
     return re.sub(r'(<img\s+[^>]*?src)="([^"]+)"', repl, html_str)
 
 
-def build_html(data: dict) -> str:
-    theme_mode = data.get("theme", "light")
+def _build_style_block(theme_mode: str) -> str:
+    """构建包含 CSS 变量和外部/内联样式的 <style> 内容。"""
     c = theme_colors_by_name(theme_mode)
-    todo = data.get("todo", {})
-    is_done = bool(todo.get("_is_done"))
-    is_archived = bool(todo.get("_is_archived"))
-
-    # 描述
-    md_text = todo.get("description", "") or ""
-    task_folder_str = data.get("task_folder", "")
-    try:
-        import markdown as _md
-        md_html = _md.markdown(
-            md_text,
-            extensions=["fenced_code", "tables", "sane_lists", "nl2br"],
-        )
-    except ImportError:
-        # 简单 fallback:把 \n\n 转 <p>
-        import re as _re
-        md_html = _re.sub(r"\n\n+", "</p><p>", _re.sub(r"\n", "<br>", escape(md_text)))
-        md_html = f"<p>{md_html}</p>"
-
-    if task_folder_str:
-        md_html = _rewrite_image_paths(md_html, Path(task_folder_str))
-
-    # CSS：注入主题变量 + 加载外部 CSS 文件
     css_vars = _build_css_vars(c)
     external_css = _load_detail_css()
     if external_css:
-        style_block = f"{css_vars}\n{external_css}"
+        return f"{css_vars}\n{external_css}"
     else:
         # 回退：内置 CSS 文件不存在时使用内联兜底样式
-        style_block = f"""{css_vars}
+        return f"""{css_vars}
 * {{ box-sizing: border-box; }}
 html, body {{
     margin: 0; padding: 0;
@@ -332,6 +325,36 @@ html, body {{
 .markdown-body th {{ background-color: var(--code-bg); }}
 .markdown-body img {{ max-width: 100%; max-height: 480px; border-radius: 4px; }}
 """
+
+
+def _build_page_inner(data: dict) -> tuple[str, str]:
+    """生成 .page 容器内的 HTML 片段和主题模式（用于确定 CSS 变量）。
+
+    返回值: (theme_mode, page_inner_html)
+    """
+    theme_mode = data.get("theme", "light")
+    c = theme_colors_by_name(theme_mode)
+    todo = data.get("todo", {})
+    is_done = bool(todo.get("_is_done"))
+    is_archived = bool(todo.get("_is_archived"))
+
+    # 描述
+    md_text = todo.get("description", "") or ""
+    task_folder_str = data.get("task_folder", "")
+    try:
+        import markdown as _md
+        md_html = _md.markdown(
+            md_text,
+            extensions=["fenced_code", "tables", "sane_lists", "nl2br"],
+        )
+    except ImportError:
+        # 简单 fallback:把 \n\n 转 <p>
+        import re as _re
+        md_html = _re.sub(r"\n\n+", "</p><p>", _re.sub(r"\n", "<br>", escape(md_text)))
+        md_html = f"<p>{md_html}</p>"
+
+    if task_folder_str:
+        md_html = _rewrite_image_paths(md_html, Path(task_folder_str))
 
     # 头部
     color_tag = todo.get("color_tag")
@@ -468,6 +491,19 @@ html, body {{
     else:
         files_html = ""
 
+    page_inner = "".join([header, info_strip, desc, subtasks, files_html])
+    return theme_mode, page_inner
+
+
+def build_html(data: dict) -> str:
+    """保留兼容：生成完整 HTML 页面（首次加载或回退用）。"""
+    theme_mode, page_inner = _build_page_inner(data)
+    style_block = _build_style_block(theme_mode)
+    return _build_page(style_block, page_inner)
+
+
+def _build_page(style_block: str, page_inner: str) -> str:
+    """组装完整 HTML 页面框架;page_inner 是 .page 容器内的动态内容。"""
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -479,11 +515,7 @@ html, body {{
 </head>
 <body>
 <div class="page">
-    {header}
-    {info_strip}
-    {desc}
-    {subtasks}
-    {files_html}
+{page_inner}
 </div>
 <script>
 // 把 file:// URL 还原成本地路径,供 open_file 使用
@@ -770,11 +802,6 @@ def main():
                 _apply_window_position("任务详情", popup_pos[0], popup_pos[1])
             return
 
-        try:
-            html = build_html(data)
-        except Exception:
-            traceback.print_exc()
-            return
         title = "任务详情"
         theme_mode = data.get("theme", "light")
         # 标题栏背景与弹窗内容背景保持一致(取自统一主题色配置)
@@ -784,10 +811,6 @@ def main():
         popup_pos = data.get("popup_pos")
         existing = state["task_window"]
 
-        # 把 HTML 写到临时文件,以 file:// 加载,这样图片资源(file://)能被同源加载。
-        # 直接用 html= 加载会被 WebView2 视为 data: origin,从而拦截 file:// 图片。
-        page_url = _write_html_to_tempfile(html)
-
         if existing is not None:
             try:
                 saved_w, saved_h = existing.width, existing.height
@@ -796,17 +819,15 @@ def main():
         else:
             saved_w, saved_h = _load_webview_size(data)
 
-        def _load_into(window):
-            if page_url is not None:
-                window.load_url(page_url)
-            else:
-                window.load_html(html, '')
-
-        # 快速路径：复用已存在的任务窗口，仅更新内容
+        # 快速路径：复用已存在的任务窗口，仅通过 JS 更新 .page 内容
         if existing is not None:
             try:
+                theme_mode, page_inner = _build_page_inner(data)
+                # 若主题发生变化，需要刷新 CSS 变量与 body 背景色
                 existing.set_title(title)
-                _load_into(existing)
+                style_block = _build_style_block(theme_mode)
+                js_payload = _update_page_dom(page_inner, style_block)
+                existing.evaluate_js(js_payload)
                 existing.show()
                 existing.restore()
                 _apply_native_title_bar_color(title, caption_bg, caption_text)
@@ -814,7 +835,20 @@ def main():
                     _apply_window_position(title, popup_pos[0], popup_pos[1])
                 return
             except Exception:
+                traceback.print_exc()
                 state["task_window"] = None
+
+        # 首次或复用失败：构建完整 HTML 并通过临时文件加载
+        try:
+            html = build_html(data)
+        except Exception:
+            traceback.print_exc()
+            return
+
+        # 把 HTML 写到临时文件,以 file:// 加载,这样图片资源(file://)能被同源加载。
+        # 直接用 html= 加载会被 WebView2 视为 data: origin,从而拦截 file:// 图片。
+        page_url = _write_html_to_tempfile(html)
+
         try:
             kwargs = dict(
                 width=saved_w,
