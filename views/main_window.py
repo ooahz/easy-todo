@@ -8,7 +8,7 @@ import winreg
 from datetime import date, timedelta
 
 from PySide6.QtCore import Qt, QTimer, QRunnable, QThreadPool, QObject, Signal
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor, QFont
 from PySide6.QtWidgets import (
     QSystemTrayIcon, QMenu, QFileDialog, QApplication
 )
@@ -35,6 +35,50 @@ from views.todo_detail_panel import TodoDetailDialog
 from views.todo_detail_webview import TodoDetailWebView
 from views.todo_dialog import TodoDialog
 from views.todo_list_view import TodoListView
+
+
+def _category_avatar_icon(name: str, color: str = "") -> QIcon:
+    """生成首字头像图标，用于折叠态区分自定义分类
+
+    - color 非透明：绘制圆角方块背景，字体颜色按背景亮度自动选黑/白
+    - color 透明（默认）：不绘制背景，字体颜色跟随主题（深色白字、浅色黑字）
+    """
+    size = 64
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setRenderHint(QPainter.TextAntialiasing, True)
+
+    bg = QColor(color) if color else QColor()
+    transparent = (not bg.isValid()) or bg.alpha() == 0
+
+    if transparent:
+        # 透明背景：不绘制圆角方块，字体颜色跟随主题（深色白字、浅色黑字）
+        try:
+            from qfluentwidgets import isDarkTheme
+            fg = QColor("#FFFFFF") if isDarkTheme() else QColor("#000000")
+        except Exception:
+            fg = QColor("#FFFFFF")
+    else:
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(0, 0, size, size, size // 5, size // 5)
+        # 根据背景色相对亮度选择黑/白字体（WCAG 公式）
+        r, g, b = bg.red() / 255, bg.green() / 255, bg.blue() / 255
+        def _lin(c):
+            return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        luminance = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+        fg = QColor("#000000") if luminance > 0.179 else QColor("#FFFFFF")
+
+    first = name.strip()[:1] if name.strip() else "?"
+    font = QFont()
+    font.setPixelSize(46)
+    p.setFont(font)
+    p.setPen(fg)
+    p.drawText(pix.rect(), Qt.AlignCenter, first)
+    p.end()
+    return QIcon(pix)
 
 
 class _LoadTodosSignals(QObject):
@@ -309,15 +353,22 @@ class MainWindow(FluentWindow):
 
         self._setup_ui()
         self._setup_navigation()
+        self._setup_category_navigation()
+        self._apply_navigation_order()
 
         # 根据导航顺序确定初始视图
-        order = settings.system_view_order
-        for key in order:
-            if key in self._view_instances:
-                self._current_view_key = key
-                break
+        for token in self.category_service.get_navigation_order():
+            if token.startswith("sys:"):
+                key = token[4:]
+                if key in self._view_instances:
+                    self._current_view_key = key
+                    break
+            elif token.startswith("cat:"):
+                cat_id = int(token[4:])
+                if cat_id in self._category_nav_items:
+                    self._current_view_key = f"cat_{cat_id}"
+                    break
 
-        self._setup_category_navigation()
         self._setup_floating()
         self._setup_tray()
         self._connect_signals()
@@ -393,17 +444,44 @@ class MainWindow(FluentWindow):
             "recent": "最近待办",
         }
 
-        order = settings.system_view_order
-        for key in order:
-            if key in self._view_instances:
-                view = self._view_instances[key]
-                icon = self._view_map[key]
-                name = self._view_names[key]
-                self.addSubInterface(view, icon, name)
-
         # 日程视图弹窗
         self.settings_page = SettingsPage(parent=self)
         self.settings_page.setObjectName("settingsPage")
+
+    def _apply_navigation_order(self):
+        """根据 navigation_order 应用侧边导航顺序"""
+        mixed_mode = self.category_service.is_mixed_navigation_order()
+        order = self.category_service.get_navigation_order()
+
+        for token in order:
+            if token.startswith("sys:"):
+                key = token[4:]
+                if key not in self._view_instances:
+                    continue
+                position = (
+                    NavigationItemPosition.SCROLL
+                    if mixed_mode
+                    else NavigationItemPosition.TOP
+                )
+                self.addSubInterface(
+                    self._view_instances[key],
+                    self._view_map[key],
+                    self._view_names[key],
+                    position=position,
+                )
+            elif token.startswith("cat:"):
+                cat_id = int(token[4:])
+                item = self._category_nav_items.get(cat_id)
+                if not item:
+                    continue
+                view, name = item
+                cat = self.category_service.get_by_id(cat_id)
+                color = cat.color if cat else ""
+                self.addSubInterface(
+                    view, _category_avatar_icon(name, color), name,
+                    position=NavigationItemPosition.SCROLL,
+                )
+
         self.addSubInterface(
             self.settings_page, FluentIcon.SETTING,
             "设置",
@@ -1970,6 +2048,8 @@ class MainWindow(FluentWindow):
         self.floating.refresh_theme()
         # 刷新卡片样式
         self._refresh_all_views()
+        # 重建导航以刷新分类首字头像（透明背景时字体颜色需跟随主题）
+        self._on_navigation_order_changed()
 
     def _on_show_done_changed(self, checked: bool):
         self._refresh_all_views()
@@ -1990,7 +2070,7 @@ class MainWindow(FluentWindow):
         self.floating.set_always_on_top(enabled)
 
     def _setup_category_navigation(self):
-        """启动时一次性建立分类导航"""
+        """启动时一次性建立分类导航视图缓存"""
         bus = category_event_bus()
         bus.created.connect(self._on_category_created)
         bus.updated.connect(self._on_category_updated)
@@ -1999,15 +2079,12 @@ class MainWindow(FluentWindow):
 
         for cat in self.category_service.get_all():
             if not cat.is_system:
-                self._add_category_nav_item(cat)
+                self._create_category_nav_view(cat)
 
-    def _add_category_nav_item(self, cat):
+    def _create_category_nav_view(self, cat):
         view = TodoListView(parent=self, view_name=cat.name)
         view.setObjectName(f"categoryView_{cat.id}")
         view.set_time_filter_visible(True)
-
-        self.addSubInterface(view, FluentIcon.BOOK_SHELF, cat.name,
-                             position=NavigationItemPosition.SCROLL)
 
         cat_key = f"cat_{cat.id}"
 
@@ -2036,7 +2113,9 @@ class MainWindow(FluentWindow):
         cat = self.category_service.get_by_id(category_id)
         if not cat or cat.is_system:
             return
-        self._add_category_nav_item(cat)
+        self._create_category_nav_view(cat)
+        self.category_service.append_navigation_order(f"cat:{category_id}")
+        self._on_navigation_order_changed()
 
     def _on_category_updated(self, category_id: int):
         item = self._category_nav_items.get(category_id)
@@ -2047,7 +2126,9 @@ class MainWindow(FluentWindow):
             return
         view, _ = item
         try:
-            self.navigationInterface.widget(view.objectName()).setText(cat.name)
+            nav_widget = self.navigationInterface.widget(view.objectName())
+            nav_widget.setText(cat.name)
+            nav_widget.setIcon(_category_avatar_icon(cat.name, cat.color))
         except Exception:
             pass
         self._category_nav_items[category_id] = (view, cat.name)
@@ -2075,42 +2156,17 @@ class MainWindow(FluentWindow):
         if self._current_view_key == cat_key:
             self._current_view_key = "all"
 
+        self.category_service.remove_navigation_order(f"cat:{category_id}")
+
     def _on_category_reordered(self):
-        """分类顺序变化：仅调整导航项顺序，复用已有视图避免泄漏"""
-        ordered_ids = [c.id for c in self.category_service.get_all() if not c.is_system]
-        cached_ids = list(self._category_nav_items.keys())
-        if ordered_ids == cached_ids:
-            return
-
-        # 从导航中移除所有分类项（不删除视图对象）
-        for cat_id in cached_ids:
-            item = self._category_nav_items.get(cat_id)
-            if not item:
-                continue
-            view, _ = item
-            try:
-                self.removeInterface(view, isDelete=False)
-            except Exception:
-                pass
-
-        # 按新顺序重新添加已有视图到导航（不创建新视图）
-        for cat_id in ordered_ids:
-            item = self._category_nav_items.get(cat_id)
-            if not item:
-                # 新分类（兜底，理论上已被 _on_category_created 处理）
-                cat = self.category_service.get_by_id(cat_id)
-                if cat:
-                    self._add_category_nav_item(cat)
-                continue
-            view, name = item
-            self.addSubInterface(view, FluentIcon.BOOK_SHELF, name,
-                                 position=NavigationItemPosition.SCROLL)
+        """分类顺序变化：使用 navigation_order 重建导航"""
+        self._on_navigation_order_changed()
 
     def _on_navigation_order_changed(self):
         """设置页/分类管理对话框中视图顺序变化后，重建左侧导航顺序"""
         current_widget = self.stackedWidget.currentWidget()
 
-        # 重建系统视图导航
+        # 从导航中移除所有系统视图和分类视图（不删除视图对象）
         for key in list(self._view_instances.keys()):
             view = self._view_instances[key]
             try:
@@ -2118,16 +2174,20 @@ class MainWindow(FluentWindow):
             except Exception:
                 pass
 
-        for key in settings.system_view_order:
-            if key in self._view_instances:
-                self.addSubInterface(
-                    self._view_instances[key],
-                    self._view_map[key],
-                    self._view_names[key],
-                )
+        for cat_id in list(self._category_nav_items.keys()):
+            view, _ = self._category_nav_items[cat_id]
+            try:
+                self.removeInterface(view, isDelete=False)
+            except Exception:
+                pass
 
-        # 刷新分类导航
-        self._on_category_reordered()
+        try:
+            self.removeInterface(self.settings_page, isDelete=False)
+        except Exception:
+            pass
+
+        # 按 navigation_order 重新添加
+        self._apply_navigation_order()
 
         # 尽量恢复之前的选中视图
         if current_widget is not None:

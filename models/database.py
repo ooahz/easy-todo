@@ -87,6 +87,7 @@ class Database:
         self._migrate_add_recurrence_start_date()
         self._migrate_add_start_date()
         self._migrate_add_task_type()
+        self._migrate_category_color_to_argb()
         self._init_default_categories()
         self._migrate_add_indexes()
         self._migrate_cleanup_datetime_columns()
@@ -232,6 +233,22 @@ class Database:
                     "UPDATE todos SET task_type = 'default' WHERE task_type IS NULL"
                 ))
                 conn.commit()
+
+    def _migrate_category_color_to_argb(self):
+        """迁移：将 categories.color 旧默认值 #0078D4（RGB）统一为透明色 #00000000（ARGB）
+
+        SQLite 不支持 ALTER COLUMN，这里仅更新存量数据值；
+        新建分类由 ORM default 写入 #00000000，表级旧 DEFAULT 不再被触发。
+        """
+        from sqlalchemy import text
+
+        with self.engine.connect() as conn:
+            # 将旧的 7 位 RGB 默认色统一改为 9 位 ARGB 透明色
+            conn.execute(text(
+                "UPDATE categories SET color = '#00000000' "
+                "WHERE color = '#0078D4' OR length(color) = 7"
+            ))
+            conn.commit()
 
     def _init_default_categories(self):
         """清理旧的系统分类"""

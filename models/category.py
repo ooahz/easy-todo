@@ -11,7 +11,7 @@ class Category(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(50), nullable=False)
-    color = Column(String(7), default="#0078D4")
+    color = Column(String(9), default="#00000000")
     sort_order = Column(Integer, default=0)
     is_system = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.now)

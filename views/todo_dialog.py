@@ -178,8 +178,9 @@ class TodoDialog(QDialog):
         super().paintEvent(event)
 
     def closeEvent(self, event):
-        # 保存窗口尺寸
+        # 保存窗口尺寸（关闭时立即刷新到磁盘，避免延迟保存丢失）
         settings.todo_dialog_size = (self.width(), self.height())
+        settings.flush()
         # 用户取消 / 直接关闭时，清理粘贴图暂存目录（成功保存后 _pending_paste_finalized=True，跳过）
         if not getattr(self, '_pending_paste_finalized', False):
             try:

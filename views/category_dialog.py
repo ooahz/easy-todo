@@ -2,7 +2,7 @@
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPainter, QColor, QPainterPath
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QListWidgetItem, QLabel
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QListWidgetItem
 )
 
 from qfluentwidgets import (
@@ -79,6 +79,7 @@ class CategoryListItem(QWidget):
     edit_clicked = Signal(int)
     delete_clicked = Signal(int)
     move_up_clicked = Signal(int)
+    move_down_clicked = Signal(int)
 
     def __init__(self, category_id: int, name: str, parent=None):
         super().__init__(parent)
@@ -106,6 +107,13 @@ class CategoryListItem(QWidget):
         self.up_btn.setToolTip("上移")
         self.up_btn.clicked.connect(lambda: self.move_up_clicked.emit(self.category_id))
         layout.addWidget(self.up_btn)
+
+        self.down_btn = TransparentToolButton(FluentIcon.DOWN)
+        self.down_btn.setFixedSize(28, 28)
+        self.down_btn.setIconSize(QSize(12, 12))
+        self.down_btn.setToolTip("下移")
+        self.down_btn.clicked.connect(lambda: self.move_down_clicked.emit(self.category_id))
+        layout.addWidget(self.down_btn)
 
         self.edit_btn = TransparentToolButton(FluentIcon.EDIT)
         self.edit_btn.setFixedSize(28, 28)
@@ -283,13 +291,21 @@ class CategoryDialog(QDialog):
                     widget._update_icon_color()
 
     def _load_categories(self):
-        """加载分类列表"""
+        """加载混排分类列表"""
         self.category_list.clear()
 
-        from config.settings import settings
-        order = settings.system_view_order
-        for key in order:
-            if key in SYSTEM_VIEW_MAP:
+        categories = {
+            c.id: c
+            for c in self.category_service.get_all()
+            if not c.is_system
+        }
+        order = self.category_service.get_navigation_order()
+
+        for token in order:
+            if token.startswith("sys:"):
+                key = token[4:]
+                if key not in SYSTEM_VIEW_MAP:
+                    continue
                 name, icon = SYSTEM_VIEW_MAP[key]
                 item = QListWidgetItem()
                 widget = SystemViewItem(key, name, icon)
@@ -298,26 +314,21 @@ class CategoryDialog(QDialog):
                 self.category_list.addItem(item)
                 self.category_list.setItemWidget(item, widget)
                 item.setSizeHint(widget.sizeHint())
-
-        sep_item = QListWidgetItem()
-        sep_widget = QLabel()
-        sep_widget.setFixedHeight(1)
-        sep_widget.setStyleSheet(f"background-color: {palette().DIVIDER}; margin: 4px 8px;")
-        self.category_list.addItem(sep_item)
-        self.category_list.setItemWidget(sep_item, sep_widget)
-        sep_item.setSizeHint(sep_widget.sizeHint())
-
-        categories = self.category_service.get_all()
-        for cat in categories:
-            item = QListWidgetItem()
-            item.setData(Qt.UserRole, cat.id)
-            widget = CategoryListItem(cat.id, cat.name)
-            widget.edit_clicked.connect(self._on_edit_clicked)
-            widget.delete_clicked.connect(self._on_delete_clicked)
-            widget.move_up_clicked.connect(self._on_move_up)
-            self.category_list.addItem(item)
-            self.category_list.setItemWidget(item, widget)
-            item.setSizeHint(widget.sizeHint())
+            elif token.startswith("cat:"):
+                cat_id = int(token[4:])
+                cat = categories.get(cat_id)
+                if not cat:
+                    continue
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, cat.id)
+                widget = CategoryListItem(cat.id, cat.name)
+                widget.edit_clicked.connect(self._on_edit_clicked)
+                widget.delete_clicked.connect(self._on_delete_clicked)
+                widget.move_up_clicked.connect(self._on_move_up)
+                widget.move_down_clicked.connect(self._on_move_down)
+                self.category_list.addItem(item)
+                self.category_list.setItemWidget(item, widget)
+                item.setSizeHint(widget.sizeHint())
 
     def _on_add(self):
         """添加或保存编辑分类"""
@@ -330,7 +341,8 @@ class CategoryDialog(QDialog):
             self._editing_id = None
             self.add_btn.setText(" 添加 ")
         else:
-            self.category_service.create(name)
+            category = self.category_service.create(name)
+            self.category_service.append_navigation_order(f"cat:{category.id}")
 
         self.name_input.clear()
         # service 会通过事件总线触发 _on_category_event，列表自动刷新
@@ -354,35 +366,34 @@ class CategoryDialog(QDialog):
         msg.yesButton.setText("删除")
         msg.cancelButton.setText("取消")
         if msg.exec():
+            self.category_service.remove_navigation_order(f"cat:{category_id}")
             self.category_service.delete(category_id)
             # service 会通过事件总线触发 _on_category_event，列表自动刷新
 
     def _on_move_up(self, category_id: int):
         """上移分类"""
-        categories = self.category_service.get_all()
-        cat_ids = [c.id for c in categories]
+        self._move_navigation_item(f"cat:{category_id}", -1)
 
-        idx = cat_ids.index(category_id)
-        if idx > 0:
-            cat_ids[idx], cat_ids[idx - 1] = cat_ids[idx - 1], cat_ids[idx]
-            self.category_service.reorder(cat_ids)
+    def _on_move_down(self, category_id: int):
+        """下移分类"""
+        self._move_navigation_item(f"cat:{category_id}", 1)
 
     def _on_system_view_move_up(self, view_key: str):
         """上移系统视图"""
-        from config.settings import settings
-        order = list(settings.system_view_order)
-        idx = order.index(view_key) if view_key in order else -1
-        if idx > 0:
-            order[idx], order[idx - 1] = order[idx - 1], order[idx]
-            settings.system_view_order = order
-            self._load_categories()
+        self._move_navigation_item(f"sys:{view_key}", -1)
 
     def _on_system_view_move_down(self, view_key: str):
         """下移系统视图"""
-        from config.settings import settings
-        order = list(settings.system_view_order)
-        idx = order.index(view_key) if view_key in order else -1
-        if 0 <= idx < len(order) - 1:
-            order[idx], order[idx + 1] = order[idx + 1], order[idx]
-            settings.system_view_order = order
+        self._move_navigation_item(f"sys:{view_key}", 1)
+
+    def _move_navigation_item(self, token: str, delta: int):
+        """移动导航项，delta 为 -1 表示上移，1 表示下移"""
+        order = self.category_service.get_navigation_order()
+        if token not in order:
+            return
+        idx = order.index(token)
+        new_idx = idx + delta
+        if 0 <= new_idx < len(order):
+            order[idx], order[new_idx] = order[new_idx], order[idx]
+            self.category_service.save_navigation_order(order)
             self._load_categories()

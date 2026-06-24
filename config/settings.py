@@ -40,6 +40,7 @@ class Settings:
         "todo_dialog_width": None,
         "todo_dialog_height": None,
         "system_view_order": ["recent", "today", "important", "all", "done"],
+        "navigation_order": None,  # 混排导航顺序，元素为 "sys:<key>" 或 "cat:<id>"，None 表示按系统视图+分类默认顺序
         "shortcut_new_task": "",
         "holiday_source": "",  # none / default
     }
@@ -318,6 +319,16 @@ class Settings:
     @system_view_order.setter
     def system_view_order(self, value: list):
         self._data["system_view_order"] = value
+        self.save()
+
+    @property
+    def navigation_order(self) -> list[str] | None:
+        """混排导航顺序，元素为 "sys:<key>" 或 "cat:<id>"，None 表示使用默认顺序"""
+        return self._data.get("navigation_order")
+
+    @navigation_order.setter
+    def navigation_order(self, value: list[str] | None):
+        self._data["navigation_order"] = value
         self.save()
 
     @property

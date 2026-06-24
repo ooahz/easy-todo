@@ -749,8 +749,8 @@ class SettingsPage(QWidget):
         from views.category_dialog import CategoryDialog
         from services.category_service import CategoryService
 
-        old_system_order = list(settings.system_view_order)
-        old_category_order = [c.id for c in CategoryService().get_all() if not c.is_system]
+        svc = CategoryService()
+        old_order = svc.get_navigation_order()
 
         # WA_DeleteOnClose 让 Qt 在窗口关闭后自动释放底层 C++ 对象，
         # 避免每次打开都残留一个挂在 SettingsPage 子树上的 CategoryDialog 实例
@@ -763,9 +763,8 @@ class SettingsPage(QWidget):
         # 关闭的瞬间不会再触发任何"延迟全量重建"。
         self._update_category_count()
 
-        new_system_order = list(settings.system_view_order)
-        new_category_order = [c.id for c in CategoryService().get_all() if not c.is_system]
-        if old_system_order != new_system_order or old_category_order != new_category_order:
+        new_order = svc.get_navigation_order()
+        if old_order != new_order:
             self.navigation_order_changed.emit()
 
     def _update_category_count(self):
