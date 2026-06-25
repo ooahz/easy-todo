@@ -308,6 +308,13 @@ class TodoService:
         with db.session_scope() as session:
             return session.query(Todo).filter(Todo.pid == parent_id).count()
 
+    def get_children(self, parent_id: int) -> list[Todo]:
+        """获取指定父任务下的所有子任务"""
+        with db.session_scope() as session:
+            return session.query(Todo).filter(
+                Todo.pid == parent_id
+            ).order_by(Todo.sort_order.asc()).all()
+
     # ---- 自动延期 ----
 
     def process_auto_postpone(self) -> int:

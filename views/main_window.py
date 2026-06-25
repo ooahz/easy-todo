@@ -324,6 +324,9 @@ class MainWindow(FluentWindow):
 
     def __init__(self):
         super().__init__()
+        # 必须在创建任何 UI 之前先应用主题，否则 isDarkTheme() 仍返回默认 False，
+        # 会导致 _apply_navigation_order() 中为分类绘制的首字头像颜色错位（深色主题下文字仍为黑色）。
+        self._apply_theme()
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         self.stackedWidget.setAnimationEnabled(False)
 
@@ -916,7 +919,8 @@ class MainWindow(FluentWindow):
             self._inject_completed_dates(tree)
         self.floating.set_todos(tree)
 
-    def _apply_initial_theme(self):
+    def _apply_theme(self):
+        """仅设置主题（不涉及浮窗恢复），可在 UI 创建前调用。"""
         theme = settings.theme
         if theme == "dark":
             setTheme(Theme.DARK)
@@ -928,6 +932,14 @@ class MainWindow(FluentWindow):
                 setTheme(Theme.DARK if darkdetect.isDark() else Theme.LIGHT)
             except Exception:
                 setTheme(Theme.LIGHT)
+
+    def _apply_initial_theme(self):
+        """启动时一次性应用主题 + 恢复固定浮窗。
+
+        主题应用实际上在 __init__ 早期就完成了（见 _apply_theme），
+        这里只处理浮窗恢复（依赖 _setup_floating 已创建 self.floating）。
+        """
+        self._apply_theme()
 
         # 主题应用后恢复固定浮窗
         if getattr(self, '_restore_floating_pending', False):
@@ -1819,34 +1831,37 @@ class MainWindow(FluentWindow):
     def _on_card_clicked(self, todo_id: int):
         """父任务卡片点击"""
         todo = self.todo_service.get_by_id(todo_id)
-        if todo:
-            todo_tree = self._build_todo_tree([todo])
-            self._inject_completed_dates(todo_tree)
-            if not todo_tree:
-                return
-            node = todo_tree[0]
-            if settings.dialog_mode == "widescreen":
-                saved_w, saved_h = self._load_webview_popup_size()
-                popup_pos = self._calc_popup_position(saved_w, saved_h)
-                preview = TodoDetailWebView(
-                    node, todo_id=node["id"], popup_pos=popup_pos, parent=self
-                )
-                preview.show()
-                return
-            dialog = TodoDetailDialog(node, parent=self)
-            dialog.exec()
-            if dialog._pending_action:
-                action, tid = dialog._pending_action
-                if action == "toggle_done":
-                    self._toggle_todo_done(tid)
-                elif action == "edit":
-                    self._open_todo_dialog(tid)
-                elif action == "delete":
-                    self._delete_todo(tid)
-                elif action == "subtask_toggle_done":
-                    self._toggle_todo_done(tid)
-                elif action == "archive":
-                    self._archive_todo(tid)
+        if not todo:
+            return
+        # 加载子任务，确保详情弹窗能显示子任务列表
+        children = self.todo_service.get_children(todo_id)
+        todo_tree = self._build_todo_tree([todo] + children)
+        self._inject_completed_dates(todo_tree)
+        node = next((t for t in todo_tree if t["id"] == todo_id), None)
+        if not node:
+            return
+        if settings.dialog_mode == "widescreen":
+            saved_w, saved_h = self._load_webview_popup_size()
+            popup_pos = self._calc_popup_position(saved_w, saved_h)
+            preview = TodoDetailWebView(
+                node, todo_id=node["id"], popup_pos=popup_pos, parent=self
+            )
+            preview.show()
+            return
+        dialog = TodoDetailDialog(node, parent=self)
+        dialog.exec()
+        if dialog._pending_action:
+            action, tid = dialog._pending_action
+            if action == "toggle_done":
+                self._toggle_todo_done(tid)
+            elif action == "edit":
+                self._open_todo_dialog(tid)
+            elif action == "delete":
+                self._delete_todo(tid)
+            elif action == "subtask_toggle_done":
+                self._toggle_todo_done(tid)
+            elif action == "archive":
+                self._archive_todo(tid)
 
     def _open_todo_dialog_for_subtask(self, parent_id: int):
         """为父任务新建子任务"""

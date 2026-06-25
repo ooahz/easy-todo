@@ -10,7 +10,7 @@ from PySide6.QtGui import QMouseEvent, QCursor, QIcon, QPainter, QPixmap, QVecto
 from qfluentwidgets import BodyLabel, SmoothScrollArea, isDarkTheme, LineEdit, FluentIcon, TransparentToolButton, PipsPager, PipsScrollButtonDisplayMode
 
 from config.settings import settings
-from config.theme_config import FontSize, palette, theme_colors, bg_rgba
+from config.theme_config import FontSize, palette, theme_colors, floating_bg_rgba
 from views.quadrant_floating_widget import QuadrantFloatingWidget
 
 
@@ -260,7 +260,7 @@ class FloatingWidget(QWidget):
     def _update_bg_opacity(self):
         """根据透明度更新背景色"""
         c = theme_colors()
-        r, g, b, _ = bg_rgba(255)
+        r, g, b, _ = floating_bg_rgba(255)
         alpha = int(self._opacity * 255)
         self.bg_frame.setStyleSheet(f"""
             #floatingBg {{
@@ -272,7 +272,7 @@ class FloatingWidget(QWidget):
 
     def _apply_theme(self):
         c = theme_colors()
-        r, g, b, _ = bg_rgba(255)
+        r, g, b, _ = floating_bg_rgba(255)
         alpha = int(self._opacity * 255)
         self.bg_frame.setStyleSheet(f"""
             #floatingBg {{
@@ -553,6 +553,15 @@ class FloatingWidget(QWidget):
         self._refresh_list()
         self.quadrant_widget.refresh_theme()
 
+    def _floating_item_font_size(self, is_child: bool) -> int:
+        """浮窗任务列表字号（来自 theme_config，可在 theme.json 中覆盖）。"""
+        return (FontSize.FLOATING_CHILD_ITEM_TITLE
+                if is_child else FontSize.FLOATING_ITEM_TITLE)
+
+    def _floating_item_font_color(self, c: dict) -> str:
+        """浮窗任务列表默认字体颜色（来自 theme_config，可在 theme.json 中覆盖）。"""
+        return c.get('floating_font_color') or c['title']
+
     def _refresh_list(self):
         from config.settings import settings
 
@@ -616,7 +625,7 @@ class FloatingWidget(QWidget):
         elif is_overdue:
             text_style = f"color: {settings.warning_color};"
         else:
-            text_style = f"color: {c['title']};"
+            text_style = f"color: {self._floating_item_font_color(c)};"
 
         row.setStyleSheet(f"""
             QFrame {{
@@ -640,8 +649,7 @@ class FloatingWidget(QWidget):
         h_layout.setSpacing(6)
 
         title = todo.get("title", "")
-        font_size = (f"{FontSize.FLOATING_CHILD_ITEM_TITLE}px"
-                     if is_child else f"{FontSize.FLOATING_ITEM_TITLE}px")
+        font_size = f"{self._floating_item_font_size(is_child)}px"
 
         title_label = QLabel(title)
         title_label.setToolTip(title)

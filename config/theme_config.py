@@ -131,8 +131,8 @@ class _LightColors:
     TAG_BG = "rgba(0, 0, 0, 0.04)"
     BLOCKQUOTE = "#666"
     # 浮窗
-    FLOATING_BG = "rgba(255, 255, 255, 245)"
-    FLOATING_BG_OPAQUE = "rgb(255, 255, 255)"
+    FLOATING_FONT_COLOR = "#1A1A1A"   # 浮窗任务列表默认字体颜色
+    FLOATING_BG = "rgb(255, 255, 255)" # 浮窗背景色（alpha 由 settings.floating_opacity 控制）
     # 弹窗 / Tooltip
     TOOLTIP_BG = "#FFF"
     OVERLAY_BG = "rgba(255, 255, 255, 245)"
@@ -188,8 +188,8 @@ class _DarkColors:
     TAG_BG = "rgba(255, 255, 255, 0.06)"
     BLOCKQUOTE = "#AAA"
     # 浮窗
-    FLOATING_BG = "rgba(45, 45, 45, 245)"
-    FLOATING_BG_OPAQUE = "rgb(45, 45, 45)"
+    FLOATING_FONT_COLOR = "#EEE"       # 浮窗任务列表默认字体颜色
+    FLOATING_BG = "rgb(45, 45, 45)"    # 浮窗背景色（alpha 由 settings.floating_opacity 控制）
     # 弹窗 / Tooltip
     TOOLTIP_BG = "#3C3C3C"
     OVERLAY_BG = "rgba(43, 43, 43, 240)"
@@ -223,8 +223,8 @@ def _user_theme_path() -> Path:
     return _USER_THEME_PATH
 
 
-# 浮窗背景字段：仅这两个字段允许被外挂配置覆盖
-_FLOATING_BG_FIELDS = ("FLOATING_BG", "FLOATING_BG_OPAQUE")
+# 浮窗背景字段：仅该字段允许被外挂配置覆盖（rgb 形式，alpha 由透明度设置控制）
+_FLOATING_BG_FIELDS = ("FLOATING_BG",)
 
 
 def _is_background_field(name: str) -> bool:
@@ -257,7 +257,7 @@ def _apply_overrides_to_class(cls, overrides: dict, value_type: type) -> None:
 
 
 def _apply_floating_bg_overrides(cls, overrides: dict) -> None:
-    """把 dict 中的浮窗背景字段（FLOATING_BG / FLOATING_BG_OPAQUE）写回类属性。"""
+    """把 dict 中的浮窗背景字段（FLOATING_BG）写回类属性。"""
     if not isinstance(overrides, dict):
         return
     valid_names = {n for n in vars(cls) if not n.startswith("_")}
@@ -277,11 +277,11 @@ def _load_user_overrides() -> None:
     """从用户 theme.json 合并覆盖到 FontSize / FontFamily / _LightColors / _DarkColors。
 
     覆盖范围：
-    - FontSize 任意字段（含任务列表专属 TASK_*）
+    - FontSize 任意字段（含任务列表专属 TASK_* / 浮窗 FLOATING_*）
     - FontFamily.FAMILIES（整个列表） / FontFamily.MONO_FAMILIES /
       FontFamily.DEFAULT_SIZE
-    - 非背景类颜色字段（文本、边框、强调色、警示色等）
-    - 浮窗背景字段（FLOATING_BG / FLOATING_BG_OPAQUE）
+    - 非背景类颜色字段（文本、边框、强调色、警示色、浮窗字体颜色等）
+    - 浮窗背景字段（FLOATING_BG）
 
     其余背景字段（BG / CARD_BG / INPUT_BG / HOVER_BG 等）始终使用预设值，
     不受外挂配置影响，避免破坏主界面视觉一致性。
@@ -413,6 +413,7 @@ def theme_colors() -> dict:
             "option_selected_bg": c.SELECTED_BG,
             "option_selected_border": c.SELECTED_BORDER,
             "drop_bg": c.DROP_BG,
+            "floating_font_color": c.FLOATING_FONT_COLOR,
         }
     return {
         "bg": c.BG,
@@ -460,6 +461,7 @@ def theme_colors() -> dict:
         "option_selected_bg": c.SELECTED_BG,
         "option_selected_border": c.SELECTED_BORDER,
         "drop_bg": c.DROP_BG,
+        "floating_font_color": c.FLOATING_FONT_COLOR,
     }
 
 
@@ -537,6 +539,7 @@ def theme_colors_by_name(theme_name: str) -> dict:
         "option_selected_bg": c.SELECTED_BG,
         "option_selected_border": c.SELECTED_BORDER,
         "drop_bg": c.DROP_BG,
+        "floating_font_color": c.FLOATING_FONT_COLOR,
     }
 
 
@@ -598,11 +601,17 @@ def color_to_rgba(color_str: str, alpha: int = 255) -> tuple[int, int, int, int]
     if m:
         r, g, b = int(m.group(1)), int(m.group(2)), int(m.group(3))
         a_val = m.group(4)
-        a = int(float(a_val) * 255) if a_val is not None else alpha
+        if a_val is not None:
+            a_float = float(a_val)
+            # 同时兼容 CSS 规范的 0-1 与本项目约定的 0-255：
+            # >1 即视为 0-255 范围（取整），否则按 0-1 换算。
+            a = int(a_float) if a_float > 1 else int(a_float * 255)
+        else:
+            a = alpha
         return r, g, b, a
 
     # 解析失败 → 使用调色板兜底
-    fallback = palette().FLOATING_BG_OPAQUE
+    fallback = palette().FLOATING_BG
     fr, fg, fb, fa = color_to_rgba(fallback, alpha)
     return fr, fg, fb, fa
 
@@ -610,3 +619,12 @@ def color_to_rgba(color_str: str, alpha: int = 255) -> tuple[int, int, int, int]
 def bg_rgba(alpha: int = 255) -> tuple[int, int, int, int]:
     """当前主题 BG 的 rgba 拆分（用于浮窗等需要叠加 alpha 的场景）。"""
     return color_to_rgba(palette().BG, alpha)
+
+
+def floating_bg_rgba(alpha: int = 255) -> tuple[int, int, int, int]:
+    """浮窗专用背景的 rgba 拆分（从 palette().FLOATING_BG 取色，可被 theme.json 覆盖）。
+
+    注意：与 bg_rgba 不同——后者读的是通用 BG，前者读的是专门为浮窗预留的 FLOATING_BG。
+    浮窗渲染应使用本函数，否则用户在 theme.json 中覆盖 FLOATING_BG 不会生效。
+    """
+    return color_to_rgba(palette().FLOATING_BG, alpha)

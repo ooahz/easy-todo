@@ -157,7 +157,7 @@ class QuadrantCell(QFrame):
         if is_done:
             text_style = f"color: {c['done_text']}; text-decoration: line-through;"
         else:
-            text_style = f"color: {c['text']};"
+            text_style = f"color: {c.get('floating_font_color') or c['text']};"
 
         row.setStyleSheet(f"""
             QFrame {{
