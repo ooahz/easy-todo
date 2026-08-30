@@ -7,7 +7,7 @@ import sys
 import winreg
 from datetime import date, timedelta
 
-from PySide6.QtCore import Qt, QTimer, QRunnable, QThreadPool, QObject, Signal
+from PySide6.QtCore import Qt, QTimer, QRunnable, QThreadPool, QObject, Signal, QRect, QEvent
 from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor, QFont
 from PySide6.QtWidgets import (
     QSystemTrayIcon, QMenu, QFileDialog, QApplication
@@ -32,17 +32,13 @@ from views.recurrence_delete_dialog import RecurrenceDeleteDialog
 from views.recurrence_edit_dialog import RecurrenceEditDialog
 from views.settings_dialog import SettingsPage
 from views.todo_detail_panel import TodoDetailDialog
-from views.todo_detail_webview import TodoDetailWebView
 from views.todo_dialog import TodoDialog
 from views.todo_list_view import TodoListView
+from qfluentwidgets import isDarkTheme
 
 
 def _category_avatar_icon(name: str, color: str = "") -> QIcon:
-    """生成首字头像图标，用于折叠态区分自定义分类
-
-    - color 非透明：绘制圆角方块背景，字体颜色按背景亮度自动选黑/白
-    - color 透明（默认）：不绘制背景，字体颜色跟随主题（深色白字、浅色黑字）
-    """
+    """生成首字头像图标"""
     size = 64
     pix = QPixmap(size, size)
     pix.fill(Qt.transparent)
@@ -50,30 +46,11 @@ def _category_avatar_icon(name: str, color: str = "") -> QIcon:
     p.setRenderHint(QPainter.Antialiasing, True)
     p.setRenderHint(QPainter.TextAntialiasing, True)
 
-    bg = QColor(color) if color else QColor()
-    transparent = (not bg.isValid()) or bg.alpha() == 0
-
-    if transparent:
-        # 透明背景：不绘制圆角方块，字体颜色跟随主题（深色白字、浅色黑字）
-        try:
-            from qfluentwidgets import isDarkTheme
-            fg = QColor("#FFFFFF") if isDarkTheme() else QColor("#000000")
-        except Exception:
-            fg = QColor("#FFFFFF")
-    else:
-        p.setPen(Qt.NoPen)
-        p.setBrush(bg)
-        p.drawRoundedRect(0, 0, size, size, size // 5, size // 5)
-        # 根据背景色相对亮度选择黑/白字体（WCAG 公式）
-        r, g, b = bg.red() / 255, bg.green() / 255, bg.blue() / 255
-        def _lin(c):
-            return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-        luminance = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
-        fg = QColor("#000000") if luminance > 0.179 else QColor("#FFFFFF")
+    fg = QColor("#FFFFFF") if isDarkTheme() else QColor("#000000")
 
     first = name.strip()[:1] if name.strip() else "?"
     font = QFont()
-    font.setPixelSize(46)
+    font.setPixelSize(58)
     p.setFont(font)
     p.setPen(fg)
     p.drawText(pix.rect(), Qt.AlignCenter, first)
@@ -88,7 +65,7 @@ class _LoadTodosSignals(QObject):
 
 class _LoadViewSignals(QObject):
     """后台加载单个视图的信号"""
-    done = Signal(str, list, int, int, dict)  # view_key, tree, total, generation, stats
+    done = Signal(str, list, int, int, dict)
 
 
 class _LoadViewWorker(QRunnable):
@@ -291,7 +268,7 @@ class _LoadTodosWorker(QRunnable):
 
 
 class ConfirmDialog(MessageBoxBase):
-    """带阴影和圆角的确认弹窗"""
+    """确认弹窗"""
 
     def __init__(self, title: str, content: str, confirm_text: str = "确认",
                  cancel_text: str = "取消", parent=None):
@@ -324,8 +301,6 @@ class MainWindow(FluentWindow):
 
     def __init__(self):
         super().__init__()
-        # 必须在创建任何 UI 之前先应用主题，否则 isDarkTheme() 仍返回默认 False，
-        # 会导致 _apply_navigation_order() 中为分类绘制的首字头像颜色错位（深色主题下文字仍为黑色）。
         self._apply_theme()
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         self.stackedWidget.setAnimationEnabled(False)
@@ -343,10 +318,8 @@ class MainWindow(FluentWindow):
         self._load_generation: int = 0
         self._view_load_in_progress: set[str] = set()
 
-        # 分类导航项缓存 {category_id: (interface, name)}
         self._category_nav_items: dict[int, tuple] = {}
 
-        # 防抖定时器：避免开关快速切换时重复触发重操作
         self._refresh_debounce_timer = QTimer(self)
         self._refresh_debounce_timer.setSingleShot(True)
         self._refresh_debounce_timer.setInterval(150)  # 150ms 防抖
@@ -392,17 +365,10 @@ class MainWindow(FluentWindow):
         self.stackedWidget.setAnimationEnabled(True)
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
 
-        if settings.dialog_mode == "widescreen":
-            QTimer.singleShot(3000, self._prewarm_webview)
-
     def _setup_ui(self):
         """初始化窗口"""
         self.setWindowTitle(APP_NAME)
         self.resize(*settings.window_size)
-
-        pos = settings.window_pos
-        if pos:
-            self.move(*pos)
 
         self.setMinimumSize(800, 500)
 
@@ -582,7 +548,6 @@ class MainWindow(FluentWindow):
         """从托盘显示浮窗"""
         if not self.floating.isVisible():
             self._position_floating()
-            # 根据视图设置浮窗模式
             self.floating.set_view_key(self._floating_view_key)
             if self._floating_view_key == "important":
                 self.floating.set_mode("quadrant")
@@ -598,21 +563,7 @@ class MainWindow(FluentWindow):
         settings.flush()
         self.tray_icon.hide()
         self.floating.close()
-        # 关闭长驻 webview 子进程
-        try:
-            from views.todo_detail_webview import stop_webview
-            stop_webview()
-        except Exception:
-            pass
         QApplication.quit()
-
-    def _prewarm_webview(self):
-        """预热 webview 子进程：提前启动并初始化引擎，首次点击即可秒开。"""
-        try:
-            from views.todo_detail_webview import ensure_webview_running
-            ensure_webview_running()
-        except Exception:
-            pass
 
     def _connect_signals(self):
         """连接信号"""
@@ -686,9 +637,9 @@ class MainWindow(FluentWindow):
     _WM_HOTKEY = 0x0312
 
     _MOD_MAP = {
-        "Ctrl": 0x0002,   # MOD_CONTROL
-        "Shift": 0x0004,  # MOD_SHIFT
-        "Alt": 0x0001,    # MOD_ALT
+        "Ctrl": 0x0002,
+        "Shift": 0x0004,
+        "Alt": 0x0001,
     }
 
     _KEY_MAP = {
@@ -767,7 +718,6 @@ class MainWindow(FluentWindow):
 
     def _on_hotkey_new_task(self):
         """全局热键触发：打开新建任务对话框"""
-        # 防止重复触发：如果已有对话框打开则激活它
         if hasattr(self, '_todo_dialog') and self._todo_dialog is not None and self._todo_dialog.isVisible():
             self._todo_dialog.raise_()
             self._todo_dialog.activateWindow()
@@ -822,7 +772,6 @@ class MainWindow(FluentWindow):
         self._floating_view_key = key
         # 控制四象限按钮可见性
         self.floating.set_view_key(key)
-        # 重要任务视图默认打开四象限模式
         if key == "important":
             self.floating.set_mode("quadrant")
         else:
@@ -920,7 +869,7 @@ class MainWindow(FluentWindow):
         self.floating.set_todos(tree)
 
     def _apply_theme(self):
-        """仅设置主题（不涉及浮窗恢复），可在 UI 创建前调用。"""
+        """仅设置主题"""
         theme = settings.theme
         if theme == "dark":
             setTheme(Theme.DARK)
@@ -934,14 +883,9 @@ class MainWindow(FluentWindow):
                 setTheme(Theme.LIGHT)
 
     def _apply_initial_theme(self):
-        """启动时一次性应用主题 + 恢复固定浮窗。
-
-        主题应用实际上在 __init__ 早期就完成了（见 _apply_theme），
-        这里只处理浮窗恢复（依赖 _setup_floating 已创建 self.floating）。
-        """
+        """启动时一次性应用主题 + 恢复固定浮窗。 """
         self._apply_theme()
 
-        # 主题应用后恢复固定浮窗
         if getattr(self, '_restore_floating_pending', False):
             self._restore_floating_pending = False
             self._update_floating_data(self._floating_view_key)
@@ -1189,7 +1133,6 @@ class MainWindow(FluentWindow):
             return
         self._view_load_in_progress.add(view_key)
 
-        view.show_loading()
         self._load_generation += 1
         gen = self._load_generation
 
@@ -1354,11 +1297,9 @@ class MainWindow(FluentWindow):
         self._loaded_views.add(view_key)
 
     def _refresh_current_view(self):
-        """只刷新当前可见的视图"""
         self._schedule_debounced_refresh("current")
 
     def _refresh_all_views(self):
-        """刷新所有视图"""
         self._schedule_debounced_refresh("all")
 
     def _schedule_debounced_refresh(self, level: str):
@@ -1588,6 +1529,17 @@ class MainWindow(FluentWindow):
             InfoBar.success(title="成功", content="任务已保存", parent=self,
                             position=InfoBarPosition.TOP, duration=2000)
 
+    def _on_delete_mode_changed(self, enabled: bool):
+        """删除模式状态变化时给出提示"""
+        if enabled:
+            InfoBar.warning(
+                title="删除模式已开启",
+                content="删除任务时将不再弹出确认弹窗，请谨慎操作",
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+            )
+
     def _delete_todo(self, todo_id: int):
         todo = self.todo_service.get_by_id(todo_id)
         file_count = self.file_service.get_file_count(todo_id)
@@ -1796,26 +1748,41 @@ class MainWindow(FluentWindow):
                 return item[0]
         return None
 
-    def _calc_popup_position(self, popup_w: int = 900, popup_h: int = 720) -> tuple[int, int] | None:
-        """计算双栏模式任务详情弹窗的位置"""
+    def _calc_popup_position(
+        self,
+        popup_w: int = 900,
+        popup_h: int = 720,
+        anchor=None,
+    ) -> tuple[int, int] | None:
         try:
             from PySide6.QtWidgets import QApplication
-            main_geo = self.frameGeometry()
+
+            if anchor is None:
+                anchor = self
+            if isinstance(anchor, QRect):
+                anchor_geo = anchor
+            elif isinstance(anchor, (tuple, list)) and len(anchor) >= 4:
+                anchor_geo = QRect(int(anchor[0]), int(anchor[1]), int(anchor[2]), int(anchor[3]))
+            elif hasattr(anchor, "frameGeometry"):
+                anchor_geo = anchor.frameGeometry()
+            else:
+                return None
+
             screen = (
-                QApplication.screenAt(main_geo.center())
+                QApplication.screenAt(anchor_geo.center())
                 or QApplication.primaryScreen()
             )
             if screen is None:
                 return None
             screen_geo = screen.availableGeometry()
-            # 优先:主窗口右侧 10px
-            x = main_geo.right() + 10
-            y = main_geo.top() + (main_geo.height() - popup_h) // 2
+            x = anchor_geo.right() + 10
+            y = anchor_geo.top() + (anchor_geo.height() - popup_h) // 2
             if x + popup_w > screen_geo.right():
-                # 右侧放不下,放到主窗口左侧
-                x = main_geo.left() - popup_w - 10
+                x = anchor_geo.left() - popup_w - 10
             if x < screen_geo.left():
                 x = screen_geo.left()
+            if x + popup_w > screen_geo.right():
+                x = max(screen_geo.left(), screen_geo.right() - popup_w)
             if y + popup_h > screen_geo.bottom():
                 y = max(screen_geo.top(), screen_geo.bottom() - popup_h)
             if y < screen_geo.top():
@@ -1824,30 +1791,18 @@ class MainWindow(FluentWindow):
         except Exception:
             return None
 
-    def _load_webview_popup_size(self) -> tuple[int, int]:
-        """读取 webview 弹窗持久化尺寸"""
-        return settings.detail_dialog_size
-
-    def _on_card_clicked(self, todo_id: int):
+    def _on_card_clicked(self, todo_id: int, anchor=None):
         """父任务卡片点击"""
         todo = self.todo_service.get_by_id(todo_id)
         if not todo:
             return
-        # 加载子任务，确保详情弹窗能显示子任务列表
         children = self.todo_service.get_children(todo_id)
         todo_tree = self._build_todo_tree([todo] + children)
         self._inject_completed_dates(todo_tree)
         node = next((t for t in todo_tree if t["id"] == todo_id), None)
         if not node:
             return
-        if settings.dialog_mode == "widescreen":
-            saved_w, saved_h = self._load_webview_popup_size()
-            popup_pos = self._calc_popup_position(saved_w, saved_h)
-            preview = TodoDetailWebView(
-                node, todo_id=node["id"], popup_pos=popup_pos, parent=self
-            )
-            preview.show()
-            return
+        # 始终基于锚点计算弹窗位置
         dialog = TodoDetailDialog(node, parent=self)
         dialog.exec()
         if dialog._pending_action:
@@ -1865,7 +1820,6 @@ class MainWindow(FluentWindow):
 
     def _open_todo_dialog_for_subtask(self, parent_id: int):
         """为父任务新建子任务"""
-        # 检查子任务数量限制
         children_count = self.todo_service.get_children_count(parent_id)
         if children_count >= 15:
             InfoBar.warning(
@@ -1892,13 +1846,15 @@ class MainWindow(FluentWindow):
         dialog.exec()
 
     def _on_reorder_todos(self, from_id: int, to_id: int, insert_after: bool, current_order: list):
-        """处理任务拖拽排序 - 基于当前视图显示的顺序"""
+        """处理任务拖拽排序"""
         todo_ids = current_order.copy()
 
         if from_id not in todo_ids or to_id not in todo_ids:
             return
 
-        if settings.sort_rules != ["custom"]:
+        was_custom = settings.sort_rules == ["custom"]
+
+        if not was_custom:
             self.todo_service.reorder(todo_ids)
             settings.sort_rules = ["custom"]
             settings.sort_rule = "custom"
@@ -1924,7 +1880,15 @@ class MainWindow(FluentWindow):
         # 更新排序
         self.todo_service.reorder(todo_ids)
 
-        self._refresh_current_view_immediate()
+        # 尝试就地重排卡片，避免全量查库重建
+        current = self._current_view_key
+        view = self._get_view_by_key(current)
+        if view is not None and view.apply_reorder(from_id, to_id, insert_after):
+            # 就地重排成功，无需查库刷新
+            return
+
+        # 回退：全量静默刷新（分组视图或就地重排失败时）
+        self._refresh_view_after_change(lambda view: False)
 
     # ---- 导入导出 ----
 
@@ -2061,9 +2025,13 @@ class MainWindow(FluentWindow):
 
         # 刷新浮窗样式
         self.floating.refresh_theme()
+        # 刷新周日程视图分割线等主题相关样式
+        for view in list(self._view_instances.values()):
+            view.week_view.refresh_theme()
+        for view, _ in self._category_nav_items.values():
+            view.week_view.refresh_theme()
         # 刷新卡片样式
         self._refresh_all_views()
-        # 重建导航以刷新分类首字头像（透明背景时字体颜色需跟随主题）
         self._on_navigation_order_changed()
 
     def _on_show_done_changed(self, checked: bool):
@@ -2121,7 +2089,7 @@ class MainWindow(FluentWindow):
         # 缓存
         self._category_nav_items[cat.id] = (view, cat.name)
 
-    # ---- 分类变更增量处理（订阅事件总线）----
+    # ---- 分类变更增量处理----
     def _on_category_created(self, category_id: int):
         if category_id in self._category_nav_items:
             return
@@ -2174,14 +2142,12 @@ class MainWindow(FluentWindow):
         self.category_service.remove_navigation_order(f"cat:{category_id}")
 
     def _on_category_reordered(self):
-        """分类顺序变化：使用 navigation_order 重建导航"""
+        """分类顺序变化"""
         self._on_navigation_order_changed()
 
     def _on_navigation_order_changed(self):
         """设置页/分类管理对话框中视图顺序变化后，重建左侧导航顺序"""
         current_widget = self.stackedWidget.currentWidget()
-
-        # 从导航中移除所有系统视图和分类视图（不删除视图对象）
         for key in list(self._view_instances.keys()):
             view = self._view_instances[key]
             try:
@@ -2196,11 +2162,6 @@ class MainWindow(FluentWindow):
             except Exception:
                 pass
 
-        try:
-            self.removeInterface(self.settings_page, isDelete=False)
-        except Exception:
-            pass
-
         # 按 navigation_order 重新添加
         self._apply_navigation_order()
 
@@ -2210,6 +2171,20 @@ class MainWindow(FluentWindow):
                 self.switchTo(current_widget)
             except Exception:
                 pass
+
+        self._refresh_navigation_layout()
+
+    def _refresh_navigation_layout(self):
+        """刷新导航面板布局"""
+        try:
+            panel = self.navigationInterface.panel
+            panel.scrollWidget.adjustSize()
+            panel.scrollArea.updateGeometry()
+            panel.updateGeometry()
+            self.navigationInterface.updateGeometry()
+            self.navigationInterface.setMinimumHeight(panel.layoutMinHeight())
+        except Exception:
+            pass
 
     def _on_floating_pin_changed(self, pinned: bool):
         """浮窗固定状态变更"""
@@ -2227,8 +2202,10 @@ class MainWindow(FluentWindow):
 
     def _on_floating_quick_add(self, title: str):
         """浮窗快速新建任务"""
-        self.todo_service.create(title=title)
-        self._refresh_current_view_immediate()
+        todo = self.todo_service.create(title=title)
+        if todo:
+            self._after_todo_created(todo)
+        self.reminder_service.request_check()
 
     def _on_auto_start_changed(self, enabled: bool):
         """设置开机自启"""

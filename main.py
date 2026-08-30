@@ -9,34 +9,51 @@ import sys
 import os
 import warnings
 
-# 在 import qtpy 之前设置 Qt 后端,让 pywebview 的 Qt 平台能找到 PySide6
 os.environ.setdefault("QT_API", "pyside6")
-
-# 将项目根目录加入 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# 抑制 PySide6 弃用警告
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# 打包模式下，通过 --webview-runner 标志启动长驻 webview 子进程，
-# 避免重新加载整个主程序。必须在 PySide6 等重模块 import 之前拦截。
-if "--webview-runner" in sys.argv:
-    from views.webview_runner import main as _runner_main
-    _runner_main()
-    sys.exit(0)
-
-from PySide6.QtCore import Qt, QSharedMemory
+from PySide6.QtCore import Qt, QObject, QEvent, QSharedMemory
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont, QColor, QIcon
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from qfluentwidgets import FluentIcon
 
 from config.constants import APP_NAME, APP_VERSION
 from config.settings import settings
-from config.theme_config import font_family_list, app_default_font_size
+from config.theme_config import font_family_list, app_default_font_size, show_themed_tooltip
 from models.database import db
 from views.main_window import MainWindow
 
-_shared_memory = None
+
+class _GlobalToolTipFilter(QObject):
+    """全局 tooltip 过滤器"""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.ToolTip:
+            text = obj.toolTip()
+            if text:
+                return show_themed_tooltip(event.globalPos(), text)
+        return False
+
+
+_INSTANCE_SERVER_NAME = "EasyTodo_SingleInstance"
+
+
+def _notify_running_instance():
+    """尝试连接已运行实例的本地服务端（Windows 命名管道） """
+    probe = QLocalSocket()
+    probe.connectToServer(_INSTANCE_SERVER_NAME)
+    if not probe.waitForConnected(500):
+        return False
+    # 已有实例运行，通知其显示主窗口
+    probe.write(b"show")
+    probe.flush()
+    probe.waitForBytesWritten(500)
+    probe.disconnectFromServer()
+    if probe.state() != QLocalSocket.LocalSocketState.UnconnectedState:
+        probe.waitForDisconnected(500)
+    return True
 
 
 def main():

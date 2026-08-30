@@ -11,8 +11,8 @@ from pathlib import Path
 
 try:
     from qfluentwidgets import isDarkTheme
-except Exception:  # 子进程（如 webview_runner）无 Qt 上下文时的安全回退
-    def isDarkTheme() -> bool:  # type: ignore[no-redef]
+except Exception:
+    def isDarkTheme() -> bool:
         return False
 
 
@@ -33,7 +33,6 @@ class FontSize:
     SMALL = 12            # 普通正文、按钮
     BODY = 13             # 内容、标题
     MEDIUM = 14           # 描述、卡片标题
-    SUBTITLE = 15         # 浮窗标题
     LARGE = 16            # 详情副标题
     H3 = 18               # H3 标题
     H2 = 20               # 大标题
@@ -75,7 +74,7 @@ def font_family_str() -> str:
 
 
 def mono_family_str() -> str:
-    """生成等宽字体族字符串（用于代码块）。"""
+    """生成等宽字体族字符串"""
     return ", ".join(f'"{f}"' for f in FontFamily.MONO_FAMILIES)
 
 
@@ -105,8 +104,8 @@ class _LightColors:
     INPUT_BG = "#FFF"
     CODE_BG = "#F5F5F5"
     HEADER_BG = "#F0F0F0"
-    BORDER = "rgba(0, 0, 0, 0.06)"
-    BORDER_STRONG = "rgba(0, 0, 0, 0.08)"
+    BORDER = "#e2e8f0"
+    BORDER_STRONG = "#202935"
     DIVIDER = "#DDD"
     DIVIDER_FALLBACK = "rgba(0, 0, 0, 0.06)"
     HOVER_BG = "rgba(0, 0, 0, 0.02)"
@@ -121,8 +120,6 @@ class _LightColors:
     ACCENT = "#0078D4"
     LINK = "#0078D4"
     WARNING = "#FF8C00"
-    WARNING_ALT = "#FFB900"
-    WARNING_HOVER = "#FFB347"
     DANGER = "#D13438"
     DANGER_ALT = "#FF6B6B"
     DONE_GREEN = "#107C10"
@@ -132,6 +129,7 @@ class _LightColors:
     BLOCKQUOTE = "#666"
     # 浮窗
     FLOATING_FONT_COLOR = "#1A1A1A"   # 浮窗任务列表默认字体颜色
+    FLOATING_SUB_FONT_COLOR = "#999999"  # 浮窗副字体颜色：已完成任务、顶部数量等
     FLOATING_BG = "rgb(255, 255, 255)" # 浮窗背景色（alpha 由 settings.floating_opacity 控制）
     # 弹窗 / Tooltip
     TOOLTIP_BG = "#FFF"
@@ -139,9 +137,6 @@ class _LightColors:
     # 标签 badge
     SYS_TAG_BG = "rgba(0,0,0,0.06)"
     SYS_TAG_FG = "#888"
-    # 拖拽高亮
-    DRAG_BORDER = "#0078D4"
-    SELECTED_BORDER_LINE = "#0078D4"
 
 
 class _DarkColors:
@@ -178,8 +173,6 @@ class _DarkColors:
     ACCENT = "#60CDFF"
     LINK = "#60CDFF"
     WARNING = "#FFB347"
-    WARNING_ALT = "#FFB347"
-    WARNING_HOVER = "#FFB347"
     DANGER = "#FF6B6B"
     DANGER_ALT = "#FF6B6B"
     DONE_GREEN = "#6BCB77"
@@ -189,6 +182,7 @@ class _DarkColors:
     BLOCKQUOTE = "#AAA"
     # 浮窗
     FLOATING_FONT_COLOR = "#EEE"       # 浮窗任务列表默认字体颜色
+    FLOATING_SUB_FONT_COLOR = "#888888"   # 浮窗副字体颜色：已完成任务、顶部数量等
     FLOATING_BG = "rgb(45, 45, 45)"    # 浮窗背景色（alpha 由 settings.floating_opacity 控制）
     # 弹窗 / Tooltip
     TOOLTIP_BG = "#3C3C3C"
@@ -196,17 +190,20 @@ class _DarkColors:
     # 标签 badge
     SYS_TAG_BG = "rgba(255,255,255,0.08)"
     SYS_TAG_FG = "#AAA"
-    # 拖拽高亮
-    DRAG_BORDER = "#60CDFF"
-    SELECTED_BORDER_LINE = "#0078D4"
 
 
 LIGHT = _LightColors()
 DARK = _DarkColors()
 
 
-# ============================================================
-# 外挂主题配置（启动时一次性合并，运行时不支持热更新）
+# 保存原始默认值，以便 theme.json 热重载时恢复被移除的覆盖项
+_DEFAULT_FONT_SIZE = {k: v for k, v in vars(FontSize).items() if not k.startswith("_") and not callable(v)}
+_DEFAULT_FONT_FAMILY = {
+    k: (v[:] if isinstance(v, list) else v)
+    for k, v in vars(FontFamily).items() if not k.startswith("_") and not callable(v)
+}
+_DEFAULT_LIGHT_COLORS = {k: v for k, v in vars(_LightColors).items() if not k.startswith("_") and not callable(v)}
+_DEFAULT_DARK_COLORS = {k: v for k, v in vars(_DarkColors).items() if not k.startswith("_") and not callable(v)}
 # ============================================================
 _USER_THEME_PATH: Path | None = None
 
@@ -216,56 +213,22 @@ def _user_theme_path() -> Path:
     global _USER_THEME_PATH
     if _USER_THEME_PATH is None:
         try:
-            from config.constants import APP_ID
-            _USER_THEME_PATH = Path.home() / f".{APP_ID}" / "theme.json"
+            from config.constants import user_config_dir
+            _USER_THEME_PATH = Path(user_config_dir()) / "theme.json"
         except Exception:
-            _USER_THEME_PATH = Path.home() / ".com.easy.todo" / "theme.json"
+            _USER_THEME_PATH = Path.home() / ".com.easy.todo" / "config" / "theme.json"
     return _USER_THEME_PATH
 
 
-# 浮窗背景字段：仅该字段允许被外挂配置覆盖（rgb 形式，alpha 由透明度设置控制）
-_FLOATING_BG_FIELDS = ("FLOATING_BG",)
-
-
-def _is_background_field(name: str) -> bool:
-    """判断字段名是否为背景类字段（不区分浮窗与其它）"""
-    if name == "BG" or name == "CARD_HOVER":
-        return True
-    return name.endswith("_BG")
-
-
 def _apply_overrides_to_class(cls, overrides: dict, value_type: type) -> None:
-    """把 dict 中的合法字段写回类属性；类型不匹配或字段不存在则跳过。
-
-    背景类字段（BG / *_BG / CARD_HOVER）一律忽略，保持预设值；
-    浮窗背景由 _apply_floating_bg_overrides 单独处理。
-    """
+    """把 dict 中的合法字段写回类属性；类型不匹配或字段不存在则跳过。"""
     if not isinstance(overrides, dict):
         return
     valid_names = {n for n in vars(cls) if not n.startswith("_")}
     for key, value in overrides.items():
         if key not in valid_names:
             continue
-        if _is_background_field(key):
-            continue
         if not isinstance(value, value_type):
-            continue
-        try:
-            setattr(cls, key, value)
-        except Exception:
-            pass
-
-
-def _apply_floating_bg_overrides(cls, overrides: dict) -> None:
-    """把 dict 中的浮窗背景字段（FLOATING_BG）写回类属性。"""
-    if not isinstance(overrides, dict):
-        return
-    valid_names = {n for n in vars(cls) if not n.startswith("_")}
-    for key in _FLOATING_BG_FIELDS:
-        if key not in valid_names:
-            continue
-        value = overrides.get(key)
-        if not isinstance(value, str):
             continue
         try:
             setattr(cls, key, value)
@@ -280,31 +243,12 @@ def _load_user_overrides() -> None:
     - FontSize 任意字段（含任务列表专属 TASK_* / 浮窗 FLOATING_*）
     - FontFamily.FAMILIES（整个列表） / FontFamily.MONO_FAMILIES /
       FontFamily.DEFAULT_SIZE
-    - 非背景类颜色字段（文本、边框、强调色、警示色、浮窗字体颜色等）
-    - 浮窗背景字段（FLOATING_BG）
-
-    其余背景字段（BG / CARD_BG / INPUT_BG / HOVER_BG 等）始终使用预设值，
-    不受外挂配置影响，避免破坏主界面视觉一致性。
+    - 颜色字段（文本、背景、边框、强调色、警示色等）
 
     失败（文件不存在、格式错误、权限不足）一律静默回退到内置默认值。
     """
-    path = _user_theme_path()
-    try:
-        if not path.exists():
-            return
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return
-    if not isinstance(data, dict):
-        return
-
-    _apply_overrides_to_class(FontSize, data.get("font_size"), int)
-    _apply_font_family_overrides(data.get("font_family"))
-    _apply_overrides_to_class(_LightColors, data.get("light"), str)
-    _apply_overrides_to_class(_DarkColors, data.get("dark"), str)
-    _apply_floating_bg_overrides(_LightColors, data.get("light"))
-    _apply_floating_bg_overrides(_DarkColors, data.get("dark"))
+    data = load_user_theme()
+    _apply_theme_overrides(data)
 
 
 def _apply_font_family_overrides(overrides) -> None:
@@ -328,6 +272,88 @@ def _apply_font_family_overrides(overrides) -> None:
         FontFamily.DEFAULT_SIZE = size
 
 
+def _apply_theme_overrides(data: dict) -> None:
+    """把 theme.json 数据中的覆盖项应用到内置类属性。
+
+    先恢复原始默认值，再应用 ``font_size`` / ``font_family`` / ``light`` / ``dark``
+    四个顶层键，确保被用户移除的覆盖项能回到内置默认值。
+    """
+    if not isinstance(data, dict):
+        return
+
+    # 恢复原始默认值，确保本次未覆盖的字段回到初始状态
+    for k, v in _DEFAULT_FONT_SIZE.items():
+        setattr(FontSize, k, v)
+    for k, v in _DEFAULT_FONT_FAMILY.items():
+        setattr(FontFamily, k, v[:] if isinstance(v, list) else v)
+    for k, v in _DEFAULT_LIGHT_COLORS.items():
+        setattr(_LightColors, k, v)
+    for k, v in _DEFAULT_DARK_COLORS.items():
+        setattr(_DarkColors, k, v)
+
+    _apply_overrides_to_class(FontSize, data.get("font_size"), int)
+    _apply_font_family_overrides(data.get("font_family"))
+    _apply_overrides_to_class(_LightColors, data.get("light"), str)
+    _apply_overrides_to_class(_DarkColors, data.get("dark"), str)
+
+
+def load_user_theme() -> dict:
+    """读取用户 theme.json，返回完整 dict；文件不存在或解析失败返回空 dict。"""
+    path = _user_theme_path()
+    try:
+        if not path.exists():
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_user_theme(data: dict) -> None:
+    """保存完整 theme.json 数据到用户配置目录。"""
+    path = _user_theme_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def update_user_theme(updates: dict) -> dict:
+    """合并用户提供的覆盖项到现有 theme.json 并保存，返回保存后的完整数据。"""
+    data = load_user_theme()
+    if not isinstance(data, dict):
+        data = {}
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(data.get(key), dict):
+            data[key].update(value)
+        else:
+            data[key] = value
+    save_user_theme(data)
+    return data
+
+
+def reload_user_overrides() -> None:
+    """重新从用户 theme.json 加载并覆盖到内置类属性。
+
+    供设置界面在修改 theme.json 后调用，使浮窗等组件能立即使用最新配置。
+    """
+    _load_user_overrides()
+
+
+def reset_user_theme() -> None:
+    """删除用户主题文件并恢复内置默认主题覆盖"""
+    path = _user_theme_path()
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception:
+        pass
+    _apply_theme_overrides({})
+
+
 # 启动时执行一次（模块级副作用，业务代码无需感知）
 _load_user_overrides()
 
@@ -343,11 +369,6 @@ def palette() -> "_LightColors | _DarkColors":
 def is_dark() -> bool:
     """当前是否为深色主题"""
     return isDarkTheme()
-
-
-def pick(light_value: str, dark_value: str) -> str:
-    """根据主题选择颜色值（短写）"""
-    return dark_value if isDarkTheme() else light_value
 
 
 # ============================================================
@@ -393,6 +414,7 @@ def theme_colors() -> dict:
             "blockquote_color": c.BLOCKQUOTE,
             "warning": c.WARNING,
             "danger": c.DANGER,
+            "danger_alt": c.DANGER_ALT,
             "header_bg": c.HEADER_BG,
             "priority_urgent_important": "#FF6B6B",
             "priority_important": "#FFB347",
@@ -414,6 +436,7 @@ def theme_colors() -> dict:
             "option_selected_border": c.SELECTED_BORDER,
             "drop_bg": c.DROP_BG,
             "floating_font_color": c.FLOATING_FONT_COLOR,
+            "floating_sub_font_color": c.FLOATING_SUB_FONT_COLOR,
         }
     return {
         "bg": c.BG,
@@ -441,6 +464,7 @@ def theme_colors() -> dict:
         "blockquote_color": c.BLOCKQUOTE,
         "warning": c.WARNING,
         "danger": c.DANGER,
+        "danger_alt": c.DANGER_ALT,
         "header_bg": c.HEADER_BG,
         "priority_urgent_important": "#D13438",
         "priority_important": "#0078D4",
@@ -462,6 +486,7 @@ def theme_colors() -> dict:
         "option_selected_border": c.SELECTED_BORDER,
         "drop_bg": c.DROP_BG,
         "floating_font_color": c.FLOATING_FONT_COLOR,
+        "floating_sub_font_color": c.FLOATING_SUB_FONT_COLOR,
     }
 
 
@@ -481,6 +506,22 @@ def tooltip_style(font_size: int = FontSize.SMALL) -> str:
             font-size: {font_size}px;
         }}
     """
+
+
+def show_themed_tooltip(global_pos, text: str) -> bool:
+    """以独立顶层窗口弹出 tooltip，避免浮窗 WA_TranslucentBackground 透明污染。
+
+    parent=None 切断对父窗口透明属性的继承，QToolTip 使用系统原生外观
+    （可读、不双层、不黑底）。代价：不跟随应用明暗主题色。
+    如需跟随主题色，可在此处设置 QApplication 调色板的 ToolTipBase/ToolTipText。
+
+    Returns True 供 eventFilter 直接返回。
+    """
+    if not text:
+        return True
+    from PySide6.QtWidgets import QToolTip
+    QToolTip.showText(global_pos, text, None)
+    return True
 
 
 # ============================================================
@@ -519,6 +560,7 @@ def theme_colors_by_name(theme_name: str) -> dict:
         "blockquote_color": c.BLOCKQUOTE,
         "warning": c.WARNING,
         "danger": c.DANGER,
+        "danger_alt": c.DANGER_ALT,
         "header_bg": c.HEADER_BG,
         "priority_urgent_important": "#FF6B6B" if theme_name == "dark" else "#D13438",
         "priority_important": "#FFB347" if theme_name == "dark" else "#0078D4",
@@ -540,40 +582,16 @@ def theme_colors_by_name(theme_name: str) -> dict:
         "option_selected_border": c.SELECTED_BORDER,
         "drop_bg": c.DROP_BG,
         "floating_font_color": c.FLOATING_FONT_COLOR,
+        "floating_sub_font_color": c.FLOATING_SUB_FONT_COLOR,
     }
 
 
 # ============================================================
 # Tooltip 样式片段
 # ============================================================
-def card_hover_style(bg_var: str = "hover_bg", selector: str = "CardWidget") -> str:
-    """生成带 hover 背景的卡片样式片段"""
-    c = theme_colors()
-    return f"""
-        {selector} {{
-            border: none;
-            border-radius: 8px;
-            background-color: transparent;
-        }}
-        {selector}:hover {{
-            background-color: {c[bg_var]};
-        }}
-    """
-
-
-def divider_color() -> str:
-    """统一分隔线颜色"""
-    return palette().DIVIDER
-
-
 def accent_color() -> str:
     """主题强调色"""
     return palette().ACCENT
-
-
-def warning_color() -> str:
-    """统一警告色（与 settings.warning_color 保持一致）"""
-    return palette().WARNING
 
 
 # ============================================================
@@ -616,15 +634,9 @@ def color_to_rgba(color_str: str, alpha: int = 255) -> tuple[int, int, int, int]
     return fr, fg, fb, fa
 
 
-def bg_rgba(alpha: int = 255) -> tuple[int, int, int, int]:
-    """当前主题 BG 的 rgba 拆分（用于浮窗等需要叠加 alpha 的场景）。"""
-    return color_to_rgba(palette().BG, alpha)
-
-
 def floating_bg_rgba(alpha: int = 255) -> tuple[int, int, int, int]:
     """浮窗专用背景的 rgba 拆分（从 palette().FLOATING_BG 取色，可被 theme.json 覆盖）。
 
-    注意：与 bg_rgba 不同——后者读的是通用 BG，前者读的是专门为浮窗预留的 FLOATING_BG。
     浮窗渲染应使用本函数，否则用户在 theme.json 中覆盖 FLOATING_BG 不会生效。
     """
     return color_to_rgba(palette().FLOATING_BG, alpha)

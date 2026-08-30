@@ -309,9 +309,11 @@ class TodoService:
             return session.query(Todo).filter(Todo.pid == parent_id).count()
 
     def get_children(self, parent_id: int) -> list[Todo]:
-        """获取指定父任务下的所有子任务"""
+        """获取指定父任务下的所有子任务（预加载 category，避免脱离会话后序列化报错）"""
         with db.session_scope() as session:
-            return session.query(Todo).filter(
+            return session.query(Todo).options(
+                joinedload(Todo.category)
+            ).filter(
                 Todo.pid == parent_id
             ).order_by(Todo.sort_order.asc()).all()
 

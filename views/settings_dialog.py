@@ -1,4 +1,4 @@
-"""设置页面 - 使用 QFluentWidgets 设置卡组件重构"""
+"""设置页面"""
 from __future__ import annotations
 
 import os
@@ -359,11 +359,11 @@ class SettingsPage(QWidget):
         # ---- 编辑器组 ----
         self.list_layout.addWidget(self._create_editor_group())
 
-        # ---- 排序规则组 ----
-        self.list_layout.addWidget(self._create_sort_group())
-
         # ---- 分类组 ----
         self.list_layout.addWidget(self._create_category_group())
+
+        # ---- 排序规则组 ----
+        self.list_layout.addWidget(self._create_sort_group())
 
         # ---- 浮窗组 ----
         self.list_layout.addWidget(self._create_floating_group())
@@ -470,7 +470,6 @@ class SettingsPage(QWidget):
             self._on_holiday_source_changed
         )
         group.addSettingCard(self.holiday_source_card)
-
         return group
 
     def _create_editor_group(self) -> SettingCardGroup:
@@ -752,15 +751,9 @@ class SettingsPage(QWidget):
         svc = CategoryService()
         old_order = svc.get_navigation_order()
 
-        # WA_DeleteOnClose 让 Qt 在窗口关闭后自动释放底层 C++ 对象，
-        # 避免每次打开都残留一个挂在 SettingsPage 子树上的 CategoryDialog 实例
-        # （同时挂着事件总线的 4 条 connect，闭包不释放就泄漏）。
         dialog = CategoryDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dialog.exec()
-        # CategoryDialog 内部已订阅事件总线，自身数据已自动同步。
-        # 主窗口侧由 MainWindow 订阅同一总线完成导航增量更新，
-        # 关闭的瞬间不会再触发任何"延迟全量重建"。
         self._update_category_count()
 
         new_order = svc.get_navigation_order()

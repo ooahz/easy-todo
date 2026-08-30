@@ -16,7 +16,7 @@ from qfluentwidgets import (
 from config.constants import PRIORITY_MAP, TASK_TYPE_MAP
 from config.settings import settings
 from config.theme_config import (
-    FontSize, palette, theme_colors, tooltip_style, accent_color, pick,
+    FontSize, palette, theme_colors, tooltip_style, accent_color,
 )
 
 

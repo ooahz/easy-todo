@@ -102,10 +102,10 @@ class TodoDialog(QDialog):
             2: Qt.CursorShape.SizeHorCursor,
             4: Qt.CursorShape.SizeVerCursor,
             8: Qt.CursorShape.SizeVerCursor,
-            5: Qt.CursorShape.SizeFDiagCursor,   # top-left
-            6: Qt.CursorShape.SizeBDiagCursor,   # top-right
-            9: Qt.CursorShape.SizeBDiagCursor,   # bottom-left
-            10: Qt.CursorShape.SizeFDiagCursor,  # bottom-right
+            5: Qt.CursorShape.SizeFDiagCursor,
+            6: Qt.CursorShape.SizeBDiagCursor,
+            9: Qt.CursorShape.SizeBDiagCursor,
+            10: Qt.CursorShape.SizeFDiagCursor,
         }
         return cursor_map.get(edge, Qt.CursorShape.ArrowCursor)
 
@@ -178,10 +178,11 @@ class TodoDialog(QDialog):
         super().paintEvent(event)
 
     def closeEvent(self, event):
-        # 保存窗口尺寸（关闭时立即刷新到磁盘，避免延迟保存丢失）
-        settings.todo_dialog_size = (self.width(), self.height())
-        settings.flush()
-        # 用户取消 / 直接关闭时，清理粘贴图暂存目录（成功保存后 _pending_paste_finalized=True，跳过）
+        # 仅主任务弹窗（非子任务）保存窗口尺寸
+        if self._pid is None:
+            settings.todo_dialog_size = (self.width(), self.height())
+            settings.flush()
+        # 取消 / 直接关闭时，清理粘贴图暂存目录（成功保存后 _pending_paste_finalized=True，跳过）
         if not getattr(self, '_pending_paste_finalized', False):
             try:
                 self._file_service.cleanup_pending(self._pending_paste_id)
@@ -364,10 +365,7 @@ class TodoDialog(QDialog):
         if not self._is_edit:
             self.due_picker.setDate(QDate.currentDate())
         else:
-            try:
-                self.due_picker.setText("截止日期")
-            except Exception:
-                pass
+            self.due_picker.setText("截止日期")
         due_container_layout.addWidget(self.due_picker)
 
         btn_bg = palette().CARD_BG
@@ -393,7 +391,7 @@ class TodoDialog(QDialog):
         due_container_layout.addWidget(self._clear_due_btn)
 
         self.auto_postpone_cb = CheckBox("自动延期")
-        self.auto_postpone_cb.setToolTip("开启后，过期未完成的任务会自动延期到当天")
+        self.auto_postpone_cb.setToolTip("开启后，超期未完成的任务会自动延期到当天")
 
         self.recurrence_combo = ComboBox()
         self.recurrence_combo.setToolTip("任务重复设置")
@@ -438,18 +436,12 @@ class TodoDialog(QDialog):
         self.recurrence_start_picker = FastCalendarPicker()
         self.recurrence_start_picker.setToolTip("开始日期（不早于今日）")
         self.recurrence_start_picker.setVisible(False)
-        try:
-            self.recurrence_start_picker.setText("开始日期")
-        except Exception:
-            pass
+        self.recurrence_start_picker.setText("开始日期")
 
         self.recurrence_end_picker = FastCalendarPicker()
         self.recurrence_end_picker.setToolTip("结束日期（不早于今日，不超过一年）")
         self.recurrence_end_picker.setVisible(False)
-        try:
-            self.recurrence_end_picker.setText("结束日期")
-        except Exception:
-            pass
+        self.recurrence_end_picker.setText("结束日期")
 
         self.recurrence_instance_label = BodyLabel("🔁 此任务属于重复系列")
         self.recurrence_instance_label.setVisible(False)
@@ -622,18 +614,13 @@ class TodoDialog(QDialog):
         self.periodic_start_picker = FastCalendarPicker()
         self.periodic_start_picker.setToolTip("生效开始日期（必填）")
         self.periodic_start_picker.setFixedWidth(180)
-        try:
-            self.periodic_start_picker.setText("开始日期")
-        except Exception:
-            pass
+        self.periodic_start_picker.setText("开始日期")
 
         self.periodic_end_picker = FastCalendarPicker()
         self.periodic_end_picker.setToolTip("生效结束日期（必填）")
         self.periodic_end_picker.setFixedWidth(180)
-        try:
-            self.periodic_end_picker.setText("结束日期")
-        except Exception:
-            pass
+        self.periodic_end_picker.setText("结束日期")
+
 
         periodic_date_row = QHBoxLayout()
         periodic_date_row.setSpacing(10)
@@ -798,7 +785,6 @@ class TodoDialog(QDialog):
     def _connect_signals(self):
         self.title_edit.returnPressed.connect(self._on_save)
         if hasattr(self, 'desc_edit') and self._pid is None:
-            self.desc_edit.textChanged.connect(self._on_desc_changed)
             self.desc_edit.imagePasted.connect(self._on_image_pasted)
             # 预览能找到图片：暂存区（新粘贴的）+ task 文件夹（已保存的）
             self._update_editor_search_paths()
@@ -807,6 +793,10 @@ class TodoDialog(QDialog):
         """更新 MarkdownEditor 的图片搜索路径 """
         if not hasattr(self, 'desc_edit'):
             return
+        self.desc_edit.setSearchPaths(self._collect_desc_search_paths())
+
+    def _collect_desc_search_paths(self) -> list[str]:
+        """收集描述区图片搜索路径：暂存区 + task 文件夹"""
         paths = [str(self._pending_paste_dir)]
         if self._is_edit and self.todo_data and self.todo_data.get("id"):
             try:
@@ -815,14 +805,7 @@ class TodoDialog(QDialog):
                     paths.append(str(task_folder))
             except Exception:
                 pass
-        self.desc_edit.setSearchPaths(paths)
-
-    def _on_desc_changed(self):
-        text = self.desc_edit.toPlainText()
-        if len(text) > 1000:
-            cursor = self.desc_edit.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            cursor.deletePreviousChar()
+        return paths
 
     def _on_image_pasted(self, ext: str, data: bytes):
         """MarkdownEditor 转发来的粘贴事件：把图片字节流落地到暂存目录，并在描述里插入引用。"""
@@ -873,10 +856,7 @@ class TodoDialog(QDialog):
 
     def _on_clear_due_date(self):
         self.due_picker.setDate(QDate())
-        try:
-            self.due_picker.setText("截止日期")
-        except Exception:
-            pass
+        self.due_picker.setText("截止日期")
 
     def _get_weekday_value(self) -> str | None:
         """获取选中的星期几，返回逗号分隔字符串如 '1,3,5'，未选返回 None"""
@@ -1009,7 +989,6 @@ class TodoDialog(QDialog):
             due_str = data.get("due_date")
             if due_str:
                 try:
-                    from PySide6.QtCore import QDate
                     if isinstance(due_str, str):
                         pyd = date.fromisoformat(due_str)
                         self.due_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
@@ -1046,22 +1025,22 @@ class TodoDialog(QDialog):
                             if r_type == "weekly":
                                 self._set_weekday_value(r_day)
                             else:
-                                self.recurrence_day_spin.setValue(int(parse_recurrence_day(r_day)[0]) if parse_recurrence_day(r_day) else 1)
+                                self.recurrence_day_spin.setValue(
+                                    int(parse_recurrence_day(r_day)[0]) if parse_recurrence_day(r_day) else 1)
                         start_str = tpl.get("recurrence_start_date")
                         if start_str:
                             try:
-                                from PySide6.QtCore import QDate
                                 if isinstance(start_str, str):
                                     pyd = date.fromisoformat(start_str)
                                     self.recurrence_start_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
                                 else:
-                                    self.recurrence_start_picker.setDate(QDate(start_str.year, start_str.month, start_str.day))
+                                    self.recurrence_start_picker.setDate(
+                                        QDate(start_str.year, start_str.month, start_str.day))
                             except Exception:
                                 pass
                         end_str = tpl.get("recurrence_end_date")
                         if end_str:
                             try:
-                                from PySide6.QtCore import QDate
                                 if isinstance(end_str, str):
                                     pyd = date.fromisoformat(end_str)
                                     self.recurrence_end_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
@@ -1097,7 +1076,8 @@ class TodoDialog(QDialog):
                                 pyd = date.fromisoformat(start_str)
                                 self.periodic_start_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
                             else:
-                                self.periodic_start_picker.setDate(QDate(start_str.year, start_str.month, start_str.day))
+                                self.periodic_start_picker.setDate(
+                                    QDate(start_str.year, start_str.month, start_str.day))
                         except Exception:
                             pass
                     end_str = data.get("due_date")
@@ -1135,22 +1115,23 @@ class TodoDialog(QDialog):
                         if recurrence_type == "weekly":
                             self._set_weekday_value(recurrence_day)
                         else:
-                            self.recurrence_day_spin.setValue(int(parse_recurrence_day(recurrence_day)[0]) if parse_recurrence_day(recurrence_day) else 1)
+                            self.recurrence_day_spin.setValue(
+                                int(parse_recurrence_day(recurrence_day)[0]) if parse_recurrence_day(
+                                    recurrence_day) else 1)
                     start_str = data.get("recurrence_start_date")
                     if start_str:
                         try:
-                            from PySide6.QtCore import QDate
                             if isinstance(start_str, str):
                                 pyd = date.fromisoformat(start_str)
                                 self.recurrence_start_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
                             else:
-                                self.recurrence_start_picker.setDate(QDate(start_str.year, start_str.month, start_str.day))
+                                self.recurrence_start_picker.setDate(
+                                    QDate(start_str.year, start_str.month, start_str.day))
                         except Exception:
                             pass
                     end_str = data.get("recurrence_end_date")
                     if end_str:
                         try:
-                            from PySide6.QtCore import QDate
                             if isinstance(end_str, str):
                                 pyd = date.fromisoformat(end_str)
                                 self.recurrence_end_picker.setDate(QDate(pyd.year, pyd.month, pyd.day))
@@ -1171,6 +1152,18 @@ class TodoDialog(QDialog):
                 f"LineEdit {{ border: 2px solid {palette().DANGER}; border-radius: 6px; }}"
             )
             return
+
+        if self._pid is None and hasattr(self, 'desc_edit'):
+            desc_text = self.desc_edit.toPlainText()
+            if len(desc_text) > 1000:
+                InfoBar.warning(
+                    title="描述过长",
+                    content=f"任务描述不能超过 1000 字符，当前 {len(desc_text)} 字符",
+                    parent=self,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                )
+                return
 
         data = {
             "title": title,
@@ -1432,10 +1425,6 @@ class TodoDialog(QDialog):
         saved_size = settings.todo_dialog_size
         if saved_size:
             self.resize(saved_size[0], saved_size[1])
-        screen = self.screen().availableGeometry()
-        x = screen.x() + (screen.width() - self.width()) // 2
-        y = screen.y() + (screen.height() - self.height()) // 2
-        self.move(x, y)
         self.title_edit.setFocus()
         self.title_edit.setStyleSheet("")
         if hasattr(self, 'weekday_btns'):
